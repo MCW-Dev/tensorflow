@@ -1064,12 +1064,14 @@ cc_test(
 
 cc_library(
     name = "convolution",
-    srcs = ["convolution.cc"],
-    hdrs = ["convolution.h"],
+    srcs = ["convolution.cc","convolution_helper_functions.cc"],
+    hdrs = ["convolution.h","convolution_helper_functions.h"],
     deps = [
         ":util",
         "//tensorflow/lite/experimental/shlo:data_type",
         "//tensorflow/lite/experimental/shlo:dispatch",
+        "//tensorflow/lite/experimental/shlo:quantize",
+        "//tensorflow/lite/experimental/shlo:quantized_tensor_element_type",
         "//tensorflow/lite/experimental/shlo:shape",
         "//tensorflow/lite/experimental/shlo:tensor",
         "@com_google_absl//absl/status",
