@@ -55,6 +55,9 @@ class ConvolutionOp {
   Tensor lhs_padded;
   std::vector<Tensor> lhs_splits;
   std::vector<Tensor> rhs_splits;
+  Tensor lhs_dequantized;
+  Tensor rhs_dequantized;
+  Tensor output_dequantized;
   absl::InlinedVector<Axis, kMaxNumDimensions> lhs_permutations;
   absl::InlinedVector<Axis, kMaxNumDimensions> rhs_permutations;
   absl::InlinedVector<Axis, kMaxNumDimensions> output_permutations;
@@ -64,6 +67,9 @@ class ConvolutionOp {
   std::vector<std::byte> lhs_padded_data;
   std::vector<std::vector<std::byte>> lhs_splits_data;
   std::vector<std::vector<std::byte>> rhs_splits_data;
+  std::vector<std::byte> lhs_dequantized_data;
+  std::vector<std::byte> rhs_dequantized_data;
+  std::vector<std::byte> output_dequantized_data;
   absl::InlinedVector<int64_t, kMaxNumDimensions> pad_input_shape;
   absl::InlinedVector<int64_t, kMaxNumDimensions> pad_input_strides;
   absl::InlinedVector<int64_t, kMaxNumDimensions> pad_output_strides;

@@ -1085,6 +1085,8 @@ cc_test(
     deps = [
         ":convolution",
         ":test_util",
+        "//tensorflow/lite/experimental/shlo:quantize",
+        "//tensorflow/lite/experimental/shlo:quantized_tensor_element_type",
         "//tensorflow/lite/experimental/shlo:shape",
         "//tensorflow/lite/experimental/shlo:status_matcher",
         "//tensorflow/lite/experimental/shlo:tensor",
