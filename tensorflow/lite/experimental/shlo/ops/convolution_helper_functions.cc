@@ -90,4 +90,17 @@ bool CheckOutputSpatial(ConvolutionOp& op, const Tensor& lhs, const Tensor& rhs,
   return true;
 }
 
+// This will be replaced by tensor GetNdIndex function
+absl::InlinedVector<DimensionSize, kMaxNumDimensions> GenerateIndices(
+    int i, absl::Span<const DimensionSize> temp) {
+  int rank = temp.size();
+  absl::InlinedVector<DimensionSize, kMaxNumDimensions> indices(rank, 0);
+  int divisor = 1;
+  for (int64_t j = rank - 1; j >= 0; --j) {
+    indices[j] = (i / divisor) % temp[j];
+    divisor *= temp[j];
+  }
+  return indices;
+}
+
 }  // namespace shlo_ref

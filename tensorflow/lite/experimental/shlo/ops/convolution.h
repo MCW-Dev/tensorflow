@@ -49,6 +49,15 @@ class ConvolutionOp {
     std::array<PrecisionTypes, 2> precision_configs;
   };
   Attributes attributes;
+  Tensor lhs_transposed;
+  Tensor rhs_transposed;
+  Tensor output_transposed;
+  absl::InlinedVector<Axis, kMaxNumDimensions> lhs_permutations;
+  absl::InlinedVector<Axis, kMaxNumDimensions> rhs_permutations;
+  absl::InlinedVector<Axis, kMaxNumDimensions> output_permutations;
+  std::vector<std::byte> lhs_transposed_data;
+  std::vector<std::byte> rhs_transposed_data;
+  std::vector<std::byte> output_transposed_data;
 };
 
 ConvolutionOp Create(const ConvolutionOp::Attributes& attributes);

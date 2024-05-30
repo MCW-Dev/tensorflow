@@ -294,6 +294,85 @@ absl::Status PrepareImpl(ConvolutionOp& op, const Tensor& lhs,
 
   SHLO_REF_RETURN_ON_ERROR(CheckParameters(op, lhs, rhs, output));
 
+  // preparing data for transpose
+  absl::InlinedVector<Axis, kMaxNumDimensions> lhs_permutation_values(
+      lhs.Rank(), 0);
+  lhs_permutation_values[0] = op.attributes.input_batch_dimension;
+  lhs_permutation_values[1] = op.attributes.input_feature_dimension;
+  absl::InlinedVector<DimensionSize, kMaxNumDimensions> lhs_shape_dims(
+      lhs.Rank(), 0);
+  lhs_shape_dims[0] =
+      lhs.shape().Dim(static_cast<Axis>(op.attributes.input_batch_dimension));
+  lhs_shape_dims[1] =
+      lhs.shape().Dim(static_cast<Axis>(op.attributes.input_feature_dimension));
+  for (size_t i = 0; i < lhs.Rank() - 2; ++i) {
+    lhs_shape_dims[i + 2] = lhs.shape().Dim(
+        static_cast<Axis>(op.attributes.input_spatial_dimensions[i]));
+    lhs_permutation_values[i + 2] = op.attributes.input_spatial_dimensions[i];
+  }
+
+  op.lhs_transposed_data =
+      std::vector<std::byte>(lhs.NumElements() * sizeof(StorageT));
+  const Shape lhs_transposed_shape(lhs_shape_dims);
+  Tensor lhs_transposed{.type = TensorType{.shape = lhs_transposed_shape,
+                                           .element_type = storage_type},
+                        .data = op.lhs_transposed_data.data()};
+
+  absl::InlinedVector<Axis, kMaxNumDimensions> rhs_permutation_values(
+      rhs.Rank(), 0);
+  rhs_permutation_values[0] = op.attributes.kernel_output_feature_dimension;
+  rhs_permutation_values[1] = op.attributes.kernel_input_feature_dimension;
+  absl::InlinedVector<DimensionSize, kMaxNumDimensions> rhs_shape_dims(
+      rhs.Rank(), 0);
+  rhs_shape_dims[0] = rhs.shape().Dim(
+      static_cast<Axis>(op.attributes.kernel_output_feature_dimension));
+  rhs_shape_dims[1] = rhs.shape().Dim(
+      static_cast<Axis>(op.attributes.kernel_input_feature_dimension));
+  for (size_t i = 0; i < rhs.Rank() - 2; ++i) {
+    rhs_shape_dims[i + 2] = rhs.shape().Dim(
+        static_cast<Axis>(op.attributes.kernel_spatial_dimensions[i]));
+    rhs_permutation_values[i + 2] = op.attributes.kernel_spatial_dimensions[i];
+  }
+
+  op.rhs_transposed_data =
+      std::vector<std::byte>(rhs.NumElements() * sizeof(StorageT));
+  const Shape rhs_transposed_shape(rhs_shape_dims);
+  Tensor rhs_transposed{.type = TensorType{.shape = rhs_transposed_shape,
+                                           .element_type = storage_type},
+                        .data = op.rhs_transposed_data.data()};
+
+  absl::InlinedVector<Axis, kMaxNumDimensions> output_permutation_values(
+      output.Rank(), 0);
+  output_permutation_values[op.attributes.output_batch_dimension] = 0;
+  output_permutation_values[op.attributes.output_feature_dimension] = 1;
+  absl::InlinedVector<DimensionSize, kMaxNumDimensions> output_shape_dims(
+      output.Rank(), 0);
+  output_shape_dims[0] = output.shape().Dim(
+      static_cast<Axis>(op.attributes.output_batch_dimension));
+  output_shape_dims[1] = output.shape().Dim(
+      static_cast<Axis>(op.attributes.output_feature_dimension));
+  for (size_t i = 0; i < output.Rank() - 2; ++i) {
+    output_shape_dims[i + 2] = output.shape().Dim(
+        static_cast<Axis>(op.attributes.output_spatial_dimensions[i]));
+    output_permutation_values[op.attributes.output_spatial_dimensions[i]] =
+        i + 2;
+  }
+
+  op.output_transposed_data =
+      std::vector<std::byte>(output.NumElements() * sizeof(StorageT));
+  const Shape output_transposed_shape(output_shape_dims);
+  Tensor output_transposed{.type = TensorType{.shape = output_transposed_shape,
+                                              .element_type = storage_type},
+                           .data = op.output_transposed_data.data()};
+  // transpose data prepare end
+
+  op.lhs_permutations = std::move(lhs_permutation_values);
+  op.lhs_transposed = std::move(lhs_transposed);
+  op.rhs_permutations = std::move(rhs_permutation_values);
+  op.rhs_transposed = std::move(rhs_transposed);
+  op.output_permutations = std::move(output_permutation_values);
+  op.output_transposed = std::move(output_transposed);
+
   return absl::OkStatus();
 }
 
@@ -382,9 +461,18 @@ absl::Status ConvolutionImpl(ConvolutionOp& op, size_t& output_channel,
 template <DataType storage_type>
 absl::Status EvaluateImpl(ConvolutionOp& op, const Tensor& lhs,
                           const Tensor& rhs, Tensor& output) {
+  SHLO_REF_RETURN_ON_ERROR(
+      TransposeImpl<storage_type>(lhs, op.lhs_permutations, op.lhs_transposed));
+
+  SHLO_REF_RETURN_ON_ERROR(
+      TransposeImpl<storage_type>(rhs, op.rhs_permutations, op.rhs_transposed));
+
   size_t output_channel = 0;
   SHLO_REF_RETURN_ON_ERROR(
-      ConvolutionImpl<storage_type>(op, output_channel, lhs, rhs, output));
+      ConvolutionImpl<storage_type>(op, output_channel, op.lhs_transposed,
+                                    op.rhs_transposed, op.output_transposed));
+  SHLO_REF_RETURN_ON_ERROR(TransposeImpl<storage_type>(
+      op.output_transposed, op.output_permutations, output));
   return absl::OkStatus();
 }
 
