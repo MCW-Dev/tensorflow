@@ -52,12 +52,23 @@ class ConvolutionOp {
   Tensor lhs_transposed;
   Tensor rhs_transposed;
   Tensor output_transposed;
+  Tensor lhs_padded;
+  std::vector<Tensor> lhs_splits;
+  std::vector<Tensor> rhs_splits;
   absl::InlinedVector<Axis, kMaxNumDimensions> lhs_permutations;
   absl::InlinedVector<Axis, kMaxNumDimensions> rhs_permutations;
   absl::InlinedVector<Axis, kMaxNumDimensions> output_permutations;
   std::vector<std::byte> lhs_transposed_data;
   std::vector<std::byte> rhs_transposed_data;
   std::vector<std::byte> output_transposed_data;
+  std::vector<std::byte> lhs_padded_data;
+  std::vector<std::vector<std::byte>> lhs_splits_data;
+  std::vector<std::vector<std::byte>> rhs_splits_data;
+  absl::InlinedVector<int64_t, kMaxNumDimensions> pad_input_shape;
+  absl::InlinedVector<int64_t, kMaxNumDimensions> pad_input_strides;
+  absl::InlinedVector<int64_t, kMaxNumDimensions> pad_output_strides;
+  int64_t pad_input_offset;
+  int64_t pad_output_offset;
 };
 
 ConvolutionOp Create(const ConvolutionOp::Attributes& attributes);

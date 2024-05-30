@@ -84,6 +84,89 @@ inline absl::Status TransposeImpl(const Tensor& operand,
   return absl::OkStatus();
 }
 
+int64_t DivNegRoundAwayOrZero(int64_t num, int64_t denum);
+
+// Split function implementation
+template <DataType storage_type>
+inline void SliceImpl(const Tensor& operand, int64_t num_outputs,
+                      size_t start_indices, size_t inner_dimensions_size,
+                      size_t outer_dimensions_size, int64_t dimension,
+                      Tensor& output) {
+  using StorageT = StorageType<storage_type>;
+
+  StorageT* output_buffer = output.GetDataAs<storage_type>();
+  const StorageT* operand_buffer = operand.GetDataAs<storage_type>();
+
+  size_t i = start_indices;
+  size_t k = 0;
+  const size_t size = (output.shape().Dim(dimension) * inner_dimensions_size);
+  while (i < operand.NumElements()) {
+    for (size_t j = 0; j < size; ++j, ++k) {
+      output_buffer[k] = operand_buffer[i + j];
+    }
+    i += outer_dimensions_size;
+  }
+}
+
+template <DataType storage_type>
+inline void Split(const Tensor& operand, int64_t num_outputs, int64_t dimension,
+                  std::vector<Tensor>& outputs) {
+  size_t start_indices = 0;
+  size_t inner_dimensions_size = 1;
+  size_t outer_dimensions_size = 1;
+  size_t dimension_size = operand.shape().Dim(dimension) / num_outputs;
+
+  for (size_t i = operand.Rank() - 1; i > dimension; --i) {
+    inner_dimensions_size *= operand.shape().Dim(i);
+  }
+  outer_dimensions_size *=
+      inner_dimensions_size * operand.shape().Dim(dimension);
+
+  for (int64_t i = 0; i < num_outputs; ++i) {
+    start_indices = (i)*dimension_size * inner_dimensions_size;
+    SliceImpl<storage_type>(operand, num_outputs, start_indices,
+                            inner_dimensions_size, outer_dimensions_size,
+                            dimension, outputs[i]);
+  }
+}
+
+// Padding function implementation
+template <typename StorageT>
+inline void StridedCopy(const int rank, const StorageT* input,
+                        const int64_t* input_shape,
+                        const int64_t* input_strides, StorageT* output,
+                        const int64_t* output_strides,
+                        const int64_t element_size, const int depth) {
+  if (depth + 1 == rank) {
+    for (int64_t i = 0; i < input_shape[depth]; ++i) {
+      std::memcpy(output, input, element_size);
+      input += input_strides[depth];
+      output += output_strides[depth];
+    }
+  } else {
+    for (int64_t i = 0; i < input_shape[depth]; ++i) {
+      StridedCopy<StorageT>(rank, input, input_shape, input_strides, output,
+                            output_strides, element_size, depth + 1);
+      input += input_strides[depth];
+      output += output_strides[depth];
+    }
+  }
+}
+
+template <DataType storage_type>
+inline void PaddingImpl(ConvolutionOp& op, const Tensor& operand) {
+  using StorageT = StorageType<storage_type>;
+
+  const StorageT* operand_buffer = operand.GetDataAs<storage_type>();
+  StorageT* output_buffer = op.lhs_padded.GetDataAs<storage_type>();
+  StridedCopy<StorageT>(operand.Rank(), operand_buffer + op.pad_input_offset,
+                        op.pad_input_shape.begin(),
+                        op.pad_input_strides.begin(),
+                        output_buffer + op.pad_output_offset,
+                        op.pad_output_strides.begin(), sizeof(StorageT),
+                        /*depth=*/0);
+}
+
 }  // namespace shlo_ref
 
 #endif  // TENSORFLOW_LITE_EXPERIMENTAL_SHLO_CONVOLUTION_HELPER_FUNCTIONS_H_

@@ -103,4 +103,8 @@ absl::InlinedVector<DimensionSize, kMaxNumDimensions> GenerateIndices(
   return indices;
 }
 
+int64_t DivNegRoundAwayOrZero(int64_t num, int64_t denum) {
+  return num < 0 ? (num - denum + 1) / denum : 0;
+}
+
 }  // namespace shlo_ref
