@@ -28,6 +28,9 @@ class ReverseOp {
     absl::Span<const DimensionSize> dimensions;
   };
   Attributes attributes;
+  Tensor temp_operand;
+  std::vector<std::byte> temp_operand_data;
+  absl::InlinedVector<DimensionSize, kMaxNumDimensions> new_dimensions;
 };
 
 ReverseOp Create(ReverseOp::Attributes);

@@ -55,34 +55,112 @@ absl::Status EvaluateImpl(ReverseOp& op, const Tensor& operand,
                           Tensor& output) {
   using StorageT = StorageType<storage_type>;
 
-  const StorageT* operand_buffer = operand.GetDataAs<storage_type>();
+  StorageT* output_buffer = output.GetDataAs<storage_type>();
+  StorageT* temp_operand_buffer = op.temp_operand.GetDataAs<storage_type>();
+
   const DimensionSize operand_size = operand.NumElements();
   const DimensionSize output_size = output.NumElements();
   const size_t operand_rank = operand.Rank();
   const size_t output_rank = output.Rank();
+  absl::InlinedVector<DimensionSize, kMaxNumDimensions> operand_new_shape(
+      op.temp_operand.Rank());
 
-  absl::InlinedVector<DimensionSize, kMaxNumDimensions> operand_index(
-      operand_rank);
-  absl::InlinedVector<DimensionSize, kMaxNumDimensions> output_index(
-      output_rank);
-  absl::InlinedVector<DimensionSize, kMaxNumDimensions> output_shape(
-      output.Rank());
+  absl::c_copy(op.temp_operand.shape(), operand_new_shape.begin());
 
-  absl::c_copy(output.shape(), output_shape.data());
+  if (op.attributes.dimensions.size() > 0) {
+    for (size_t i = 0; i < op.new_dimensions.size(); ++i) {
+      DimensionSize dimension = op.new_dimensions[i];
+      DimensionSize upper_size = 1;
+      for (size_t j = 0; j < dimension; ++j) {
+        upper_size *= operand_new_shape[j];
+      }
+      DimensionSize lower_size = 1;
+      for (size_t j = dimension + 1; j < operand_new_shape.size(); ++j) {
+        lower_size *= operand_new_shape[j];
+      }
 
-  // Will be updated with optimized implementation
-  for (size_t i = 0; i < operand_size; ++i) {
-    operand.GetNdIndex(i, operand_index);
-    for (size_t j = 0; j < output_rank; ++j) {
-      if (absl::c_find(op.attributes.dimensions, j) !=
-          op.attributes.dimensions.end()) {
-        output_index[j] = output_shape[j] - operand_index[j] - 1;
+      DimensionSize current_dim_size = operand_new_shape[dimension];
+
+      if (lower_size > 1) {
+        for (size_t i = 0; i < upper_size; ++i) {
+          for (size_t j = 0; j < current_dim_size; ++j) {
+            StorageT* src =
+                temp_operand_buffer + (i * current_dim_size + j) * lower_size;
+            StorageT* dst = output_buffer + (i * current_dim_size +
+                                             (current_dim_size - j - 1)) *
+                                                lower_size;
+            std::memcpy(dst, src, lower_size * sizeof(StorageT));
+          }
+        }
       } else {
-        output_index[j] = operand_index[j];
+        for (size_t i = 0; i < upper_size; ++i) {
+          std::reverse_copy(temp_operand_buffer + i * current_dim_size,
+                            temp_operand_buffer + (i + 1) * current_dim_size,
+                            output_buffer + i * current_dim_size);
+        }
+      }
+
+      std::memcpy(temp_operand_buffer, output_buffer,
+                  operand_size * sizeof(StorageT));
+    }
+  } else {
+    std::memcpy(output_buffer, temp_operand_buffer,
+                operand_size * sizeof(StorageT));
+  }
+
+  return absl::OkStatus();
+}
+
+absl::Status ReshapeOperand(ReverseOp& op, const Tensor& operand,
+                            Tensor& output) {
+  const DimensionSize operand_rank = operand.Rank();
+  const DimensionSize operand_size = operand.NumElements();
+  absl::InlinedVector<DimensionSize, kMaxNumDimensions> operand_new_shape;
+  absl::InlinedVector<bool, kMaxNumDimensions> dimensions_map(operand_rank,
+                                                              false);
+
+  for (size_t i = 0; i < op.attributes.dimensions.size(); ++i) {
+    dimensions_map[op.attributes.dimensions[i]] = true;
+  }
+
+  bool reshaped_dimension = true;
+  DimensionSize reshaped_size = 1;
+  size_t index_offset = 0;
+  if (op.attributes.dimensions.size() > 0) {
+    for (size_t i = 0; i < operand_rank; ++i) {
+      if (dimensions_map[i]) {
+        if (i + 1 < operand_rank && dimensions_map[i + 1]) {
+          if (reshaped_dimension == true) {
+            op.new_dimensions.push_back(i - index_offset);
+            reshaped_dimension = false;
+          }
+          reshaped_size *= operand.shape().Dim(i);
+          index_offset += 1;
+        } else {
+          reshaped_size *= operand.shape().Dim(i);
+          operand_new_shape.push_back(reshaped_size);
+          reshaped_size = 1;
+          if (reshaped_dimension) {
+            op.new_dimensions.push_back(i - index_offset);
+          }
+          reshaped_dimension = true;
+        }
+      } else {
+        operand_new_shape.push_back(operand.shape().Dim(i));
       }
     }
-    output.Set<storage_type>(output_index, operand_buffer[i]);
+
+    if (reshaped_size != 1) {
+      operand_new_shape.push_back(reshaped_size);
+    }
   }
+  op.temp_operand_data = std::vector<std::byte>(operand.SizeInBytes());
+  Tensor temp_operand{.type = TensorType{.shape = Shape(operand_new_shape),
+                                         .element_type = operand.StorageType()},
+                      .data = op.temp_operand_data.data()};
+  op.temp_operand = std::move(temp_operand);
+
+  std::memcpy(temp_operand.data, operand.data, operand.SizeInBytes());
 
   return absl::OkStatus();
 }
@@ -94,6 +172,8 @@ ReverseOp Create(ReverseOp::Attributes attributes) {
 absl::Status Prepare(ReverseOp& op, const Tensor& operand, Tensor& output) {
   SHLO_REF_RETURN_ON_ERROR(
       CheckParameters(operand, op.attributes.dimensions, output));
+
+  SHLO_REF_RETURN_ON_ERROR(ReshapeOperand(op, operand, output));
 
   return absl::OkStatus();
 }
