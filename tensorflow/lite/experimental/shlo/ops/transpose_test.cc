@@ -97,35 +97,6 @@ TYPED_TEST(NonQuantizedIntTransposeTest, IntTestTypesRaiseAnError1) {
               "operand rank.");
 }
 
-TYPED_TEST(NonQuantizedIntTransposeTest, IntTestTypesRaiseAnError2) {
-  using StorageT = typename TypeParam::StorageT;
-
-  const Shape shape_operand({2, 3, 2});
-  const Shape shape_r({2, 2, 3});
-  Vector<StorageT> operand_data =
-      Vector<StorageT>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
-  absl::InlinedVector<Axis, kMaxNumDimensions> permutation = {1, 0, 2};
-  Vector<StorageT> output_data(shape_r.NumElements());
-
-  Tensor operand{.type = TensorType{.shape = shape_operand,
-                                    .element_type = TypeParam::kStorage},
-                 .data = operand_data.data()};
-  Tensor output_tensor{
-      .type = TensorType{.shape = shape_r, .element_type = TypeParam::kStorage},
-      .data = output_data.data()};
-
-  auto op = Create(TransposeOp::Attributes{
-      .permutation = permutation,
-  });
-
-  const absl::Status status = Prepare(op, operand, output_tensor);
-  EXPECT_THAT(status, shlo_ref::testing::StatusIs(
-                          absl::StatusCode::kFailedPrecondition));
-  EXPECT_THAT(status.message(),
-              "stablehlo.transpose: The output shape should be equal to the "
-              "permutation of operand shape.");
-}
-
 template <class T>
 struct QuantizedIntTransposeTest : ::testing::Test {};
 

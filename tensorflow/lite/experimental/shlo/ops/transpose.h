@@ -24,13 +24,19 @@ namespace shlo_ref {
 class TransposeOp {
  public:
   struct Attributes {
-    absl::Span<const Axis>permutation;
+    absl::Span<const Axis> permutation;
   };
   Attributes attributes;
+  Tensor operand_reshaped;
+  Tensor output_reshaped;
+  absl::InlinedVector<Axis, kMaxNumDimensions> reshaped_permutation;
+  std::vector<std::byte> output_reshaped_data_buffer;
 };
 
 TransposeOp Create(TransposeOp::Attributes);
+
 absl::Status Prepare(TransposeOp& op, const Tensor& operand, Tensor& output);
+
 absl::Status Evaluate(TransposeOp& op, const Tensor& operand, Tensor& output);
 
 }  // namespace shlo_ref
