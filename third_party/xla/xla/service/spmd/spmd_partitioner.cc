@@ -34,6 +34,7 @@ limitations under the License.
 #include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
@@ -67,7 +68,6 @@ limitations under the License.
 #include "xla/service/tuple_simplifier.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
-#include "xla/status.h"
 #include "xla/status_macros.h"
 #include "xla/types.h"
 #include "xla/util.h"
@@ -2266,7 +2266,7 @@ std::vector<ReplicaGroup> SpmdPartitioningVisitor::CreateReplicaGroups(
   return device_groups;
 }
 
-Status SpmdPartitioningVisitor::HandleCall(HloInstruction* hlo) {
+absl::Status SpmdPartitioningVisitor::HandleCall(HloInstruction* hlo) {
   std::vector<HloInstruction*> call_args;
   HloComputation* computation = hlo->called_computations()[0];
   for (int64_t i = 0; i < hlo->operand_count(); ++i) {
@@ -2289,7 +2289,7 @@ Status SpmdPartitioningVisitor::HandleCall(HloInstruction* hlo) {
     call->set_raw_backend_config_string(hlo->raw_backend_config_string());
     return call;
   });
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 absl::Status SpmdPartitioningVisitor::DefaultAction(HloInstruction* hlo) {
@@ -4059,12 +4059,13 @@ absl::Status SpmdPartitioningVisitor::HandleWhile(HloInstruction* hlo) {
                                                 next_channel_id_, logger_,
                                                 call_graph_)
                          .status());
-  SetPartitionedHlo(hlo, [&] {
-    return b_.AddInstruction(HloInstruction::CreateWhile(
-        MakePartitionedShape(hlo->shape(), sharding), hlo->while_condition(),
-        hlo->while_body(),
-        GetPartitionedHlo(hlo->operand(0)).Reshard(sharding).hlo()));
-  });
+
+  HloInstruction* whileOp = b_.AddInstruction(HloInstruction::CreateWhile(
+      MakePartitionedShape(hlo->shape(), sharding), hlo->while_condition(),
+      hlo->while_body(),
+      GetPartitionedHlo(hlo->operand(0)).Reshard(sharding).hlo()));
+  hlo->SetupDerivedInstruction(whileOp);
+  SetPartitionedHlo(hlo, [&] { return whileOp; });
   return absl::OkStatus();
 }
 
@@ -4095,9 +4096,19 @@ absl::Status SpmdPartitioningVisitor::HandleConditional(HloInstruction* hlo) {
     if (!hlo->operand(0)->sharding().IsManual()) {
       // We replicate the predicate of the conditional (the first operand) so
       // that all partitions follow the same control flow.
-      cond = GetPartitionedHlo(hlo->operand(0))
-                 .Reshard(HloSharding::Replicate())
-                 .hlo();
+      if (hlo->operand(0)->sharding().IsManualSubgroup()) {
+        auto grouped_sharding = hlo_sharding_util::GetManualSubgroupSharding(
+            hlo->operand(0)->sharding());
+        grouped_sharding.sharding = HloSharding::Replicate();
+        cond =
+            GetPartitionedHlo(hlo->operand(0))
+                .Reshard(hlo_sharding_util::UngroupSharding(grouped_sharding))
+                .hlo();
+      } else {
+        cond = GetPartitionedHlo(hlo->operand(0))
+                   .Reshard(HloSharding::Replicate())
+                   .hlo();
+      }
     }
     return b_.AddInstruction(HloInstruction::CreateConditional(
         MakePartitionedShape(hlo->shape(), hlo->sharding()), cond,
@@ -5363,6 +5374,7 @@ absl::Status SpmdPartitioner::PreprocessHlos(
           if (amount < 0) {
             continue;
           }
+          TF_RETURN_IF_ERROR(HandleRotateRightWhilePreprocessing(computation));
           HloInstruction* to_rotate = lhs->mutable_operand(0);
           HloInstruction* rotate = computation->AddInstruction(
               CreateCustomCallSPMDInternal_RotateRight(to_rotate, dim, amount));

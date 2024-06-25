@@ -22,7 +22,6 @@ limitations under the License.
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/types/span.h"
-#include "mlir/Dialect/Affine/IR/AffineOps.h"  // from @llvm-project
 #include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"  // from @llvm-project
 #include "mlir/IR/AffineExpr.h"  // from @llvm-project
@@ -44,6 +43,7 @@ limitations under the License.
 #include "xla/service/llvm_ir/llvm_util.h"
 #include "xla/shape_util.h"
 #include "xla/tests/hlo_test_base.h"
+#include "tsl/lib/core/status_test_util.h"
 #include "tsl/platform/logging.h"  // IWYU pragma: keep
 #include "third_party/triton/include/triton/Dialect/Triton/IR/Dialect.h"
 #include "third_party/triton/include/triton/Dialect/Triton/IR/Types.h"
@@ -60,10 +60,7 @@ using ::testing::ElementsAre;
 
 class TritonMakeTensorPtrTest : public HloTestBase {
  public:
-  void SetUp() override {
-    mlir_context_.loadDialect<mt::TritonDialect, mlir::arith::ArithDialect,
-                              mlir::affine::AffineDialect>();
-  }
+  void SetUp() override { LoadMlirDialectsForTriton(mlir_context_); }
 
  protected:
   MLIRContext mlir_context_;
@@ -95,7 +92,7 @@ CreateAndTileParameterHloInstruction(std::vector<int64_t> shape_sizes,
 
   auto tiled_hlo = TiledHloInstruction::Create(
       hlo.get(), tile_sizes, tile_strides, CreateAffineMap(tile_sizes, ctx));
-  EXPECT_OK(tiled_hlo);
+  TF_EXPECT_OK(tiled_hlo);
   return std::make_pair(std::move(hlo), std::move(tiled_hlo.value()));
 }
 

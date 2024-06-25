@@ -42,6 +42,8 @@ limitations under the License.
 #include "absl/functional/function_ref.h"
 #include "absl/memory/memory.h"
 #include "absl/numeric/bits.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -74,9 +76,7 @@ limitations under the License.
 #include "xla/service/tuple_points_to_analysis.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
-#include "xla/status.h"
 #include "xla/status_macros.h"
-#include "xla/statusor.h"
 #include "xla/types.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
@@ -84,10 +84,8 @@ limitations under the License.
 #include "tsl/platform/env.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"
-#include "tsl/platform/ml_dtypes.h"
 #include "tsl/platform/status.h"
 #include "tsl/platform/statusor.h"
-#include "tsl/platform/types.h"
 
 namespace xla {
 
@@ -194,7 +192,7 @@ struct PopulateImpl {
 // native types to avoid templating the whole implementations.
 template <template <PrimitiveType> typename Trait, typename F>
 absl::Status Apply(Literal& literal, F&& literal_generator) {
-  return primitive_util::PrimitiveTypeSwitch<Status>(
+  return primitive_util::PrimitiveTypeSwitch<absl::Status>(
       [&, literal_generator = std::forward<F>(literal_generator)](
           auto primitive_type_constant) -> absl::Status {
         if constexpr (primitive_util::IsArrayType(primitive_type_constant)) {
@@ -1408,7 +1406,7 @@ absl::Status HloEvaluator::HandleConcatenate(
 absl::Status HloEvaluator::HandleIsFinite(const HloInstruction* is_finite) {
   auto operand = is_finite->operand(0);
   auto elem_ty = operand->shape().element_type();
-  return primitive_util::PrimitiveTypeSwitch<Status>(
+  return primitive_util::PrimitiveTypeSwitch<absl::Status>(
       [&](auto primitive_type_constant) -> absl::Status {
         if constexpr (primitive_util::IsFloatingPointType(
                           primitive_type_constant)) {
@@ -1431,7 +1429,7 @@ absl::Status HloEvaluator::HandleIsFinite(const HloInstruction* is_finite) {
 
 absl::Status HloEvaluator::HandleReal(const HloInstruction* real) {
   auto operand = real->operand(0);
-  return primitive_util::PrimitiveTypeSwitch<Status>(
+  return primitive_util::PrimitiveTypeSwitch<absl::Status>(
       [&](auto primitive_type_constant) -> absl::Status {
         if constexpr (primitive_util::IsFloatingPointType(
                           primitive_type_constant)) {
@@ -1460,7 +1458,7 @@ absl::Status HloEvaluator::HandleReal(const HloInstruction* real) {
 
 absl::Status HloEvaluator::HandleImag(const HloInstruction* imag) {
   auto operand = imag->operand(0);
-  return primitive_util::PrimitiveTypeSwitch<Status>(
+  return primitive_util::PrimitiveTypeSwitch<absl::Status>(
       [&](auto primitive_type_constant) -> absl::Status {
         if constexpr (primitive_util::IsFloatingPointType(
                           primitive_type_constant)) {
@@ -1493,7 +1491,7 @@ absl::Status HloEvaluator::HandleComplex(const HloInstruction* complex) {
   TF_RET_CHECK(ShapeUtil::Compatible(real.shape(), imag.shape()));
 
   Literal result(complex->shape());
-  return primitive_util::PrimitiveTypeSwitch<Status>(
+  return primitive_util::PrimitiveTypeSwitch<absl::Status>(
       [&](auto primitive_type_constant) -> absl::Status {
         if constexpr (primitive_util::IsComplexType(primitive_type_constant)) {
           using NativeT = primitive_util::NativeTypeOf<primitive_type_constant>;
@@ -1527,7 +1525,7 @@ absl::Status HloEvaluator::HandleCompare(const HloInstruction* compare) {
   const Literal& lhs_literal = GetEvaluatedLiteralFor(lhs);
   const Literal& rhs_literal = GetEvaluatedLiteralFor(rhs);
   // Note here we switch on the operand's type.
-  return primitive_util::PrimitiveTypeSwitch<Status>(
+  return primitive_util::PrimitiveTypeSwitch<absl::Status>(
       [&](auto primitive_type_constant) -> absl::Status {
         if constexpr (primitive_util::IsArrayType(primitive_type_constant)) {
           using NativeT = primitive_util::NativeTypeOf<primitive_type_constant>;
@@ -4251,7 +4249,7 @@ static absl::StatusOr<bool> PerformReductionStep(
 }
 
 static absl::StatusOr<bool> GenerateReduceOutputElement(
-    bool is_tuple, absl::Span<const int64_t> output_index,
+    bool is_tuple, bool use_fast_path, absl::Span<const int64_t> output_index,
 
     absl::Span<const Literal* const> init_values,
     absl::Span<const Literal* const> input_args, absl::Span<Literal> results,
@@ -4261,7 +4259,8 @@ static absl::StatusOr<bool> GenerateReduceOutputElement(
     absl::Span<const int64_t> arg_dim_steps,
     absl::Span<const int64_t> arg_dim_counts,
     absl::Span<const int64_t> result_to_arg_index) {
-  bool use_fast_add = ShapeUtil::ElementIsFloating(init_values[0]->shape()) &&
+  bool use_fast_add = use_fast_path &&
+                      ShapeUtil::ElementIsFloating(init_values[0]->shape()) &&
                       IsScalarAdd(function) && !is_tuple;
 
   const Shape& arg_shape = input_args[0]->shape();
@@ -4399,8 +4398,8 @@ absl::Status HloEvaluator::HandleReduce(const HloInstruction* hlo) {
   TF_RETURN_IF_ERROR(ShapeUtil::ForEachIndexParallelWithStatus(
       output_shape, [&](absl::Span<const int64_t> output_index, int thread_id) {
         return GenerateReduceOutputElement(
-            is_tuple, output_index, init_values, input_args,
-            absl::Span<Literal>(results), function,
+            is_tuple, use_fast_path_reduce_, output_index, init_values,
+            input_args, absl::Span<Literal>(results), function,
             embedded_evaluators[thread_id + 1].get(), arg_dim_steps,
             arg_dim_counts, result_to_arg_index);
       }));

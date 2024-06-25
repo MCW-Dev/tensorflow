@@ -39,6 +39,7 @@ limitations under the License.
 #include "xla/service/gpu/cudnn_fused_conv_rewriter.h"
 #include "xla/service/gpu/cusolver_rewriter.h"
 #include "xla/service/gpu/gemm_algorithm_picker.h"
+#include "xla/service/gpu/gpu_algebraic_simplifier.h"
 #include "xla/service/gpu/gpu_compiler.h"
 #include "xla/service/gpu/gpu_conv_padding_legalization.h"
 #include "xla/service/gpu/gpu_conv_rewriter.h"
@@ -57,7 +58,6 @@ limitations under the License.
 #include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/dnn.h"
 #include "xla/stream_executor/rocm/rocm_platform_id.h"
-#include "xla/stream_executor/stream_executor_pimpl.h"
 #include "xla/util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
@@ -123,10 +123,11 @@ absl::Status AMDGPUCompiler::OptimizeHloConvolutionCanonicalization(
   pipeline.AddPass<FloatNormalization>(&conv_bf16_support);
 
   pipeline.AddPass<GpusolverRewriter>();
-  pipeline.AddPass<GpuConvRewriter>();
+  pipeline.AddPass<GpuConvRewriter>(gpu_version);
   pipeline.AddPass<GpuConvPaddingLegalization>();
   auto rcc = std::get<se::RocmComputeCapability>(gpu_version);
-  pipeline.AddPass<CudnnFusedConvRewriter>(rcc);
+  pipeline.AddPass<CudnnFusedConvRewriter>(rcc, dnn_version,
+                                           GetToolkitVersion());
 
   // The conv padding/vectorization passes which we need to get rid of.  They
   // also leave behind unnecessary tuple/get-tuple-element pairs that
@@ -141,7 +142,7 @@ absl::Status AMDGPUCompiler::OptimizeHloConvolutionCanonicalization(
       GetAlgebraicSimplifierOptions(hlo_module->config());
   options.set_enable_conv_operand_swap(false);
   options.set_enable_unconditional_reduce_of_concat_replacement(false);
-  pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(options);
+  pipeline.AddPass<HloPassFix<GpuAlgebraicSimplifier>>(options, gpu_version);
 
   // tf2xla bridge, DepthwiseConvolutionConverter, GpuConvRewriter, and
   // CudnnSimplifyPadding introduce reshapes and transposes.  Run ReshapeMover
@@ -151,7 +152,7 @@ absl::Status AMDGPUCompiler::OptimizeHloConvolutionCanonicalization(
     ReshapeMoverOptions reshape_mover_options;
     reshape_mover_options.reshape_of_1d_broadcast_is_cheap = true;
     pipeline.AddPass<ReshapeMover>(reshape_mover_options);
-    pipeline.AddPass<AlgebraicSimplifier>(options);
+    pipeline.AddPass<GpuAlgebraicSimplifier>(options, gpu_version);
   }();
 
   // The reshapes and transposes can possibly be eliminated using
@@ -162,7 +163,7 @@ absl::Status AMDGPUCompiler::OptimizeHloConvolutionCanonicalization(
   [&, &pipeline = pipeline.AddPass<HloPassFix<HloPassPipeline>>(
           "simplify_after_conv_canonicalization")] {
     pipeline.AddPass<ConvertMover>();
-    pipeline.AddPass<AlgebraicSimplifier>(options);
+    pipeline.AddPass<GpuAlgebraicSimplifier>(options, gpu_version);
   }();
 
   // GpuConvRewriter, GpuConvPaddingLegalization and

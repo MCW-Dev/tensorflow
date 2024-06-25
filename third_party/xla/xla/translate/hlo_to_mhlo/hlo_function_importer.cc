@@ -70,7 +70,6 @@ limitations under the License.
 #include "xla/service/hlo.pb.h"
 #include "xla/shape_layout.h"
 #include "xla/shape_util.h"
-#include "xla/status.h"
 #include "xla/translate/hlo_to_mhlo/attribute_importer.h"
 #include "xla/translate/hlo_to_mhlo/custom_call_importer.h"
 #include "xla/translate/hlo_to_mhlo/hlo_utils.h"
@@ -492,6 +491,9 @@ absl::StatusOr<FuncOp> HloFunctionImporter::ImportAsFunc(
                                  : FuncOp::Visibility::Private);
 
   int arg_index = 0;
+  // Create block so that the function has arguments we can attach
+  // `mlir::Location`s to.
+  mlir::Block* block = function.addEntryBlock();
   for (auto instruction : computation.parameter_instructions()) {
     HloParameterInstruction* parameter =
         Cast<HloParameterInstruction>(instruction);
@@ -532,6 +534,10 @@ absl::StatusOr<FuncOp> HloFunctionImporter::ImportAsFunc(
           function.setArgAttr(arg_index, kParameterReplicationAttr,
                               builder_->getBoolArrayAttr({true}));
         }
+        // NOTE: since we are flattening args, all arguments will share the same
+        // location as the tuple parameter instruction.
+        function.getArgument(i).setLoc(
+            mlir::mhlo::GenerateInstructionLocation(instruction, context_));
         ++arg_index;
       }
     } else {
@@ -558,6 +564,8 @@ absl::StatusOr<FuncOp> HloFunctionImporter::ImportAsFunc(
               builder_->getBoolArrayAttr(replicated_at_leaf_buffers));
         }
       }
+      function.getArgument(arg_index).setLoc(
+          mlir::mhlo::GenerateInstructionLocation(instruction, context_));
       ++arg_index;
     }
   }
@@ -617,7 +625,6 @@ absl::StatusOr<FuncOp> HloFunctionImporter::ImportAsFunc(
     *imported = function;
   }
 
-  mlir::Block* block = function.addEntryBlock();
   TF_RETURN_IF_ERROR(ImportInstructions(computation, block));
 
   return function;

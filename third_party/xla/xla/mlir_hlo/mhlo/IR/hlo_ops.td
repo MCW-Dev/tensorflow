@@ -230,7 +230,7 @@ def MHLO_CbrtOp: MHLO_UnaryElementwiseOp<"cbrt",
   }];
 }
 def MHLO_CeilOp: MHLO_UnaryElementwiseOp<"ceil",
-    [Pure, HLO_CompatibleOperandsAndResultType], MHLO_FpTensor> {
+    [Pure, HLO_CompatibleOperandsAndResultType], MHLO_FpOrQuantizedIntTensor> {
   let summary = "Ceil operation";
   let description = [{
     Performs element-wise ceil of `operand` tensor and produces a `result` tensor.
@@ -357,7 +357,7 @@ def MHLO_Expm1Op: MHLO_UnaryElementwiseOp<"exponential_minus_one",
   }];
 }
 def MHLO_FloorOp: MHLO_UnaryElementwiseOp<"floor",
-    [Pure, HLO_CompatibleOperandsAndResultType], MHLO_FpTensor> {
+    [Pure, HLO_CompatibleOperandsAndResultType], MHLO_FpOrQuantizedIntTensor> {
   let summary = "Floor operation";
   let description = [{
     Performs element-wise floor of `operand` tensor and produces a `result`
@@ -2687,37 +2687,6 @@ def MHLO_EinsumOp: MHLO_Op<"einsum", [Pure]> {
   // side HLO ops.
 }
 
-def MHLO_UnaryEinsumOp: MHLO_Op<"unary_einsum", [Pure]> {
-  let summary = "UnaryEinsum operation";
-  let description = [{
-    This operation is on its way out of StableHLO, so it is not included in
-    the specification: https://github.com/openxla/stablehlo/issues/3.
-
-    Informally, this operation does the same thing as TF's einsum:
-    https://www.tensorflow.org/api_docs/python/tf/einsum
-
-    Example:
-    ```mlir
-    %result = "mhlo.unary_einsum"(%operand) {
-      einsum_config = "ab->a"
-    } : (tensor<4x16xf32>) -> tensor<4xf32>
-    ```
-  }];
-
-  let arguments = (ins
-    MHLO_Tensor:$operand,
-    StrAttr:$einsum_config
-  );
-
-  let results = (outs MHLO_Tensor);
-
-  let hasCanonicalizer = 1;
-
-  // UnaryEinsumOp is unconditionally canonicalized to the binary EinsumOp so
-  // the HLO converter shouldn't be invoked.
-  let hasCustomHLOConverter = 1;
-}
-
 def MHLO_FftOp: MHLO_Op<"fft", [InferTensorType, Pure]> {
   let summary = "Fft operation";
   let description = [{
@@ -2753,14 +2722,16 @@ def MHLO_GatherOp: MHLO_Op<"gather", [InferTensorTypeWithReify, Pure]> {
     Example:
     ```mlir
     %result = "mhlo.gather"(%operand, %start_indices) {
-      dimension_numbers = #mhlo.gather<
-        offset_dims = [2, 3],
-        collapsed_slice_dims = [0],
-        start_index_map = [0, 2],
-        index_vector_dim = 2>,
+      dimension_numbers = #stablehlo.gather<
+        offset_dims = [3, 4],
+        collapsed_slice_dims = [1],
+        operand_batching_dims = [0],
+        start_indices_batching_dims = [1],
+        start_index_map = [2, 1],
+        index_vector_dim = 3>,
       slice_sizes = dense<[0, 2, 2]> : tensor<3xi64>,
       indices_are_sorted = false
-    } : (tensor<3x4x2xi32>, tensor<2x3x2xi64>) -> tensor<2x3x2x2xi32>
+    } : (tensor<2x3x4x2xi64>, tensor<2x2x3x2xi64>) -> tensor<2x2x3x2x2xi64>
     ```
   }];
 
@@ -2910,13 +2881,15 @@ def MHLO_ScatterOp: MHLO_Op<"scatter",
        mhlo.return %0 : tensor<i32>
    }) {
      scatter_dimension_numbers = #mhlo.scatter<
-       update_window_dims = [2,3],
-       inserted_window_dims = [0],
-       scatter_dims_to_operand_dims = [1, 0],
-       index_vector_dim = 2>,
+       update_window_dims = [3, 4],
+       inserted_window_dims = [1],
+       input_batching_dims = [0],
+       scatter_indices_batching_dims = [1],
+       scatter_dims_to_operand_dims = [2, 1],
+       index_vector_dim = 3>,
      indices_are_sorted = false,
      unique_indices = false
-   } : (tensor<3x4x2xi32>, tensor<2x3x2xi64>, tensor<2x3x2x2xi32>) -> tensor<3x4x2xi32>
+   } : (tensor<2x3x4x2xi64>, tensor<2x2x3x2xi64>, tensor<2x2x3x2x2xi64>) -> tensor<2x3x4x2xi64>
    ```
   }];
   let arguments = (ins
@@ -3593,6 +3566,7 @@ def MHLO_UniformQuantizeOp : MHLO_UnaryElementwiseOp<"uniform_quantize",
   // Currently, it doesn't have an XLA builder equivalent.
   // TODO(b/230671877): Implement XLA import/export for quantized MHLO ops.
   let hasCustomHLOConverter = 1;
+  let hasVerifier = 1;
 }
 
 def MHLO_UniformDequantizeOp : MHLO_UnaryElementwiseOp<"uniform_dequantize",

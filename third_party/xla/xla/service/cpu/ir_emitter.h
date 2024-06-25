@@ -27,8 +27,11 @@ limitations under the License.
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -37,6 +40,7 @@ limitations under the License.
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "xla/hlo/ir/dfs_hlo_visitor_with_default.h"
 #include "xla/hlo/ir/hlo_computation.h"
+#include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/cpu/ir_function.h"
 #include "xla/service/cpu/target_machine_features.h"
@@ -47,14 +51,20 @@ limitations under the License.
 #include "xla/service/llvm_ir/ir_builder_mixin.h"
 #include "xla/service/llvm_ir/loop_emitter.h"
 #include "xla/service/name_uniquer.h"
-#include "xla/statusor.h"
 #include "xla/xla_data.pb.h"
 
 namespace xla {
 namespace cpu {
+
+// Forward declare emitter for XLA:CPU thunks.
+class IrEmitter2;
+
 // This class is the top-level API for the XLA HLO --> LLVM IR compiler.  It
 // implements the DfsHloVisitor interface and emits HLO computations as LLVM IR
 // functions.
+// NOTE: A lot of functionality in this class (e.g. ElementTypesSameAndSupported
+// helper function) is duplicated by ThunkEmitter and IrEmitter2. These two
+// classes are part of the new runtime and will eventually replace IrEmitter.
 class IrEmitter : public DfsHloVisitorWithDefault,
                   public IrBuilderMixin<IrEmitter> {
   class CpuElementalIrEmitter;
@@ -116,7 +126,8 @@ class IrEmitter : public DfsHloVisitorWithDefault,
       HloComputation* computation, absl::string_view function_name_prefix,
       bool is_top_level_computation,
       absl::Span<HloInstruction* const> instruction_order,
-      bool allow_reassociation);
+      bool allow_reassociation,
+      absl::Span<const llvm::Attribute::AttrKind> function_attributes = {});
 
   llvm::IRBuilder<>* b() { return &b_; }
 
@@ -126,7 +137,37 @@ class IrEmitter : public DfsHloVisitorWithDefault,
   // Emit an LLVM global variable for every constant buffer allocation.
   absl::Status EmitConstantGlobals();
 
+  // Emits a call to a thread local function (e.g. to the computation nested
+  // within a reduce or a map).  Thread local callees (by definition) only write
+  // to and read from thread local allocations.
+  // Supports only functions returning scalars or tuples of scalars.
+  //
+  // `parameters` holds the *scalar values* that need to be passed to the
+  // callee.  The return value is the scalar returned by the callee.
+  //
+  // If `in_compute_function` is true, the call is emitted inside the compute
+  // function emitted by a legacy IrEmitter and has access to executable run
+  // options, status flag, etc. If `in_compute_function` is false, then the call
+  // is inside nested computation of a host kernel emitted for thunks and it
+  // can only emit simple scalar computations and has no way to call back into
+  // the runtime.
+  std::vector<llvm::Value*> EmitThreadLocalCall(
+      const HloComputation& callee, absl::Span<llvm::Value* const> parameters,
+      absl::string_view name, bool is_reducer, bool in_compute_function = true);
+
+  // Returns true if given computation has been emitted.
+  bool is_computation_emitted(const HloComputation& callee,
+                              bool allow_reassociation) {
+    return emitted_functions_.contains({&callee, allow_reassociation});
+  }
+
+  const TargetMachineFeatures& target_machine_features() const {
+    return target_machine_features_;
+  }
+
  protected:
+  friend class IrEmitter2;
+
   //
   // The following methods implement the DfsHloVisitor interface.
   //
@@ -184,6 +225,11 @@ class IrEmitter : public DfsHloVisitorWithDefault,
   absl::Status Preprocess(HloInstruction* hlo) override;
   absl::Status Postprocess(HloInstruction* hlo) override;
 
+  absl::Status HandleSelectAndScatter(HloInstruction* select_and_scatter,
+                                      const llvm_ir::IrArray& operand_array,
+                                      const llvm_ir::IrArray& source_array,
+                                      const llvm_ir::IrArray& output_array);
+
   // A convenient helper for calling BufferAssignment::GetUniqueSlice.
   BufferAllocation::Slice GetAllocationSlice(
       const HloInstruction& hlo, const ShapeIndex& index = {}) const {
@@ -201,6 +247,7 @@ class IrEmitter : public DfsHloVisitorWithDefault,
                                        std::string runtime_symbol_name);
   absl::Status HandleOneDnnSoftmax(HloInstruction* hlo);
   absl::Status HandleOneDnnLayerNorm(HloInstruction* hlo);
+  absl::Status HandleOneDnnConvolution(HloInstruction* hlo);
 #endif  // INTEL_MKL && ENABLE_ONEDNN_V3
   // Private helper to initialize an IR function for the computation.
   void InitializeIrFunction(const std::string& function_name);
@@ -289,17 +336,6 @@ class IrEmitter : public DfsHloVisitorWithDefault,
   // Emits code that computes the address of the given buffer allocation slice.
   llvm::Value* EmitBufferPointer(const BufferAllocation::Slice& slice,
                                  const Shape& target_shape);
-
-  // Emits a call to a thread local function (e.g. to the computation nested
-  // within a reduce or a map).  Thread local callees (by definition) only write
-  // to and read from thread local allocations.
-  // Supports only functions returning scalars or tuples of scalars.
-  //
-  // `parameters` holds the *scalar values* that need to be passed to the
-  // callee.  The return value is the scalar returned by the callee.
-  std::vector<llvm::Value*> EmitThreadLocalCall(
-      const HloComputation& callee, absl::Span<llvm::Value* const> parameters,
-      absl::string_view name, bool is_reducer);
 
   // Similar to EmitThreadLocal, yet assumes that the function returns a scalar.
   llvm::Value* EmitScalarReturningThreadLocalCall(
@@ -452,14 +488,9 @@ class IrEmitter : public DfsHloVisitorWithDefault,
       bool only_accesses_arg_memory = false,
       bool only_accesses_inaccessible_mem_or_arg_mem = false);
 
-  template <typename T>
-  llvm::AllocaInst* StoreTypes(std::string_view alloca_name, T&& args);
-  template <typename T>
-  llvm::Value* StoreShapes(std::string_view alloca_name, T&& args);
-
   // Emits a call to a proxy that builds an FFI call frame for `custom_call`
   llvm::Value* EmitCallToFfi(HloCustomCallInstruction* custom_call,
-                             llvm::Value* output_address,
+                             llvm::AllocaInst* results_alloca,
                              llvm::AllocaInst* operands_alloca);
 
   // Assignment of the buffers needed by the computation and their shape
@@ -674,7 +705,7 @@ class IrEmitter : public DfsHloVisitorWithDefault,
 
   struct LiteralPtrEqualityFunctor {
     bool operator()(const Literal* lhs, const Literal* rhs) const {
-      return *lhs == *rhs && lhs->shape().layout() == rhs->shape().layout();
+      return lhs->Equal(*rhs, true);
     }
   };
 

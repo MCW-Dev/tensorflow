@@ -40,7 +40,7 @@ limitations under the License.
 #include "xla/tsl/distributed_runtime/call_options.h"
 #include "xla/tsl/distributed_runtime/coordination/coordination_client.h"
 #include "xla/tsl/distributed_runtime/coordination/coordination_service_error_util.h"
-#include "tsl/framework/cancellation.h"
+#include "xla/tsl/framework/cancellation.h"
 #include "tsl/lib/monitoring/gauge.h"
 #include "tsl/platform/env.h"
 #include "tsl/platform/random.h"
@@ -108,6 +108,8 @@ class CoordinationServiceAgentImpl : public CoordinationServiceAgent {
                            StatusOrValueDirCallback done) override;
   absl::Status InsertKeyValue(std::string_view key,
                               std::string_view value) override;
+  absl::Status InsertKeyValue(std::string_view key, std::string_view value,
+                              bool allow_overwrite) override;
   absl::Status DeleteKeyValue(std::string_view key) override;
   absl::Status UpdateKeyValue(std::string_view key,
                               std::string_view value) override;
@@ -709,9 +711,15 @@ void CoordinationServiceAgentImpl::GetKeyValueDirAsync(
 
 absl::Status CoordinationServiceAgentImpl::InsertKeyValue(
     std::string_view key, std::string_view value) {
+  return InsertKeyValue(key, value, /*allow_overwrite=*/false);
+}
+
+absl::Status CoordinationServiceAgentImpl::InsertKeyValue(
+    std::string_view key, std::string_view value, bool allow_overwrite) {
   InsertKeyValueRequest request;
   request.mutable_kv()->set_key(key.data(), key.size());
   request.mutable_kv()->set_value(value.data(), value.size());
+  request.set_allow_overwrite(allow_overwrite);
   VLOG(3) << "InsertKeyValueRequest: " << request.DebugString();
   InsertKeyValueResponse response;
 

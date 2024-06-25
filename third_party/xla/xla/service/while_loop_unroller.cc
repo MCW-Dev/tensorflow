@@ -93,6 +93,33 @@ std::unique_ptr<HloComputation> MakeTrivialLoopCondition(
           init_value_constant, ComparisonDirection::kLe)));
 }
 
+// Handle DynamicGte and DynamicTuple custom-calls created during unstacking
+// pass.
+absl::Status HandleDynamicGteOrTuple(HloInstruction* instr, int64_t iter_num) {
+  if (instr->IsCustomCall("DynamicGte")) {
+    return instr->parent()->ReplaceInstruction(
+        instr, instr->AddInstruction(HloInstruction::CreateGetTupleElement(
+                   instr->mutable_operand(0), iter_num)));
+  } else if (instr->IsCustomCall("DynamicTuple")) {
+    std::vector<HloInstruction*> tuple_operands;
+    for (int64_t i = 0; i < instr->operand(0)->shape().tuple_shapes_size();
+         i++) {
+      if (i == iter_num) {
+        tuple_operands.push_back(instr->mutable_operand(1));
+      } else {
+        HloInstruction* slice =
+            instr->AddInstruction(HloInstruction::CreateGetTupleElement(
+                instr->mutable_operand(0), i));
+        tuple_operands.push_back(slice);
+      }
+    }
+    return instr->parent()->ReplaceInstruction(
+        instr,
+        instr->AddInstruction(HloInstruction::CreateTuple(tuple_operands)));
+  }
+  return absl::OkStatus();
+}
+
 // Helper function that replaces a single iteration of a while loop with
 // induction variable equal to induction_value.
 absl::StatusOr<std::unique_ptr<HloComputation>>
@@ -119,11 +146,12 @@ UnrollSingleIterationOfTrivialLoop(HloInstruction* while_op,
   for (HloInstruction* body_inst : while_body_clone->instructions()) {
     // We need to assign a unique channel_id for the collective ops that are
     // unrolled within the while loop body or fusions containing collectives.
-    if (IsCollectiveWithChannelId(body_inst)) {
+    HloInstruction* collective = IsOrHasCollectiveWithChannelId(body_inst);
+    if (collective != nullptr) {
       // To obtain the channel_id for the collective ops we only need to
       // increment the `unique_channel_id` since it records the next available
       // channel_id across the module.
-      body_inst->set_channel_id(unique_channel_id++);
+      collective->set_channel_id(unique_channel_id++);
     }
 
     // We only consider induction variable instructions of the following form.
@@ -154,7 +182,7 @@ UnrollSingleIterationOfTrivialLoop(HloInstruction* while_op,
                                        match::Constant()))) {
         continue;
       }
-
+      CHECK_OK(HandleDynamicGteOrTuple(indvar_use, induction_value));
       for (int64_t i = 0; i < indvar_use->operand_count(); ++i) {
         const HloInstruction* indvar_use_operand = indvar_use->operand(i);
         // Found the induction var user.
@@ -167,18 +195,13 @@ UnrollSingleIterationOfTrivialLoop(HloInstruction* while_op,
   return while_body_clone;
 }
 
+// Checks the soft conditions of unrollability. Soft conditions are:
+// 1. num instructions in loop body.
+// 2. trip count.
+// 3. unroll expansion limit (#_body_instructions * trip_count).
+// These conditions can be changed per usecase.
 bool InitialFeasibilityCheck(HloInstruction* while_op, WhileLoopConfig config) {
   CHECK_EQ(while_op->opcode(), HloOpcode::kWhile);
-
-  // While loop must have a single tuple operand.
-  CHECK_EQ(while_op->operands().size(), 1);
-  if (while_op->operands().size() != 1) {
-    VLOG(5) << absl::StrCat(
-        "Cannot unroll while loop. While loop must have a single "
-        "tuple operand, instead has more than one operand: ",
-        while_op->operands().size());
-    return false;
-  }
 
   VLOG(5) << "Trying to unroll " << while_op->ToShortString();
 
@@ -220,10 +243,6 @@ bool InitialFeasibilityCheck(HloInstruction* while_op, WhileLoopConfig config) {
 
 absl::StatusOr<bool> UnrollInternal(HloInstruction* while_op,
                                     WhileLoopConfig config) {
-  if (!InitialFeasibilityCheck(while_op, config)) {
-    return false;
-  }
-
   VLOG(3) << "Unrolling while instruction " << while_op->ToShortString()
           << " with body instruction count "
           << while_op->while_body()->instruction_count();
@@ -254,10 +273,6 @@ absl::StatusOr<bool> UnrollInternal(HloInstruction* while_op,
 
 absl::StatusOr<bool> UnrollInternalWrapped(HloInstruction* while_op,
                                            WhileLoopConfig config) {
-  if (!InitialFeasibilityCheck(while_op, config)) {
-    return false;
-  }
-
   VLOG(3) << "Unrolling (wrapped) while instruction "
           << while_op->ToShortString() << " with body instruction count "
           << while_op->while_body()->instruction_count();
@@ -327,10 +342,9 @@ bool IsLoopInductionVar(const HloInstruction* instr,
   }
 }
 
-bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
-                                               HloInstruction* input,
-                                               HloOpcode opcode,
-                                               const WhileLoopConfig& config) {
+std::optional<int64_t> MatchShapeCoveringDynamicIndexInstruction(
+    HloInstruction* instr, HloInstruction* input, HloOpcode opcode,
+    const WhileLoopConfig& config) {
   // Based on the instruction type, start indices start from index 1 or 2 of the
   // operands.
   int64_t start_indices_offset;
@@ -339,11 +353,11 @@ bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
   } else if (instr->opcode() == HloOpcode::kDynamicUpdateSlice) {
     start_indices_offset = 2;
   } else {
-    return false;
+    return std::nullopt;
   }
   HloInstruction* operand = instr->mutable_operand(0);
   if (operand != input) {
-    return false;
+    return std::nullopt;
   }
 
   int64_t dynamic_index = -1;
@@ -355,7 +369,7 @@ bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
       std::optional<int64_t> offset =
           LiteralUtil::LiteralAsScalarInt64(index->literal());
       if (offset.has_value() && offset.value() != 0) {
-        return false;
+        return std::nullopt;
       }
     }
 
@@ -365,27 +379,38 @@ bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
       // In order to cover the whole shape only a single non-constant index is
       // allowed.
       if (dynamic_index != -1) {
-        return false;
+        return std::nullopt;
       }
       dynamic_index = start_index - start_indices_offset;
     }
   }
 
   if (dynamic_index == -1) {
-    return false;
+    return std::nullopt;
   }
 
   // The shape's broadcast_dim must be exactly equal to the loop trip count.
   if (operand->shape().dimensions(dynamic_index) != config.trip_count) {
-    return false;
+    return std::nullopt;
   }
 
-  return true;
+  return dynamic_index;
 }
 
 /*static*/ std::optional<WhileLoopConfig> WhileLoopUnroller::IsLoopUnrollable(
     HloInstruction* while_op) {
   CHECK_EQ(while_op->opcode(), HloOpcode::kWhile);
+
+  // While loop must have a single tuple operand.
+  CHECK_EQ(while_op->operands().size(), 1);
+  if (while_op->operands().size() != 1) {
+    VLOG(5) << absl::StrCat(
+        "Cannot unroll while loop ", while_op->name(),
+        ". While loop must have a single "
+        "tuple operand, instead has more than one operand: ",
+        while_op->operands().size());
+    return std::nullopt;
+  }
 
   // TODO(b/300668690): Add support for unrolling loops with control dependency.
   // For now, we bail.
@@ -461,6 +486,7 @@ bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
   std::optional<int64_t> trip_count =
       MatchTrivialLoopTripCount(while_op, *indvar_tuple_idx, indvar_iter_val);
   if (!trip_count.has_value()) {
+    VLOG(3) << "Loop doesn't have trivial trip count";
     return std::nullopt;
   }
 
@@ -471,11 +497,6 @@ bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
       LiteralUtil::LiteralAsScalarInt64(std::move(indvar_iter_val)).value();
   config.trip_count = trip_count.value();
   config.induction_var_idx = *indvar_tuple_idx;
-
-  if (!InitialFeasibilityCheck(while_op, config)) {
-    return std::nullopt;
-  }
-
   return config;
 }
 
@@ -528,6 +549,10 @@ WhileLoopUnroller::GetUnrollableLoops(
   for (HloInstruction* instr : all_while_ops) {
     std::optional<WhileLoopConfig> config = IsLoopUnrollable(instr);
     if (config.has_value()) {
+      if (!InitialFeasibilityCheck(instr, config.value())) {
+        VLOG(3) << "Initial feasibility check failed for " << instr->name();
+        continue;
+      }
       while_loop_configs.emplace_back(instr, config.value());
     }
   }
@@ -535,8 +560,8 @@ WhileLoopUnroller::GetUnrollableLoops(
 }
 
 /*static*/ absl::StatusOr<bool> WhileLoopUnroller::Unroll(
-    HloInstruction* while_op, int64_t unroll_factor,
-    bool wrap_in_trivial_loop) {
+    HloInstruction* while_op, int64_t unroll_factor, bool wrap_in_trivial_loop,
+    bool force_unroll) {
   bool changed = false;
   HloModule* module = while_op->GetModule();
   // TODO(b/288130138): For now, we only support full unrolling. Will add
@@ -556,6 +581,12 @@ WhileLoopUnroller::GetUnrollableLoops(
   // Construct the loop config
   std::optional<WhileLoopConfig> config = IsLoopUnrollable(while_op);
   if (!config.has_value()) {
+    VLOG(5) << "Not attempting to unroll " << while_op->name()
+            << " because it is not unrollable.";
+    return false;
+  }
+
+  if (!force_unroll && !InitialFeasibilityCheck(while_op, config.value())) {
     return false;
   }
 

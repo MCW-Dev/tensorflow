@@ -21,7 +21,6 @@ limitations under the License.
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -31,7 +30,6 @@ limitations under the License.
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "absl/algorithm/container.h"
@@ -40,13 +38,13 @@ limitations under the License.
 #include "absl/container/inlined_vector.h"
 #include "absl/memory/memory.h"
 #include "absl/numeric/bits.h"
+#include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 #include "Eigen/Core"  // from @eigen_archive
-#include "xla/status.h"
 #include "xla/status_macros.h"
 #include "xla/types.h"
 #include "xla/xla_data.pb.h"
@@ -713,6 +711,10 @@ std::unique_ptr<Derived> unique_ptr_down_cast(std::unique_ptr<Base> ptr) {
 }
 
 int64_t Product(absl::Span<const int64_t> xs);
+
+// Returns an array of results after performing elementwise product of a and b.
+std::vector<int64_t> ElemwiseProduct(absl::Span<const int64_t> a,
+                                     absl::Span<const int64_t> b);
 
 // Returns the start indices of consecutive non-overlapping subsequences of `a`
 // and `b` with the same product, i.e. `(i, j)` so

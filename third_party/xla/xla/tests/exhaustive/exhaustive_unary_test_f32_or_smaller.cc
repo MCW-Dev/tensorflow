@@ -18,15 +18,19 @@ limitations under the License.
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <random>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
+#include "xla/client/lib/math.h"
 #include "xla/client/xla_builder.h"
 #include "xla/tests/client_library_test_base.h"
 #include "xla/tests/exhaustive/exhaustive_op_test_utils.h"
+#include "xla/types.h"
 #include "xla/util.h"
 
 #ifdef __FAST_MATH__
@@ -42,11 +46,14 @@ using Eigen::half;
 
 template <typename T, size_t N>
 T EvaluatePolynomial(T x, const std::array<T, N>& coeffs) {
-  T result = 0;
+  // Evaluate the polynomial as accurately as we can using double precision and
+  // FMA.
+  double result = 0;
+  double x_d = static_cast<double>(x);
   for (T c : coeffs) {
-    result = result * x + c;
+    result = std::fma(result, x_d, static_cast<double>(c));
   }
-  return result;
+  return static_cast<T>(result);
 }
 
 // There's no std::erfinv, so we have to implement it ourselves.  This follows
@@ -90,14 +97,14 @@ float HostErfInv(float x) {
   };
 
   if (std::abs(x) > 1 || std::isnan(x)) {
-    return std::numeric_limits<float>::quiet_NaN();
+    return std::numeric_limits<double>::quiet_NaN();
   }
   if (std::abs(x) == 1) {
-    return std::copysign(std::numeric_limits<float>::infinity(), x);
+    return std::copysign(std::numeric_limits<double>::infinity(), x);
   }
 
-  float unsigned_result = [&] {
-    float y = std::abs(x);
+  double unsigned_result = [&] {
+    double y = std::abs(x);
     if (y <= 0.85) {
       double r = 0.180625 - 0.25 * y * y;
       return (y * EvaluatePolynomial(r, kPolyA)) /
@@ -113,28 +120,28 @@ float HostErfInv(float x) {
       }
     }
   }();
-  return std::copysign(unsigned_result, x);
+  return static_cast<float>(std::copysign(unsigned_result, x));
 }
 
 // Digamma implementation using a polynomial from Cephes.  Notably this is a
 // different implementation from the one in math.cc.
 float HostDigamma(float x) {
   // Euler-Mascheroni constant
-  float kGamma = 0.57721566490153286061;
-  float kPi = M_PI;
+  double kGamma = 0.57721566490153286061;
+  double kPi = M_PI;
 
-  std::array<float, 4> kPoly = {
+  std::array<double, 4> kPoly = {
       -4.16666666666666666667E-3,
       3.96825396825396825397E-3,
       -8.33333333333333333333E-3,
       8.33333333333333333333E-2,
   };
 
-  float reflection = 0;
+  double reflection = 0;
   if (x <= 0) {
-    float floor = std::floor(x);
+    double floor = std::floor(x);
     if (x == floor) {
-      return std::numeric_limits<float>::quiet_NaN();
+      return std::numeric_limits<double>::quiet_NaN();
     }
     // Compute reflection term, pi * cot(pi * x).
     reflection = x - floor;
@@ -149,27 +156,27 @@ float HostDigamma(float x) {
     x = 1 - x;
   }
 
-  float result = 0;
+  double result = 0;
   if (x <= 10 && x == std::floor(x)) {
     // Special case for integers <= 10.
     for (int i = 1; i < x; ++i) {
-      result += 1.0f / i;
+      result += 1.0 / i;
     }
     result -= kGamma;
   } else {
-    float w = 0;
+    double w = 0;
     for (; x < 10; ++x) {
-      w += 1.0f / x;
+      w += 1.0 / x;
     }
     if (x < 1e8) {
-      float z = 1.0f / (x * x);
+      double z = 1.0 / (x * x);
       result = z * EvaluatePolynomial(z, kPoly);
     }
-    result = std::log(x) - 0.5f / x - result - w;
+    result = std::log(x) - 0.5 / x - result - w;
   }
 
   // Compute the final, reflected value.
-  return result - reflection;
+  return static_cast<float>(result - reflection);
 }
 
 // Exhaustive test for unary operations for <= 32bit floating point types.
@@ -189,7 +196,8 @@ class Exhaustive32BitOrLessUnaryTest
   Exhaustive32BitOrLessUnaryTest()
       : input_lower_bounder_(0),
         input_upper_bounder_(0),
-        special_input_bounder_(false) {}
+        special_input_bounder_(false),
+        eup_version_(xla::exhaustive_op_test::GetEupVersion()) {}
 
  public:
   // Sets error parameters appropriately for testing tan.
@@ -206,7 +214,13 @@ class Exhaustive32BitOrLessUnaryTest
   bool IsTpu(const std::string& platform) const {
     return !IsGpu(platform) && !IsCpu(platform);
   }
-  int EupVersion() { return xla::exhaustive_op_test::GetEupVersion(); }
+  int EupVersion() const { return eup_version_; }
+  bool IsPreV5Tpu(const std::string& platform) const {
+    return IsTpu(platform) && eup_version_ < 2;
+  }
+  bool IsPreV6Tpu(const std::string& platform) const {
+    return IsTpu(platform) && eup_version_ < 3;
+  }
 
  protected:
   using typename ExhaustiveUnaryTest<T>::NativeT;
@@ -274,6 +288,7 @@ class Exhaustive32BitOrLessUnaryTest
   float input_lower_bounder_;
   float input_upper_bounder_;
   bool special_input_bounder_;
+  const int eup_version_;
 };
 
 using ExhaustiveF32UnaryTest = Exhaustive32BitOrLessUnaryTest<F32>;
@@ -318,7 +333,7 @@ using ExhaustiveBF16UnaryTest = Exhaustive32BitOrLessUnaryTest<BF16>;
 
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Log, {
   auto error_spec_gen = GetDefaultSpecGenerator();
-  if (IsTpu(platform_)) {
+  if (IsPreV6Tpu(platform_)) {
     error_spec_gen = +[](NativeT x) {
       NativeT eps = std::numeric_limits<NativeT>::epsilon();
       return ErrorSpec{.abs_err = 2e-4, .rel_err = eps};
@@ -338,11 +353,17 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(Log1p, {
 })
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Exp, {
   auto error_spec_gen = GetDefaultSpecGenerator();
-  if (IsTpu(platform_)) {
+  if (IsPreV6Tpu(platform_)) {
     error_spec_gen = +[](NativeT x) {
       NativeT min = std::numeric_limits<NativeT>::min();
       NativeT eps = std::numeric_limits<NativeT>::epsilon();
       return ErrorSpec{.abs_err = min, .rel_err = 75 * eps};
+    };
+  } else if (IsTpu(platform_)) {
+    error_spec_gen = +[](NativeT x) {
+      NativeT min = std::numeric_limits<NativeT>::min();
+      NativeT eps = std::numeric_limits<NativeT>::epsilon();
+      return ErrorSpec{.abs_err = min, .rel_err = 33 * eps};
     };
   }
   Run(Exp, std::exp, error_spec_gen);
@@ -350,15 +371,22 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(Exp, {
 
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Expm1, {
   auto error_spec_gen = GetDefaultSpecGenerator();
-  if (IsTpu(platform_)) {
+  if (IsPreV6Tpu(platform_)) {
     error_spec_gen = +[](NativeT x) {
-      // FIXME(rmlarsen): Break into region around zero and everything else.
       NativeT eps = std::numeric_limits<NativeT>::epsilon();
-      return ErrorSpec{.abs_err = 5e-4, .rel_err = 200 * eps};
+      return ErrorSpec{.abs_err = 1e-5, .rel_err = 100 * eps};
+    };
+  } else if (IsTpu(platform_)) {
+    error_spec_gen = +[](NativeT x) {
+      NativeT min = std::numeric_limits<NativeT>::min();
+      NativeT eps = std::numeric_limits<NativeT>::epsilon();
+      return ErrorSpec{.abs_err = 2 * min, .rel_err = 33 * eps};
     };
   }
+
   Run(Expm1, std::expm1, error_spec_gen);
 })
+
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Logistic, {
   // FIXME(rmlarsen): Break into region around zero and everything else.
   auto error_spec_gen = GetDefaultSpecGenerator();
@@ -370,10 +398,12 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(Logistic, {
     };
   }
   EvaluateOp fn = +[](float x) { return 1.0f / (1.0f + std::exp(-x)); };
-  Run(Logistic, fn, error_spec_gen);
+  auto range_checker =
+      +[](NativeT actual) { return !(actual < -1 || actual > 1); };
+  Run(Logistic, fn, error_spec_gen, range_checker);
 })
 
-// It feels a little overkill to exhaustively test sqrt and pow(x, 0.5), but
+// It feels a litt<le overkill to exhaustively test sqrt and pow(x, 0.5), but
 // this *did* find a bug, namely that some backends were assuming sqrt(x) ==
 // pow(x, 0.5), but this is not true for x == -inf.
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(PowOneHalf, {
@@ -382,14 +412,19 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(PowOneHalf, {
 })
 
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Rsqrt, {
-  Run(Rsqrt, +[](float x) { return 1 / std::sqrt(x); });
+  auto error_spec_gen = +[](NativeT x) {
+    float eps = std::numeric_limits<NativeT>::epsilon();
+    return ErrorSpec{
+        .abs_err = 0, .rel_err = 2 * eps, .strict_signed_zeros = true};
+  };
+  Run(Rsqrt, +[](float x) { return 1 / std::sqrt(x); }, error_spec_gen);
 })
 
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Sqrt, {
   auto error_spec_gen = +[](NativeT x) {
-    auto spec = GetDefaultSpecGenerator()(x);
-    spec.strict_signed_zeros = true;
-    return spec;
+    float eps = std::numeric_limits<NativeT>::epsilon();
+    return ErrorSpec{
+        .abs_err = 0, .rel_err = 2 * eps, .strict_signed_zeros = true};
   };
   Run(Sqrt, std::sqrt, error_spec_gen);
 })
@@ -397,12 +432,23 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(Sqrt, {
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Cbrt, {
   auto error_spec_gen = +[](NativeT x) {
     NativeT eps = std::numeric_limits<NativeT>::epsilon();
-    NativeT min = std::numeric_limits<NativeT>::min();
-    // Allow a small absolute error (e.g. 9e-16 for F32).
-    // This corresponds to a 0.5% relative error for the
-    // smallest normalized floating point values.
-    return ErrorSpec{.abs_err = std::cbrt(min) / 200, .rel_err = 50 * eps};
+    return ErrorSpec{
+        .abs_err = 0, .rel_err = 16 * eps, .strict_signed_zeros = true};
   };
+  if (IsCpu(platform_)) {
+    // While GPUs and TPUs flush subnormal inputs to zero, the CPU returns a
+    // relatively inaccurate approximation for such inputs. Therefore we allow a
+    // small absolute error (e.g. ~9e-16 for F32). This corresponds to a 0.5%
+    // relative error for the smallest normalized floating point values,
+    // increasing gradually to 100% for the smallest subnormal value.
+    error_spec_gen = +[](NativeT x) {
+      NativeT denorm_min = std::numeric_limits<NativeT>::denorm_min();
+      NativeT eps = std::numeric_limits<NativeT>::epsilon();
+      return ErrorSpec{.abs_err = std::cbrt(denorm_min),
+                       .rel_err = 10 * eps,
+                       .strict_signed_zeros = true};
+    };
+  }
   Run(Cbrt, std::cbrt, error_spec_gen);
 })
 
@@ -441,7 +487,7 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(Atanh, {
   Run(Atanh, std::atanh, error_spec_gen);
 })
 
-// Tests for inverse trogonometric functions.
+// Tests for inverse trigonometric functions.
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Acos, {
   ErrorSpecGen error_spec_gen = GetDefaultSpecGenerator();
   if (platform_ != "Host") {
@@ -479,7 +525,11 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(Cosh, {
       return ErrorSpec{.abs_err = 0, .rel_err = 100 * eps};
     };
   }
-  Run(Cosh, std::cosh, error_spec_gen);
+  auto range_checker = +[](NativeT actual) { return !(actual < 1); };
+  if (IsPreV6Tpu(platform_)) {
+    range_checker = +[](NativeT actual) { return !(actual < 0.9999); };
+  }
+  Run(Cosh, std::cosh, error_spec_gen, range_checker);
 })
 
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Sinh, {
@@ -493,57 +543,44 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(Sinh, {
   Run(Sinh, std::sinh, error_spec_gen);
 })
 
-UNARY_TEST_FLOAT_32_BITS_OR_LESS(TanhBounderTestUpperBound, {
-  SetBounder(8, 9);
+UNARY_TEST_FLOAT_32_BITS_OR_LESS(Tanh, {
   ErrorSpecGen error_spec_gen = GetDefaultSpecGenerator();
-  if (!IsTpu(platform_)) {
-    error_spec_gen =
-        +[](NativeT x) { return ErrorSpec{.abs_err = 0, .rel_err = 0}; };
-  }
-  Run(
-      Tanh, +[](float) { return 1.0f; }, error_spec_gen,
-      [](NativeT actual) { return actual >= -1 && actual <= 1; });
-})
-
-UNARY_TEST_FLOAT_32_BITS_OR_LESS(TanhBounderTestLowerBound, {
-  SetBounder(-9, -8);
-  ErrorSpecGen error_spec_gen = GetDefaultSpecGenerator();
-  if (IsTpu(platform_)) {
-    error_spec_gen = +[](NativeT x) { return ErrorSpec{0, 0}; };
-  }
-  Run(
-      Tanh, +[](float) { return -1.0f; }, error_spec_gen,
-      [](NativeT actual) { return actual >= -1 && actual <= 1; });
-})
-
-UNARY_TEST_FLOAT_32_BITS_OR_LESS(TanhNormalTest, {
-  ErrorSpecGen error_spec_gen = GetDefaultSpecGenerator();
-  if (IsTpu(platform_)) {
+  if (IsPreV6Tpu(platform_)) {
     error_spec_gen = +[](NativeT x) {
       // The range of tanh is [-1:1], so no point in giving a relative
       // tolerance when we have an absolute one.
       return ErrorSpec{.abs_err = 5e-4, .rel_err = 0};
     };
   }
-  Run(Tanh, std::tanh, error_spec_gen);
+  auto range_checker =
+      +[](NativeT actual) { return !(actual < -1 || actual > 1); };
+  Run(Tanh, std::tanh, error_spec_gen, range_checker);
 })
 
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Cos, {
+  auto range_checker =
+      +[](NativeT actual) { return !(actual < -1 || actual > 1); };
   Run(
-      Cos, std::cos, +[](NativeT) {
+      Cos, std::cos,
+      +[](NativeT) {
         // This error spec corresponds to a maximum relative error of 2 ULP.
         NativeT eps = std::numeric_limits<NativeT>::epsilon();
         return ErrorSpec{.abs_err = 0, .rel_err = 2 * eps};
-      });
+      },
+      range_checker);
 })
 
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Sin, {
+  auto range_checker =
+      +[](NativeT actual) { return !(actual < -1 || actual > 1); };
   Run(
-      Sin, std::sin, +[](NativeT) {
+      Sin, std::sin,
+      +[](NativeT) {
         // This error spec corresponds to a maximum relative error of 2 ULP.
         NativeT eps = std::numeric_limits<NativeT>::epsilon();
         return ErrorSpec{.abs_err = 0, .rel_err = 2 * eps};
-      });
+      },
+      range_checker);
 })
 
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Tan, {
@@ -557,7 +594,11 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(Tan, {
 
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Erf, { Run(Erf, std::erf); })
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(Erfc, {
-  auto error_spec_gen = GetDefaultSpecGenerator();
+  auto error_spec_gen = +[](NativeT x) {
+    NativeT min = std::numeric_limits<NativeT>::min();
+    NativeT eps = std::numeric_limits<NativeT>::epsilon();
+    return ErrorSpec{.abs_err = 2 * min, .rel_err = 50 * eps};
+  };
   if (IsTpu(platform_)) {
     error_spec_gen = +[](NativeT x) {
       NativeT min = std::numeric_limits<NativeT>::min();
@@ -568,7 +609,11 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(Erfc, {
   Run(Erfc, std::erfc, error_spec_gen);
 })
 UNARY_TEST_FLOAT_32_BITS_OR_LESS(ErfInv, {
-  auto error_spec_gen = GetDefaultSpecGenerator();
+  auto error_spec_gen = +[](NativeT x) {
+    NativeT min = std::numeric_limits<NativeT>::min();
+    NativeT eps = std::numeric_limits<NativeT>::epsilon();
+    return ErrorSpec{.abs_err = 2 * min, .rel_err = 50 * eps};
+  };
   if (IsTpu(platform_)) {
     error_spec_gen = +[](NativeT x) {
       NativeT eps = std::numeric_limits<NativeT>::epsilon();
@@ -620,6 +665,82 @@ UNARY_TEST_FLOAT_32_BITS_OR_LESS(RoundNearestEven, {
   fesetround(FE_TONEAREST);
   Run(RoundNearestEven, std::nearbyint, error_spec_gen);
   fesetround(curr_direction);
+})
+
+template <typename NativeT>
+double reciprocal_abs_error(NativeT val) {
+  double abs_err = 0.0;
+
+  // For subnormals, we need to set absolute error to the smallest positive
+  // representable value due to hardware implementations that truncate
+  // subnormals to zero.
+  bool is_subnormal_output =
+      std::numeric_limits<NativeT>::denorm_min() <= std::abs(1 / val) &&
+      std::abs(1 / val) <= std::numeric_limits<NativeT>::min();
+  if (is_subnormal_output) {
+    abs_err = std::numeric_limits<NativeT>::min();
+  }
+
+  return abs_err;
+}
+
+UNARY_TEST_FLOAT_32_BITS_OR_LESS(Reciprocal, {
+  ErrorSpecGen error_spec_gen =
+      +[](NativeT) { return ErrorSpec{.abs_err = 0.0, .rel_err = 0.0}; };
+  if (IsCpu(platform_)) {
+    error_spec_gen = +[](NativeT val) {
+      return ErrorSpec{.abs_err = reciprocal_abs_error(val), .rel_err = 0.0};
+    };
+  }
+  if (IsGpu(platform_)) {
+    error_spec_gen = +[](NativeT val) {
+      NativeT eps = std::numeric_limits<NativeT>::epsilon();
+      return ErrorSpec{.abs_err = reciprocal_abs_error(val), .rel_err = eps};
+    };
+  }
+  if (IsTpu(platform_)) {
+    error_spec_gen = +[](NativeT val) {
+      auto abs_err = reciprocal_abs_error(val);
+      if constexpr (std::is_same<NativeT, xla::bfloat16>()) {
+        return ErrorSpec{.abs_err = abs_err, .rel_err = 0.0};
+      } else if constexpr (std::is_same<NativeT, xla::half>()) {
+        // N.B.: Does not require absolute error.
+        return ErrorSpec{.abs_err = 0.0, .rel_err = 0.0};
+      } else if constexpr (std::is_same<NativeT, float>()) {
+        NativeT eps = std::numeric_limits<NativeT>::epsilon();
+        return ErrorSpec{.abs_err = abs_err, .rel_err = eps};
+      }
+    };
+  }
+  if (IsPreV6Tpu(platform_)) {
+    error_spec_gen = +[](NativeT val) {
+      auto abs_err = reciprocal_abs_error(val);
+      if constexpr (std::is_same<NativeT, xla::bfloat16>()) {
+        return ErrorSpec{.abs_err = abs_err, .rel_err = 0.0};
+      } else if constexpr (std::is_same<NativeT, xla::half>()) {
+        // N.B.: Does not require absolute error.
+        return ErrorSpec{.abs_err = 0.0, .rel_err = 0.0};
+      } else if constexpr (std::is_same<NativeT, float>()) {
+        NativeT eps = std::numeric_limits<NativeT>::epsilon();
+        return ErrorSpec{.abs_err = abs_err, .rel_err = 34 * eps};
+      }
+    };
+  }
+  if (IsPreV5Tpu(platform_)) {
+    error_spec_gen = +[](NativeT val) {
+      auto abs_err = reciprocal_abs_error(val);
+      if constexpr (std::is_same<NativeT, xla::bfloat16>()) {
+        return ErrorSpec{.abs_err = abs_err, .rel_err = 0.0};
+      } else if constexpr (std::is_same<NativeT, xla::half>()) {
+        // N.B.: Does not require absolute error.
+        return ErrorSpec{.abs_err = 0.0, .rel_err = 0.0};
+      } else if constexpr (std::is_same<NativeT, float>()) {
+        NativeT eps = std::numeric_limits<NativeT>::epsilon();
+        return ErrorSpec{.abs_err = abs_err, .rel_err = 136 * eps};
+      }
+    };
+  }
+  Run(Reciprocal, +[](float x) { return 1 / x; }, error_spec_gen);
 })
 
 INSTANTIATE_TEST_SUITE_P(F32, ExhaustiveF32UnaryTest,

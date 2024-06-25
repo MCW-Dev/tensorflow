@@ -33,6 +33,7 @@ limitations under the License.
 #include "absl/base/casts.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/functional/function_ref.h"
+#include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
@@ -47,7 +48,6 @@ limitations under the License.
 #include "xla/shape.h"
 #include "xla/shape_tree.h"
 #include "xla/shape_util.h"
-#include "xla/status.h"
 #include "xla/status_macros.h"
 #include "xla/tsl/util/byte_swap_array.h"
 #include "xla/types.h"
@@ -842,7 +842,7 @@ absl::Status MutableLiteralBase::CopySliceFrom(
   TF_RET_CHECK(src_literal.shape().rank() == src_base.size());
   TF_RET_CHECK(shape().rank() == dest_base.size());
 
-  return primitive_util::ArrayTypeSwitch<Status>(
+  return primitive_util::ArrayTypeSwitch<absl::Status>(
       [&](auto primitive_type_constant) -> absl::Status {
         using NativeT = NativeTypeOf<primitive_type_constant>;
         return CopySliceFromInternal<NativeT>(src_literal, src_base, dest_base,
@@ -1384,7 +1384,7 @@ std::optional<complex128> LiteralBase::GetAsComplex128(
 absl::Status MutableLiteralBase::SetIntegralAsS64(
     absl::Span<const int64_t> multi_index, int64_t value) {
   CHECK(LayoutUtil::IsDenseArray(shape()));
-  return primitive_util::PrimitiveTypeSwitch<Status>(
+  return primitive_util::PrimitiveTypeSwitch<absl::Status>(
       [&](auto primitive_type_constant) -> absl::Status {
         if constexpr (primitive_util::IsIntegralType(primitive_type_constant) ||
                       primitive_type_constant == PRED) {
@@ -1703,7 +1703,7 @@ absl::Status ConvertIfDestTypeMatches(const LiteralBase& src_literal,
   auto src_data = src_literal.data<NativeSrcT>();
   void* dst_base = dst_literal.untyped_data();
   DCHECK_EQ(src_data.size(), dst_literal.element_count());
-  return primitive_util::ArrayTypeSwitch<Status>(
+  return primitive_util::ArrayTypeSwitch<absl::Status>(
       [&](auto primitive_type_constant) -> absl::Status {
         if constexpr (primitive_util::IsComplexType(kSrcType) &&
                       !primitive_util::IsComplexType(primitive_type_constant)) {
@@ -1739,7 +1739,7 @@ absl::StatusOr<Literal> ConvertSwitch(const LiteralBase& literal,
   // duplicating it N^2 times in the conversion implementation.
   Literal result(
       ShapeUtil::ChangeElementType(literal.shape(), primitive_dest_type));
-  TF_RETURN_IF_ERROR(primitive_util::ArrayTypeSwitch<Status>(
+  TF_RETURN_IF_ERROR(primitive_util::ArrayTypeSwitch<absl::Status>(
       [&](auto primitive_type_constant) -> absl::Status {
         return ConvertIfDestTypeMatches<primitive_type_constant>(literal,
                                                                  result);
@@ -1891,39 +1891,42 @@ bool LiteralBase::Piece::EqualElements(const LiteralBase::Piece& other) const {
       subshape().element_type());
 }
 
-bool LiteralBase::operator==(const LiteralBase& other) const {
+bool LiteralBase::Equal(const LiteralBase& other, bool layout_sensitive) const {
   // Checking the structure of tuple literals. Checks for dense arrays are
   // performed below.
   if (!ShapeUtil::EqualStructure(shape(), other.shape())) {
     return false;
   }
 
-  return root_piece().ForEachSubpieceWithBool(
-      [&](const ShapeIndex& index, const Piece& piece) {
-        const Piece& other_piece = other.piece(index);
-        const Shape& subshape = piece.subshape();
-        const Shape& other_subshape = other_piece.subshape();
-        if (subshape.element_type() != other_subshape.element_type()) {
-          return false;
-        }
-        if (!piece.subshape().IsArray()) {
-          return true;
-        }
-        if (subshape.rank() != other_subshape.rank()) {
-          return false;
-        }
+  return root_piece().ForEachSubpieceWithBool([&](const ShapeIndex& index,
+                                                  const Piece& piece) {
+    const Piece& other_piece = other.piece(index);
+    const Shape& subshape = piece.subshape();
+    const Shape& other_subshape = other_piece.subshape();
+    if (subshape.element_type() != other_subshape.element_type()) {
+      return false;
+    }
+    if (!piece.subshape().IsArray()) {
+      return true;
+    }
+    if (subshape.rank() != other_subshape.rank()) {
+      return false;
+    }
+    if (layout_sensitive && (subshape.layout() != other_subshape.layout())) {
+      return false;
+    }
 
-        for (int64_t i = 0; i < subshape.rank(); ++i) {
-          if (piece.GetDynamicSize(i) != other_piece.GetDynamicSize(i)) {
-            return false;
-          }
-        }
+    for (int64_t i = 0; i < subshape.rank(); ++i) {
+      if (piece.GetDynamicSize(i) != other_piece.GetDynamicSize(i)) {
+        return false;
+      }
+    }
 
-        if (!piece.EqualElements(other_piece)) {
-          return false;
-        }
-        return true;
-      });
+    if (!piece.EqualElements(other_piece)) {
+      return false;
+    }
+    return true;
+  });
 }
 
 template <typename NativeT>

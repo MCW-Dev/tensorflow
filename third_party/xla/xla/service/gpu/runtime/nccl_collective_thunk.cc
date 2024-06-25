@@ -50,7 +50,6 @@ limitations under the License.
 #include "xla/service/gpu/runtime/thunk.h"
 #include "xla/service/rendezvous.h"
 #include "xla/shape.h"
-#include "xla/status.h"
 #include "xla/stream_executor/event.h"
 #include "xla/stream_executor/gpu/gpu_activation.h"
 #include "xla/stream_executor/stream.h"
@@ -522,11 +521,6 @@ absl::Status NcclCollectiveDoneThunk::ExecuteOnStream(
   se::StreamExecutor* executor = params.stream->parent();
   TF_ASSIGN_OR_RETURN(se::Event * event, async_events_->GetEvent(executor));
   return params.stream->WaitFor(event);
-}
-
-absl::Status IsValidOperand(mlir::Value operand, Thunk::Kind reduction_op) {
-  Shape shape = GetShape(operand);
-  return IsValidOperand(shape, reduction_op);
 }
 
 absl::Status IsValidOperand(Shape shape, Thunk::Kind reduction_op) {

@@ -26,10 +26,10 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
+#include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/literal_util.h"
 #include "xla/service/hlo_pass_interface.h"
 #include "xla/service/pattern_matcher.h"
-#include "xla/statusor.h"
 
 namespace xla {
 
@@ -48,12 +48,12 @@ struct WhileLoopConfig {
 // shape of the instruction. To satisfy this:
 // 1. All start indices must be constant zero except only a single dimension.
 // 2. The start index of that dimension should be equal to the enclosing loop
-// induction variable.
+//    induction variable.
 // 3. And, the size of that dimension must match the loop trip count.
-bool MatchShapeCoveringDynamicIndexInstruction(HloInstruction* instr,
-                                               HloInstruction* input,
-                                               HloOpcode opcode,
-                                               const WhileLoopConfig& config);
+// If so, it returns the dynamic index.
+std::optional<int64_t> MatchShapeCoveringDynamicIndexInstruction(
+    HloInstruction* instr, HloInstruction* input, HloOpcode opcode,
+    const WhileLoopConfig& config);
 
 // This pass unrolls while loops with the given unrolling factor. The value of
 // unroll_factor = -1 will fully unroll the loop.
@@ -102,10 +102,12 @@ class WhileLoopUnroller : public HloModulePass {
 
   // Unrolls the given while loop with the default behaviour set to full unroll.
   // If wrap_in_trivial_loop is set, the unrolled body of the loop will be
-  // wrapped in a loop with trip count of one.
+  // wrapped in a loop with trip count of one. Forcing unroll will not perform
+  // soft checking of the conditions.
   static absl::StatusOr<bool> Unroll(HloInstruction* while_op,
                                      int64_t unroll_factor = -1,
-                                     bool wrap_in_trivial_loop = false);
+                                     bool wrap_in_trivial_loop = false,
+                                     bool force_unroll = false);
 
  private:
   int64_t unroll_factor_;

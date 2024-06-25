@@ -104,6 +104,7 @@ limitations under the License.
 #include "xla/pjrt/distributed/protocol.pb.h"
 #include "xla/pjrt/event_pool.h"
 #include "xla/pjrt/host_callback.h"
+#include "xla/pjrt/host_memory_spaces.h"
 #include "xla/pjrt/local_device_state.h"
 #include "xla/pjrt/metrics.h"
 #include "xla/pjrt/mlir_to_hlo.h"
@@ -128,14 +129,13 @@ limitations under the License.
 #include "xla/shape.h"
 #include "xla/shape_tree.h"
 #include "xla/shape_util.h"
-#include "xla/status.h"
-#include "xla/statusor.h"
+#include "xla/status_macros.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/stream.h"
+#include "xla/tsl/framework/allocator.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/framework/allocator.h"
 #include "tsl/platform/casts.h"
 #include "tsl/platform/env.h"
 #include "tsl/platform/errors.h"
@@ -422,7 +422,7 @@ absl::Status AddDestinationBufferSynchronization(
   RecordUsage(std::move(device_buffer), local_device, local_device,
               definition_event, copy_stream,
               /*prefer_to_retain_reference=*/false);
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 }  // namespace
@@ -1358,11 +1358,6 @@ PjRtStreamExecutorDevice::GetStreamForExternalReadyEvents() const {
 }
 
 absl::StatusOr<PjRtDevice*> PjRtStreamExecutorClient::LookupAddressableDevice(
-    int local_hardware_id) const {
-  return LookupAddressableDevice(PjRtLocalDeviceId(local_hardware_id));
-}
-
-absl::StatusOr<PjRtDevice*> PjRtStreamExecutorClient::LookupAddressableDevice(
     xla::PjRtLocalDeviceId local_device_id) const {
   for (auto* device : addressable_devices_) {
     if (local_device_id == device->local_device_id()) {
@@ -2246,9 +2241,20 @@ std::unique_ptr<PjRtBuffer> OutputBufferHelper(
   std::shared_ptr<TrackedDeviceBuffer> out_buffer =
       TrackedDeviceBuffer::FromScopedShapedBuffer(result_buffer,
                                                   {definition_event});
+  Shape shape = result_buffer->on_device_shape();
+  PjRtMemorySpace* memory_space =
+      device->default_memory_space().value_or(nullptr);
+  if (shape.has_layout() &&
+      shape.layout().memory_space() == Layout::kHostMemorySpace) {
+    absl::StatusOr<PjRtMemorySpace*> memory_space_or =
+        device->memory_space_by_kind(PinnedHostMemorySpace::kKind);
+    if (memory_space_or.ok()) {
+      memory_space = memory_space_or.value();
+    }
+  }
   auto pjrt_buffer = std::make_unique<PjRtStreamExecutorBuffer>(
       result_buffer->on_device_shape(), std::move(out_buffer), client, device,
-      device->default_memory_space().value_or(nullptr));
+      memory_space);
   RecordUsage(pjrt_buffer->GetBufferWithUsageHold(), local_device, local_device,
               definition_event, local_device->compute_stream(),
               /*prefer_to_retain_reference=*/false, &buffers_to_release);
@@ -2591,7 +2597,7 @@ class StreamExecutorCopyToDeviceStream : public CopyToDeviceStream {
       done_.SetStateConcrete();
     }
 
-    return PjRtFuture<>(OkStatus());
+    return PjRtFuture<>(absl::OkStatus());
   }
 
  private:
@@ -2907,7 +2913,7 @@ PjRtStreamExecutorLoadedExecutable::MakeOutputBuffers(
   return outputs;
 }
 
-static Status GetFirstInputError(
+static absl::Status GetFirstInputError(
     absl::Span<PjRtBuffer* const> argument_handles) {
   for (auto* handle : argument_handles) {
     auto* buffer = tensorflow::down_cast<PjRtStreamExecutorBuffer*>(handle);
@@ -2944,7 +2950,7 @@ PjRtStreamExecutorLoadedExecutable::ExecuteHelper(
     (*device_assignment)(0, 0) = device->id();
   }
 
-  Status input_error = GetFirstInputError(argument_handles);
+  absl::Status input_error = GetFirstInputError(argument_handles);
   if (!input_error.ok()) {
     TF_ASSIGN_OR_RETURN(PjRtMemorySpace * memory_space,
                         device->default_memory_space());
@@ -3074,7 +3080,7 @@ PjRtStreamExecutorLoadedExecutable::Execute(
           << "; num_replicas=" << num_replicas()
           << " num_partitions=" << num_partitions()
           << " num_addressable_devices=" << num_addressable_devices;
-  std::vector<StatusOr<Result>> results(num_addressable_devices);
+  std::vector<absl::StatusOr<Result>> results(num_addressable_devices);
   if (num_addressable_devices == 1 && !ThisThreadIsInsideHostCallback()) {
     // Fast-path if there is only one device — run the computation on the
     // current thread.
@@ -3348,6 +3354,11 @@ PjRtStreamExecutorClient::Compile(const XlaComputation& computation,
                                   CompileOptions options) {
   tsl::profiler::TraceMe traceme("PjRtStreamExecutorClient::Compile");
   VLOG(1) << "PjRtStreamExecutorClient::Compile";
+  options.executable_build_options.set_process_index(process_index());
+  TF_RET_CHECK(device_count() % addressable_device_count() == 0)
+      << "Each process is expected to have the same number of devices";
+  options.executable_build_options.set_process_count(
+      device_count() / addressable_device_count());
   auto input_options = options;
 
   TF_RETURN_IF_ERROR(options.ApplyAllOptionOverrides());

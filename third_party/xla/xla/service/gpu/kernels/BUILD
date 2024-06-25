@@ -27,8 +27,6 @@ cc_library(
     visibility = [":friends"],
     deps = [
         ":custom_kernel",
-        "//xla:status",
-        "//xla:statusor",
         "//xla/hlo/ir:hlo",
         "//xla/stream_executor:device_description",
         "@com_google_absl//absl/base:core_headers",
@@ -49,7 +47,6 @@ cc_library(
         "//xla/hlo/ir:hlo",
         "//xla/service/gpu:backend_configs_cc",
         "//xla/stream_executor:device_description",
-        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -65,6 +62,7 @@ cc_library(
     visibility = [":friends"],
     deps = [
         "//xla/stream_executor",
+        "//xla/stream_executor:kernel_spec",
         "@com_google_absl//absl/strings:str_format",
     ],
 )
@@ -88,7 +86,6 @@ cc_library(
         ":cutlass_gemm",
         ":cutlass_gemm_custom_kernel",
         "//xla:shape_util",
-        "//xla:status",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:pattern_matcher",
@@ -208,10 +205,10 @@ cc_library(
     visibility = [":friends"],
     deps = [
         ":custom_kernel",
-        "//xla:statusor",
         "//xla:types",
         "//xla:xla_data_proto_cc",
         "//xla/stream_executor",
+        "//xla/stream_executor:kernel_spec",
         "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -262,9 +259,9 @@ cc_library(
         ":custom_kernel",
         ":cutlass_gemm",
         ":cutlass_gemm_kernels",  # build_cleaner: keep
-        "//xla:statusor",
         "//xla:xla_data_proto_cc",
         "//xla/stream_executor",
+        "//xla/stream_executor:kernel_spec",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",

@@ -3,6 +3,7 @@
 
 load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
 load("//xla/tests:build_defs.bzl", "xla_test")
+load(":build_defs.bzl", "exhaustive_unary_test_f32_or_smaller_deps")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -41,23 +42,17 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "exhaustive_unary_test_f32_or_smaller_lib",
-    testonly = True,
+filegroup(
+    name = "exhaustive_unary_test_f32_or_smaller_lib_srcs",
     srcs = ["exhaustive_unary_test_f32_or_smaller.cc"],
-    tags = ["no_pip"],
-    deps = [
-        ":exhaustive_op_test_utils",
-        "//xla:util",
-        "//xla/client:xla_builder",
-        "//xla/tests:client_library_test_base",
-        "@com_google_absl//absl/flags:flag",
-    ],
 )
 
 xla_test(
     name = "exhaustive_unary_test_f32_or_smaller",
-    srcs = ["exhaustive_test_main.cc"],
+    srcs = [
+        "exhaustive_test_main.cc",
+        ":exhaustive_unary_test_f32_or_smaller_lib_srcs",
+    ],
     backends = [
         "gpu",
         "cpu",
@@ -66,11 +61,11 @@ xla_test(
     shard_count = 50,
     tags = [
         "optonly",
+        "test_xla_cpu_thunks",
         # This is a big test that we skip for capacity reasons in OSS testing.
         "no_oss",
     ],
-    deps = [
-        ":exhaustive_unary_test_f32_or_smaller_lib",
+    deps = exhaustive_unary_test_f32_or_smaller_deps + [
         "@local_tsl//tsl/platform",
         "@local_tsl//tsl/platform:test",
     ],
@@ -83,9 +78,10 @@ xla_test(
         "gpu",
         "cpu",
     ],
-    shard_count = 48,
+    shard_count = 50,
     tags = [
         "optonly",
+        "test_xla_cpu_thunks",
         # This is a big test that we skip for capacity reasons in OSS testing.
         "no_oss",
         # TODO(b/151340488): Timed out on 2020-03-18.
@@ -107,9 +103,10 @@ xla_test(
         "gpu",
         "cpu",
     ],
-    shard_count = 48,
+    shard_count = 50,
     tags = [
         "optonly",
+        "test_xla_cpu_thunks",
         # This is a big test that we skip for capacity reasons in OSS testing.
         "no_oss",
     ],
@@ -132,9 +129,10 @@ xla_test(
         "gpu",
         "cpu",
     ],
-    shard_count = 48,
+    shard_count = 50,
     tags = [
         "optonly",
+        "test_xla_cpu_thunks",
         # This is a big test that we skip for capacity reasons in OSS testing.
         "no_oss",
     ],
@@ -151,9 +149,10 @@ xla_test(
         "gpu",
         "cpu",
     ],
-    shard_count = 48,
+    shard_count = 50,
     tags = [
         "optonly",
+        "test_xla_cpu_thunks",
         # This is a big test that we skip for capacity reasons in OSS testing.
         "no_oss",
     ],

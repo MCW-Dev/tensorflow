@@ -46,7 +46,6 @@ limitations under the License.
 #include "xla/service/pattern_matcher.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
-#include "xla/status.h"
 #include "xla/status_macros.h"
 #include "xla/util.h"
 #include "tsl/platform/errors.h"
@@ -169,8 +168,6 @@ absl::StatusOr<std::vector<InstructionAndShapeIndex>> GetSuccessors(
             {condition_instruction, instruction_and_shape_index.shape_index});
       }
     } else if (user->opcode() == HloOpcode::kAsyncStart) {
-      LOG(INFO) << "Instruction " << instruction->name()
-                << " feeds into async-start " << user->name();
       auto operand_indices = user->OperandIndices(instruction);
       CHECK(user->called_computations().size() == 1)
           << "Expect async-start to only have one called computation.";
@@ -179,8 +176,6 @@ absl::StatusOr<std::vector<InstructionAndShapeIndex>> GetSuccessors(
             user->called_computations().front();
         HloInstruction* parameter_instruction =
             called_computation->parameter_instruction(i);
-        LOG(INFO) << "Which is used by parameter "
-                  << parameter_instruction->name();
         result.push_back(
             {parameter_instruction, instruction_and_shape_index.shape_index});
       }
@@ -532,7 +527,7 @@ absl::StatusOr<bool> HostOffloader::HandleInputStreaming(
                     /*insert_copy_before=*/false));
             changed = changed || result;
           }
-          return OkStatus();
+          return absl::OkStatus();
         }));
   }
   return changed;
@@ -724,7 +719,7 @@ absl::Status HostOffloader::ValidateSliceLeadsToMoveToDeviceCustomCall(
     HloInstruction* slice) {
   if (validated_slices_.find(slice) != validated_slices_.end()) {
     // Already validated this one.
-    return OkStatus();
+    return absl::OkStatus();
   }
   // Every host-to-device DynamicSlice/Slice must be followed by a MoveToDevice
   // custom call. This function verifiest that.
@@ -762,7 +757,7 @@ absl::Status HostOffloader::ValidateSliceLeadsToMoveToDeviceCustomCall(
     }
   }
   validated_slices_.insert(slice);
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 absl::Status HostOffloader::CreateAllocateBufferForDynamicUpdateSlice(
@@ -770,7 +765,7 @@ absl::Status HostOffloader::CreateAllocateBufferForDynamicUpdateSlice(
   if (dynamic_update_slices_already_allocated_.find(dynamic_update_slice) !=
       dynamic_update_slices_already_allocated_.end()) {
     // Already added an AllocateBuffer for this DynamicUpdateSlice.
-    return OkStatus();
+    return absl::OkStatus();
   }
   VLOG(2) << absl::StreamFormat(
       "Creating a AllocateBuffer in host memory space for \"%s\"",
@@ -899,7 +894,7 @@ absl::Status HostOffloader::CreateAllocateBufferForDynamicUpdateSlice(
                         "result of a broadcast.",
                         dynamic_update_slice->name()));
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 absl::StatusOr<HloInstruction*> HostOffloader::DynamifySlice(

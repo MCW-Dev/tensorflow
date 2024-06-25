@@ -35,7 +35,6 @@ limitations under the License.
 #include "xla/service/gpu/launch_dimensions.h"
 #include "xla/service/gpu/runtime/thunk.h"
 #include "xla/service/gpu/stream_executor_util.h"
-#include "xla/status.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/kernel_factory.h"
@@ -71,7 +70,7 @@ KernelThunk::KernelThunk(const HloInstruction* instr, std::string kernel_name,
   }
 }
 
-std::string KernelThunk::ToStringExtra(int indent) const {
+std::string KernelThunk::ToString(int indent) const {
   return absl::StrFormat(
       ", kernel = %s, launch dimensions = %s, cluster_dim = %s", kernel_name_,
       launch_dimensions_.ToString(),
@@ -179,7 +178,7 @@ CustomKernelThunk::CustomKernelThunk(
   }
 }
 
-std::string CustomKernelThunk::ToStringExtra(int indent) const {
+std::string CustomKernelThunk::ToString(int indent) const {
   return custom_kernel_.ToString();
 }
 

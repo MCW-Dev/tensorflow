@@ -30,7 +30,6 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_format.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -38,7 +37,6 @@ limitations under the License.
 #include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/raw_ostream.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"  // from @llvm-project
 #include "mlir/Conversion/ComplexToStandard/ComplexToStandard.h"  // from @llvm-project
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"  // from @llvm-project
@@ -99,6 +97,7 @@ limitations under the License.
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
 #include "xla/stream_executor/device_description.h"
+#include "xla/tsl/framework/mlir/status_scoped_diagnostic_handler.h"
 #include "xla/util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
@@ -287,7 +286,7 @@ MlirFusionEmitterBase::CreateLLVMModule(
     const BufferAssignment* buffer_assignment) const {
   bool is_amd = std::holds_alternative<se::RocmComputeCapability>(
       device.gpu_compute_capability());
-  auto* hlo_module = fusion.GetModule();
+  HloModule* hlo_module = fusion.GetModule();
   std::unique_ptr<mlir::interpreter::MlirCompilationTrace> trace = nullptr;
   if (DumpingEnabledForHloModule(*hlo_module) &&
       DumpingEnabledForHloPass("mlir-fusion-emitter",
@@ -303,11 +302,24 @@ MlirFusionEmitterBase::CreateLLVMModule(
   pm.addPass(CreateEraseDeadFunctionsPass());
   pm.addPass(mlir::createCSEPass());
   pm.addPass(CreateLowerXlaGpuToScfPass());
-  pm.addPass(mlir::createInlinerPass());
+  pm.addPass(mlir::createInlinerPass({}, [&](mlir::OpPassManager& pm) {
+    // CSE after inlining because inlining can introduce duplicates.
+    pm.addPass(mlir::createCSEPass());
+  }));
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::createCSEPass());
   pm.addPass(mlir::mhlo::createConvertToSignlessPass());
   pm.addPass(CreatePropagateSliceIndicesPass());
+  // We need LICM before unswitching loops, because our loop unswitcher only
+  // detects for loops with a single if inside them.
+  pm.addPass(mlir::createLoopInvariantCodeMotionPass());
+  pm.addNestedPass<mlir::func::FuncOp>(CreateUnswitchLoopsPass());
+  // We need LICM again after unswitching, because that can introduce new
+  // opportunities for LICM. This would not be necessary if LICM also moved
+  // instructions over ifs.
+  pm.addPass(mlir::createLoopInvariantCodeMotionPass());
+  pm.addNestedPass<mlir::func::FuncOp>(CreateVectorizeLoadsAndStoresPass());
+  pm.addNestedPass<mlir::func::FuncOp>(CreateOptimizeLoopsPass());
   pm.addNestedPass<mlir::func::FuncOp>(CreateConvertPureCallOpsPass());
   pm.addPass(CreateLowerTensorsPass(
       is_amd, is_amd ? device.rocm_compute_capability().gcn_arch_name()
@@ -329,7 +341,6 @@ MlirFusionEmitterBase::CreateLLVMModule(
   pm.addPass(mlir::createLoopInvariantCodeMotionPass());
   pm.addPass(mlir::createSymbolDCEPass());
   pm.addPass(mlir::createCSEPass());
-  pm.addPass(CreateLowerTensorsPass());
   pm.addPass(CreateExpandFloatOpsPass(
       !device.cuda_compute_capability().IsAtLeastAmpere()));
   pm.addPass(CreateLowerToLLVMPass());
@@ -573,14 +584,10 @@ absl::Status MlirFusionEmitterBase::RunPassPipeline(
         std::make_unique<mlir::interpreter::MlirCompilerTraceInstrumentation>(
             *trace));
   }
-  if (pm.run(module).failed()) {
-    std::string module_dump;
-    llvm::raw_string_ostream os(module_dump);
-    module->print(os);
-    return absl::InternalError(absl::StrFormat(
-        "Failed to run pass pipeline.\nMLIR module:\n%s", module_dump));
-  }
-  return absl::OkStatus();
+
+  tsl::StatusScopedDiagnosticHandler diagnostic_handler(module.getContext());
+  (void)pm.run(module);
+  return diagnostic_handler.consumeStatus();
 }
 
 }  // namespace gpu

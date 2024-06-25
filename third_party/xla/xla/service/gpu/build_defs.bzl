@@ -39,6 +39,9 @@ def get_cub_sort_kernel_types(name = ""):
         "u64_b16",
         "u64_b32",
         "u64_b64",
+        "u8_b16",
+        "u8_b32",
+        "u8_b64",
     ]
 
 def build_cub_sort_kernels(name, types, local_defines = [], **kwargs):
@@ -64,11 +67,20 @@ def gpu_kernel_library(name, copts = [], local_defines = [], **kwargs):
 
 register_extension_info(extension = gpu_kernel_library, label_regex_for_dep = "{extension_name}")
 
-def gen_gpu_hlo_compile_tests(name, hlo_files, multihost_hlo_runner_binary_path, backends = [], disabled_backends = [], backend_tags = {}, backend_args = {}):
+def gen_gpu_hlo_compile_tests(
+        name,
+        hlo_files,
+        multihost_hlo_runner_binary_path,
+        backends = [],
+        disabled_backends = [],
+        backend_tags = {},
+        backend_args = {},
+        xla_flags = [],
+        tags = []):
     """Macro to generate Bazel tests for compiling HLO files on a GPU.
 
     This macro creates individual Bazel test targets for each specified HLO file.
-    These tests use the `cuda_hlo_runner_main` binary to attempt to compile the HLO
+    These tests use the `hlo_runner_main_gpu` binary to attempt to compile the HLO
     files.
 
     Parses num_hosts, num_devices_per_host and num_replicas for each filename in `hlo_files`.
@@ -92,6 +104,9 @@ def gen_gpu_hlo_compile_tests(name, hlo_files, multihost_hlo_runner_binary_path,
         use for that target.
       backend_args: A dict mapping backend name to list of additional args to
         use for that target.
+      xla_flags: A list of XLA flags passed to multihost_hlo_runner.
+      tags: A list of tags to apply to all generated tests.
+
 
     Example Usage:
 
@@ -167,8 +182,8 @@ def gen_gpu_hlo_compile_tests(name, hlo_files, multihost_hlo_runner_binary_path,
                     "--num_replicas=%d" % num_replicas,
                     "--num_partitions=%d" % num_partitions,
                     "--use_spmd_partitioning=true",
-                    "--hlo_file=%s" % hlo_path,
-                ],
-                data = ["//xla/tools/multihost_hlo_runner:cuda_hlo_runner_main", data_label],
-                tags = backend_tags[backend] + ["requires-mem:16g"],
+                    hlo_path,
+                ] + xla_flags,
+                data = ["//xla/tools/multihost_hlo_runner:hlo_runner_main_gpu", data_label],
+                tags = backend_tags[backend] + ["requires-mem:16g"] + tags,
             )

@@ -16,7 +16,9 @@ limitations under the License.
 #ifndef XLA_SERVICE_CPU_IR_EMITTER2_H_
 #define XLA_SERVICE_CPU_IR_EMITTER2_H_
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -28,8 +30,12 @@ limitations under the License.
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Value.h"
 #include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/hlo/ir/hlo_instructions.h"
+#include "xla/service/cpu/ir_emitter.h"
 #include "xla/service/llvm_ir/ir_array.h"
+#include "xla/service/llvm_ir/loop_emitter.h"
 #include "xla/shape.h"
+#include "xla/stream_executor/launch_dim.h"
 
 namespace xla::cpu {
 
@@ -53,7 +59,8 @@ namespace xla::cpu {
 // WARNING: This is under construction and will eventually replace IrEmitter.
 class IrEmitter2 {
  public:
-  IrEmitter2(const HloModule& hlo_module, llvm::Module* module);
+  IrEmitter2(const HloModule& hlo_module, llvm::Module* module,
+             IrEmitter* nested_ir_emitter);
 
   // Thread dimensions of the kernel invocation.
   struct KernelThreadDims {
@@ -85,13 +92,11 @@ class IrEmitter2 {
     std::vector<llvm_ir::IrArray> results;
   };
 
-  // A symbol name in the LLVM module that defines a host kernel.
-  //
-  // TODO(ezhulenev): In addition to a symbol name we also need to know the
-  // block and thread sizes.
+  // Emitted kernel information that defines how to launch it at run time.
   struct KernelInfo {
-    explicit KernelInfo(std::string name) : name(std::move(name)) {}
     std::string name;
+    se::BlockDim block_dims;
+    se::ThreadDim thread_dims;
   };
 
   // Returns all the kernels emitted so far via this emitter.
@@ -101,14 +106,50 @@ class IrEmitter2 {
   absl::StatusOr<KernelInfo> EmitElementalHostKernel(
       const HloInstruction* instr);
 
+  // Emits a host kernel for the given fusion instruction.
+  absl::StatusOr<KernelInfo> EmitFusionHostKernel(
+      const HloFusionInstruction* fusion);
+
+  // Emits a host kernel for the given reduction instruction.
+  absl::StatusOr<KernelInfo> EmitReductionHostKernel(
+      const HloInstruction* instr);
+
+  // Emits a host kernel for the given dot instruction. Small dot operations
+  // are emitted as LLVM IR directly, while larger ones are emitted as a dot
+  // thunk that calls into libraries.
+  absl::StatusOr<KernelInfo> EmitDotHostKernel(const HloInstruction* instr);
+
+  // Emits a host kernel for the given dot fusion instruction (output fusion).
+  absl::StatusOr<KernelInfo> EmitDotFusionHostKernel(
+      const HloFusionInstruction* fusion);
+
+  // Emits a host kernel for the given select-and-scatter instruction.
+  absl::StatusOr<KernelInfo> EmitSelectAndScatterHostKernel(
+      const HloInstruction* instr);
+
   // Emits a host kernel prototype and prepares function for emitting kernel
   // body into it.
   KernelPrototype EmitKernelPrototype(std::string_view name,
                                       absl::Span<const Shape> arguments,
                                       absl::Span<const Shape> results);
 
+  // Emits a host kernel prototype for the given HLO instruction.
+  KernelPrototype EmitKernelPrototype(const HloInstruction* instr);
+
  private:
   class ElementalIrEmitter;
+
+  // Parallel partition bounds for parallelized outer dimensions:
+  //   vector<[i64 lower_bound, i64 upper_bound]>
+  using ParallelPartitionBounds =
+      std::vector<std::pair<llvm::Value*, llvm::Value*>>;
+
+  // A config for running kernel in parallel. We rely on partitioning iteration
+  // space along the outer dimension(s) and run each partition as a separate
+  // task inside a runtime-managed thread pool.
+  struct ParallelConfig {
+    std::vector<int64_t> outer_dimension_partitions;
+  };
 
   KernelThreadDims EmitKernelThreadDims(llvm::IRBuilder<>& b,
                                         llvm::Value* call_frame);
@@ -119,8 +160,33 @@ class IrEmitter2 {
                                       llvm::Value* call_frame, int64_t index,
                                       const Shape& shape);
 
+  // Returns parallel config for the given instruction or std::nullopt if
+  // the instruction has to be compiled to a single threaded loop.
+  std::optional<ParallelConfig> GetParallelConfig(const HloInstruction* instr);
+
+  // Emits LLVM IR that computes parallel partition bounds from the call frame's
+  // block and thread dimensions and parallel execution config.
+  ParallelPartitionBounds EmitParallelPartitionBounds(
+      llvm::IRBuilder<>& b, const KernelPrototype& kernel_prototype,
+      const ParallelConfig& parallel_config, const Shape& shape,
+      std::string_view name);
+
+  // Emits LLVM IR using elemental loop emitter and the given element generator.
+  // If the instruction is parallelized, it will emit a parallel loop partition
+  // and return the requested number of execution threads.
+  absl::StatusOr<se::ThreadDim> EmitElementalLoops(
+      llvm::IRBuilder<>& b, const HloInstruction* instr,
+      const KernelPrototype& kernel_prototype,
+      const llvm_ir::ElementGenerator& element_generator);
+
+  bool fast_min_max() const;
+
   const HloModule& hlo_module_;
   llvm::Module* module_;
+
+  // Nested IrEmitter to emit embedded computations (e.g. computations attached
+  // to reductions inside fusions).
+  IrEmitter* nested_ir_emitter_;
 
   // LLVM types defining HostKernel API (see host_kernel_c_api.h).
   llvm::StructType* call_frame_ty_;

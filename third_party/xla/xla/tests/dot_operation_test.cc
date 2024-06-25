@@ -13,14 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <limits>
 #include <memory>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
-#if TENSORFLOW_USE_ROCM
-#include "rocm/rocm_config.h"
-#endif
 #include "xla/array2d.h"
 #include "xla/array3d.h"
 #include "xla/client/lib/arithmetic.h"
@@ -38,6 +34,10 @@ limitations under the License.
 #include "xla/tests/test_utils.h"
 #include "tsl/platform/test.h"
 #include "tsl/platform/test_benchmark.h"
+
+#if TENSORFLOW_USE_ROCM
+#include "rocm/rocm_config.h"
+#endif
 
 namespace xla {
 namespace {
@@ -2308,9 +2308,7 @@ ENTRY MatrixVectorComplex {
 void DOT_ReorderContracting(::testing::benchmark::State& state) {
   se::Platform* platform = PlatformUtil::GetDefaultPlatform().value();
   auto executors = PlatformUtil::GetStreamExecutors(platform).value();
-  se::StreamExecutorMemoryAllocator allocator(
-      platform, std::vector<se::StreamExecutorInterface*>(executors.begin(),
-                                                          executors.end()));
+  se::StreamExecutorMemoryAllocator allocator(platform, executors);
 
   xla::LocalClientOptions client_options;
   client_options.set_platform(platform);

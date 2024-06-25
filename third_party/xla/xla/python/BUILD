@@ -198,7 +198,6 @@ cc_library(
         "//third_party/nanobind",
         "//xla:literal",
         "//xla:shape_util",
-        "//xla:status",
         "//xla:status_macros",
         "//xla:util",
         "//xla:xla_data_proto_cc",
@@ -208,6 +207,7 @@ cc_library(
         "//xla/tsl/python/lib/core:numpy",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
@@ -362,9 +362,7 @@ cc_library(
         "//xla:comparison_util",
         "//xla:literal",
         "//xla:shape_util",
-        "//xla:status",
         "//xla:status_macros",
-        "//xla:statusor",
         "//xla:types",
         "//xla:util",
         "//xla:xla_data_proto_cc",
@@ -400,8 +398,8 @@ cc_library(
         "//xla/service:custom_call_target_registry",
         "//xla/service:platform_util",
         "//xla/tsl/concurrency:ref_count",
+        "//xla/tsl/framework:allocator",
         "//xla/tsl/python/lib/core:numpy",
-        "@local_tsl//tsl/framework:allocator",
         "@local_tsl//tsl/platform:casts",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:fingerprint",
@@ -518,6 +516,7 @@ cc_library(
         "//xla:util",
         "//xla/pjrt:exceptions",
         "//xla/pjrt:pjrt_client",
+        "//xla/pjrt:pjrt_common",
         "//xla/pjrt:pjrt_compiler",
         "//xla/pjrt:pjrt_layout",
         "//xla/python/ifrt",
@@ -547,6 +546,8 @@ cc_library(
     features = ["-use_header_modules"],
     visibility = [":friends"],  # For the functions to access C++ flags/thread-local variables
     deps = [
+        ":nb_absl_inlined_vector",
+        ":nb_absl_span",
         ":nb_helpers",
         ":py_client",
         ":python_ref_manager",
@@ -556,6 +557,7 @@ cc_library(
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -627,7 +629,6 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "//third_party/nanobind",
         "//xla:shape_util",
-        "//xla:status",
         "//xla:util",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/utils:hlo_sharding_util",
@@ -889,6 +890,7 @@ cc_library(
     visibility = [":friends"],
     deps = [
         ":nb_class_ptr",
+        ":nb_helpers",
         ":pytree_proto_cc",
         # placeholder for index annotation deps
         "@com_google_absl//absl/algorithm:container",
@@ -921,7 +923,6 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "//third_party/nanobind",
-        "//xla:status",
         "//xla/client:xla_computation",
         "//xla/mlir/utils:error_util",
         "//xla/mlir_hlo",
@@ -1010,10 +1011,10 @@ cc_library(
         ":types",
         ":xplane_to_profile_instructions",
         # placeholder for index annotation deps
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "//third_party/nanobind",
-        "//xla:status",
         "//xla/backends/profiler:profiler_backends",
         "//xla/backends/profiler/cpu:python_tracer",
         "//xla/backends/profiler/plugin:plugin_tracer",
@@ -1070,12 +1071,10 @@ cc_library(
     ],
     features = ["-use_header_modules"],
     deps = [
-        "//xla:status",
         "//xla:util",
-        "//xla/pjrt:pjrt_client",
-        "//xla/pjrt:pjrt_future",
         "//xla/python/ifrt",
-        "@com_google_absl//absl/strings:str_format",
+        "//xla/tsl/concurrency:ref_count",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -1125,6 +1124,7 @@ cc_library(
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
@@ -1134,7 +1134,6 @@ cc_library(
         "//xla:debug_options_flags",
         "//xla:literal",
         "//xla:shape_util",
-        "//xla:statusor",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
@@ -1348,8 +1347,6 @@ tsl_pybind_extension(
         "@local_config_python//:python_headers",  # buildcleaner: keep
         "//xla:literal",
         "//xla:shape_util",
-        "//xla:status",
-        "//xla:statusor",
         "//xla:types",
         "//xla:util",
         "//xla/ffi:ffi_api",
@@ -1385,6 +1382,7 @@ tsl_pybind_extension(
         "@local_tsl//tsl/platform:status",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform/cloud:gcs_file_system",
+        "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
     ] + select({
         # gloo transport only builds on linux
@@ -1422,7 +1420,6 @@ cc_library(
     srcs = ["xplane_to_profile_instructions.cc"],
     hdrs = ["xplane_to_profile_instructions.h"],
     deps = [
-        "//xla:status",
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_proto_cc",
@@ -1500,6 +1497,18 @@ cc_library(
 )
 
 cc_library(
+    name = "nb_absl_inlined_vector",
+    hdrs = ["nb_absl_inlined_vector.h"],
+    compatible_with = [],
+    copts = ["-fexceptions"],
+    features = ["-use_header_modules"],
+    deps = [
+        "//third_party/nanobind",
+        "@com_google_absl//absl/container:inlined_vector",
+    ],
+)
+
+cc_library(
     name = "nb_absl_span",
     hdrs = ["nb_absl_span.h"],
     compatible_with = [],
@@ -1558,4 +1567,25 @@ xla_cc_test(
         "@local_tsl//tsl/profiler/protobuf:profiled_instructions_proto_cc",
         "@local_tsl//tsl/profiler/protobuf:profiled_instructions_proto_cc_impl",
     ],
+)
+
+py_strict_test(
+    name = "jax_jit_test",
+    srcs = ["jax_jit_test.py"],
+    main = "jax_jit_test.py",
+    python_version = "PY3",
+    srcs_version = "PY3",
+    tags = [
+        "no_oss",
+        "not_run:arm",
+    ],  # TODO(phawkins): This test passes, but requires --config=monolithic.
+    deps = [
+        ":xla_client",
+        ":xla_extension",
+        "//third_party/py/numpy",
+        "@absl_py//absl/flags",
+        "@absl_py//absl/logging",
+        "@absl_py//absl/testing:absltest",
+        "@absl_py//absl/testing:parameterized",
+    ] + xla_py_test_deps(),
 )

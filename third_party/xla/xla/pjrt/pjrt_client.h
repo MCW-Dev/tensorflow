@@ -31,6 +31,7 @@ limitations under the License.
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
@@ -50,11 +51,9 @@ limitations under the License.
 #include "xla/service/hlo_cost_analysis.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
-#include "xla/status.h"
-#include "xla/statusor.h"
+#include "xla/tsl/framework/allocator.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/framework/allocator.h"
 #include "tsl/platform/errors.h"
 
 // API notes:
@@ -290,7 +289,7 @@ struct PjRtCrossHostRecvDescriptors {
 // hang indefinitely.
 using PjRtCrossHostSendCancelNotifier = std::function<void(
     absl::string_view serialized_descriptor, absl::Status reason,
-    std::function<void(Status)> on_canceled)>;
+    std::function<void(absl::Status)> on_canceled)>;
 // State asynchronously returned by MakeCrossHostReceiveBuffers. "descriptors"
 // will match the returned PjRtBuffer objects 1:1. Specifically, each PjRtBuffer
 // returned by MakeCrossHostReceiveBuffers will have one
@@ -300,7 +299,7 @@ struct PjRtCrossHostRecvState {
   PjRtCrossHostSendCancelNotifier cancel_notifier;
 };
 using PjRtCrossHostRecvNotifier =
-    std::function<void(StatusOr<PjRtCrossHostRecvState>)>;
+    std::function<void(absl::StatusOr<PjRtCrossHostRecvState>)>;
 
 // A sized chunk of host data. The host data can be either in host layout or in
 // device layout, and it can be one part of the entire buffer. The PjRt
@@ -531,12 +530,7 @@ class PjRtClient {
       PjRtGlobalDeviceId global_device_id) const = 0;
 
   // Return an addressable PjRtDevice for a given
-  // PjRtDevice::local_hardware_id().
-  ABSL_DEPRECATED("Use LookupAddressableDevice(PjRtLocalDeviceId) instead")
-  virtual absl::StatusOr<PjRtDevice*> LookupAddressableDevice(
-      int local_hardware_id) const {
-    return LookupAddressableDevice(PjRtLocalDeviceId(local_hardware_id));
-  }
+  // PjRtDevice::local_device_id().
   virtual absl::StatusOr<PjRtDevice*> LookupAddressableDevice(
       PjRtLocalDeviceId local_device_id) const = 0;
 
@@ -649,7 +643,8 @@ class PjRtClient {
 
   // Creates buffer in the given device that carries an error future without
   // allocating memory.
-  ABSL_DEPRECATED("Use CreateErrorBuffer(Status, Shape, PjRtMemorySpace*)")
+  ABSL_DEPRECATED(
+      "Use CreateErrorBuffer(absl::Status, Shape, PjRtMemorySpace*)")
   virtual absl::StatusOr<std::unique_ptr<PjRtBuffer>> CreateErrorBuffer(
       absl::Status error, const Shape& shape, PjRtDevice* device) {
     auto default_memory_space = device->default_memory_space();

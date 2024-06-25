@@ -48,7 +48,6 @@ limitations under the License.
 #include "xla/service/gpu/runtime/nccl_clique_key.h"
 #include "xla/service/gpu/runtime/nccl_collective_thunk.h"
 #include "xla/service/gpu/runtime/thunk.h"
-#include "xla/status.h"
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/kernel.h"
@@ -782,9 +781,6 @@ class CublasLtCmd : public TracedCommandBufferCmd {
                       se::gpu::BlasLt::MatmulAlgorithm>
       matmul_algorithm_cache_;
 
-  se::gpu::BlasLt::MatmulPlan* plan_;
-  se::gpu::BlasLt::MatmulAlgorithm algorithm_;
-
   const GemmConfig gemm_config_;
   const se::gpu::BlasLt::Epilogue epilogue_;
   const int64_t algorithm_idx_;
@@ -906,6 +902,10 @@ class CustomCallCmd : public CommandBufferCmd {
 // 'from_stream_id' to the execution scope created from the
 // 'execution_stream_id', e.g. Async operator lowered to command buffer requires
 // a barrier from the launching stream to the async operator's execution stream.
+//
+// In other words, all future commands added to `execution_stream_id` are
+// guaranteed to begin executing only after all already-added commands in
+// `from_stream_id` have completed.
 //===----------------------------------------------------------------------===//
 
 class BarrierCmd : public CommandBufferCmd {
@@ -920,7 +920,7 @@ class BarrierCmd : public CommandBufferCmd {
   BufferUsageVector buffers() override;
 
  private:
-  ExecutionStreamId from_stream_id_;
+  const ExecutionStreamId from_stream_id_;
 };
 
 //===----------------------------------------------------------------------===//

@@ -136,7 +136,8 @@ def ExpandFloatOpsPass : Pass<"xla-gpu-expand-float-ops", "mlir::ModuleOp"> {
   }];
 
   let dependentDialects = [
-    "mlir::arith::ArithDialect", "mlir::mhlo::MhloDialect"
+    "mlir::arith::ArithDialect", "mlir::math::MathDialect",
+    "mlir::mhlo::MhloDialect"
   ];
 
   let options = [
@@ -185,6 +186,88 @@ def LowerToLLVMPass :
   ];
 
   let constructor = "CreateLowerToLLVMPass()";
+}
+
+def VectorizeLoadsAndStoresPass :
+   Pass<"xla-gpu-vectorize-loads-stores", "mlir::func::FuncOp"> {
+  let summary = "Vectorizes loads and stores.";
+
+  let description = [{
+    Rewrites tensor.extract and tensor.insert ops inside loops to their vector
+    equivalents (vector.transfer_read and vector.transfer_write + vector.extract
+    and vector.insert).
+  }];
+
+  let dependentDialects = [
+    "mlir::vector::VectorDialect",
+  ];
+
+  let constructor = "CreateVectorizeLoadsAndStoresPass()";
+}
+
+def OptimizeLoopsPass :
+   Pass<"xla-gpu-optimize-loops", "mlir::func::FuncOp"> {
+  let summary = "Unrolls and pipelines loops.";
+
+  let description = [{
+    Unrolls loops with a small trip count. Pipelines loops with a large trip
+    count.
+  }];
+
+  let dependentDialects = [
+    "mlir::vector::VectorDialect",
+    "xla::gpu::XlaGpuDialect",
+  ];
+
+  let constructor = "CreateOptimizeLoopsPass()";
+}
+
+def UnswitchLoopsPass :
+   Pass<"xla-gpu-unswitch-loops", "mlir::func::FuncOp"> {
+  let summary = "Swaps scf.if and scf.for.";
+
+  let description = [{
+      Extracts `scf.if` ops with conditions that are independent of the loop
+      variable from `scf.for` by doing the following rewrite:
+
+      Before:
+
+      %cond = some_cond() : i1
+      %results = scf.for {
+        %some_val = scf.if %cond  {
+        } else {
+        }
+        scf.yield %some_val
+      }
+
+      After:
+
+      %cond = some_cond() : i1
+      %results = scf.if %cond {
+         %results = scf.for {
+            %some_val = scf.if %true  {
+            } else {
+            }
+         }
+         yield %results
+      } else {
+         %results = scf.for {
+            %some_val = scf.if %false  {
+            } else {
+            }
+         }
+         yield %results
+      }
+
+      This only triggers if there is a single `scf.if` op in the loop body (and
+      nothing else).
+  }];
+
+  let dependentDialects = [
+    "mlir::func::FuncDialect", "mlir::scf::SCFDialect"
+  ];
+
+  let constructor = "CreateUnswitchLoopsPass()";
 }
 
 #endif  // XLA_SERVICE_GPU_FUSIONS_MLIR_PASSES_TD_

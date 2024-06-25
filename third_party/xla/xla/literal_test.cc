@@ -30,6 +30,7 @@ limitations under the License.
 #include "absl/base/casts.h"
 #include "absl/hash/hash.h"
 #include "absl/random/random.h"
+#include "absl/status/status.h"
 #include "absl/strings/match.h"
 #include "absl/types/span.h"
 #include "xla/array.h"
@@ -44,7 +45,6 @@ limitations under the License.
 #include "xla/shape.h"
 #include "xla/shape_tree.h"
 #include "xla/shape_util.h"
-#include "xla/status.h"
 #include "xla/test.h"
 #include "xla/types.h"
 #include "xla/util.h"
@@ -482,6 +482,25 @@ TEST_F(LiteralUtilTest, DifferentLayoutEquality) {
   rowmajor.Set<float>({1, 1}, 4.0);
 
   EXPECT_EQ(rowmajor, colmajor);
+}
+
+TEST_F(LiteralUtilTest, DifferentLayoutInEquality) {
+  // Test in equality with literals which have different layouts when layout
+  // sensitive equality is used.
+  Literal colmajor(ShapeUtil::MakeShapeWithDenseLayout(F32, {2, 2}, {0, 1}));
+  colmajor.Set<float>({0, 0}, 1.0);
+  colmajor.Set<float>({0, 1}, 2.0);
+  colmajor.Set<float>({1, 0}, 3.0);
+  colmajor.Set<float>({1, 1}, 4.0);
+
+  Literal rowmajor(ShapeUtil::MakeShapeWithDenseLayout(F32, {2, 2}, {1, 0}));
+  rowmajor.Set<float>({0, 0}, 1.0);
+  rowmajor.Set<float>({0, 1}, 2.0);
+  rowmajor.Set<float>({1, 0}, 3.0);
+  rowmajor.Set<float>({1, 1}, 4.0);
+
+  EXPECT_FALSE(rowmajor.Equal(colmajor, true));
+  EXPECT_FALSE(colmajor.Equal(rowmajor, true));
 }
 
 TEST_F(LiteralUtilTest, TupleEquality) {
@@ -1822,7 +1841,7 @@ TEST_F(LiteralUtilTest, BitcastConvertBetweenInvalidTypes) {
   absl::Status status =
       literal.BitcastConvert(ShapeUtil::ChangeElementType(literal.shape(), F64))
           .status();
-  EXPECT_NE(OkStatus(), status);
+  EXPECT_NE(absl::OkStatus(), status);
   EXPECT_TRUE(
       absl::StrContains(status.message(), "to a shape of different size"));
 }

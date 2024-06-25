@@ -53,7 +53,6 @@ limitations under the License.
 #include "xla/service/symbol_repository.h"
 #include "xla/service/xla_compile_result.pb.h"
 #include "xla/shape.h"
-#include "xla/status.h"
 #include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/stream_executor/stream_executor_memory_allocator.h"
@@ -353,8 +352,8 @@ absl::Status XlaCompileMain(const XlaCompileOptions& options) {
   }
   auto result = CompileExecutable(std::move(hlo_module), backend,
                                   std::move(cfg), compilation_result);
+  *compilation_result.mutable_status() = tsl::StatusToProto(result.status());
   if (!result.ok()) {
-    *compilation_result.mutable_status() = tsl::StatusToProto(result.status());
     return result.status();
   }
 

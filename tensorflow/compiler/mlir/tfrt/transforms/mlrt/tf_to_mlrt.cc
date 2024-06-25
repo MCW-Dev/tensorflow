@@ -113,7 +113,7 @@ class FuncOpSignatureConversion final
     });
 
     // Update the entry block
-    if (rewriter.applySignatureConversion(&func_op.getBody(),
+    if (rewriter.applySignatureConversion(&func_op.getBody().front(),
                                           converted_signature,
                                           &type_converter_) == nullptr) {
       return mlir::failure();
@@ -373,7 +373,7 @@ class IfrtRestoreVariableOpConversion
         op.getLoc(), adaptor.getOperands()[0], adaptor.getOperands()[1],
         adaptor.getOperands()[2],
         adaptor.getOperands().slice(3, adaptor.getOperands().size() - 3),
-        op.getRestoredDtypes());
+        op.getRestoredDtypes(), op.getTruncateInCast());
     rewriter.replaceOp(op, new_op);
 
     return mlir::success();
