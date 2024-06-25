@@ -42,6 +42,7 @@ limitations under the License.
 #include "absl/algorithm/container.h"
 #include "absl/types/span.h"
 #include "flatbuffers/flatbuffers.h"  // from @flatbuffers
+#include "tensorflow/core/platform/bfloat16.h"
 #include "tensorflow/lite/core/api/op_resolver.h"
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/core/interpreter.h"
@@ -106,6 +107,11 @@ inline std::vector<float> Dequantize(const std::vector<T>& data, float scale,
 template <>
 constexpr TfLiteType typeToTfLiteType<Eigen::half>() {
   return kTfLiteFloat16;
+}
+
+template <>
+constexpr TfLiteType typeToTfLiteType<tensorflow::bfloat16>() {
+  return kTfLiteBFloat16;
 }
 
 // A test model that contains a single operator. All operator inputs and
