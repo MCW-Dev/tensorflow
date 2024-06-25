@@ -654,6 +654,13 @@ typedef struct {
   size_t attributes_size;
 } TfLiteStablehloCompositeParams;
 
+typedef struct {
+  // See the stablehlo spec for the explanation of the attributes:
+  // https://github.com/openxla/stablehlo/blob/main/docs/spec.md#reduce_precision
+  int32_t exponent_bits;
+  int32_t mantissa_bits;
+} TfLiteStablehloReducePrecisionParams;
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
