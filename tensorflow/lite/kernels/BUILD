@@ -772,6 +772,7 @@ BUILTIN_KERNEL_SRCS = [
     "stablehlo_reduce_window.cc",
     "stablehlo_min_max.cc",
     "stablehlo_scatter.cc",
+    "stablehlo_reduce_precision.cc",
     "sign.cc",
     "skip_gram.cc",
     "slice.cc",
@@ -892,6 +893,7 @@ cc_library(
         "//tensorflow/lite:array",
         "//tensorflow/lite:builtin_ops",
         "//tensorflow/lite:cc_api_stable",
+        "//tensorflow/core/platform:bfloat16",
         "@local_tsl//tsl/lib/random:philox_random",
         "@local_tsl//tsl/lib/random:random_distributions_utils",
         "//tensorflow/lite/core/c:c_api_types",
@@ -1419,6 +1421,19 @@ cc_test(
         "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
+    ],
+)
+cc_test(
+    name = "stablehlo_reduce_precision_test",
+    size = "small",
+    srcs = ["stablehlo_reduce_precision_test.cc"],
+    deps = [
+        ":test_main",
+        ":test_util",
+        "//tensorflow/lite/core/c:common",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
