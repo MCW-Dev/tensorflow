@@ -21,7 +21,7 @@ limitations under the License.
 #include <memory>
 
 #include "flatbuffers/flatbuffers.h"  // from @flatbuffers
-#include "flatbuffers/vector.h"  // from @flatbuffers
+#include "flatbuffers/vector.h"       // from @flatbuffers
 #include "tensorflow/lite/core/api/error_reporter.h"
 #include "tensorflow/lite/core/c/builtin_op_data.h"
 #include "tensorflow/lite/core/c/common.h"
@@ -925,10 +925,13 @@ TfLiteStatus ParseOpDataTfLite(const Operator* op, BuiltinOperator op_type,
       return ParseStablehloComposite(op, error_reporter, allocator,
                                      builtin_data);
     }
+    case BuiltinOperator_STABLEHLO_CONVOLUTION: {
+      return ParseStablehloConvolution(op, error_reporter, allocator,
+                                       builtin_data);
+    }
     // TODO: skip param parsing for now since ops below don't have kernels
     case BuiltinOperator_STABLEHLO_SLICE:
     case BuiltinOperator_STABLEHLO_BROADCAST_IN_DIM:
-    case BuiltinOperator_STABLEHLO_CONVOLUTION:
     case BuiltinOperator_STABLEHLO_LOGISTIC:
     case BuiltinOperator_STABLEHLO_ADD:
     case BuiltinOperator_STABLEHLO_DIVIDE:
@@ -2408,6 +2411,84 @@ TfLiteStatus ParseStablehloComposite(const Operator* op,
       error_reporter,
       "Could not get 'stablehlo.composite' operation parameters.");
   return kTfLiteError;
+}
+
+TfLiteStatus ParseStablehloConvolution(const Operator* op,
+                                       ErrorReporter* error_reporter,
+                                       BuiltinDataAllocator* allocator,
+                                       void** builtin_data) {
+  CheckParsePointerParams(op, error_reporter, allocator, builtin_data);
+
+  SafeBuiltinDataAllocator safe_allocator(allocator);
+  auto params = safe_allocator.Allocate<TfLiteStablehloConvolutionParams>();
+  const StablehloConvolutionOptions* schema_params =
+      op->builtin_options_2_as_StablehloConvolutionOptions();
+
+  if (!schema_params) {
+    TF_LITE_REPORT_ERROR(
+        error_reporter,
+        "Could not get'stablehlo.convolution' operation parameters.");
+    return kTfLiteError;
+  }
+  TF_LITE_ENSURE_STATUS(FlatBufferIntVectorToArray<int64_t>(
+      schema_params->window_strides()->size() * sizeof(int64_t),
+      schema_params->window_strides(), params->window_strides, error_reporter,
+      "stablehlo_convolution"));
+  params->num_window_strides = schema_params->window_strides()->size();
+  TF_LITE_ENSURE_STATUS(FlatBufferIntVectorToArray<int64_t>(
+      schema_params->padding()->size() * sizeof(int64_t),
+      schema_params->padding(), params->padding, error_reporter,
+      "stablehlo_convolution"));
+  params->num_padding = schema_params->padding()->size();
+  TF_LITE_ENSURE_STATUS(FlatBufferIntVectorToArray<int64_t>(
+      schema_params->lhs_dilation()->size() * sizeof(int64_t),
+      schema_params->lhs_dilation(), params->lhs_dilation, error_reporter,
+      "stablehlo_convolution"));
+  params->num_lhs_dilation = schema_params->lhs_dilation()->size();
+  TF_LITE_ENSURE_STATUS(FlatBufferIntVectorToArray<int64_t>(
+      schema_params->rhs_dilation()->size() * sizeof(int64_t),
+      schema_params->rhs_dilation(), params->rhs_dilation, error_reporter,
+      "stablehlo_convolution"));
+  params->num_rhs_dilation = schema_params->rhs_dilation()->size();
+  TF_LITE_ENSURE_STATUS(FlatBufferIntVectorToArray<int64_t>(
+      schema_params->input_spatial_dimensions()->size() * sizeof(int64_t),
+      schema_params->input_spatial_dimensions(),
+      params->input_spatial_dimensions, error_reporter,
+      "stablehlo_convolution"));
+  params->num_input_spatial_dimensions =
+      schema_params->input_spatial_dimensions()->size();
+  TF_LITE_ENSURE_STATUS(FlatBufferIntVectorToArray<int64_t>(
+      schema_params->kernel_spatial_dimensions()->size() * sizeof(int64_t),
+      schema_params->kernel_spatial_dimensions(),
+      params->kernel_spatial_dimensions, error_reporter,
+      "stablehlo_convolution"));
+  params->num_kernel_spatial_dimensions =
+      schema_params->kernel_spatial_dimensions()->size();
+  TF_LITE_ENSURE_STATUS(FlatBufferIntVectorToArray<int64_t>(
+      schema_params->output_spatial_dimensions()->size() * sizeof(int64_t),
+      schema_params->output_spatial_dimensions(),
+      params->output_spatial_dimensions, error_reporter,
+      "stablehlo_convolution"));
+  params->num_output_spatial_dimensions =
+      schema_params->output_spatial_dimensions()->size();
+  TF_LITE_ENSURE_STATUS(FlatBufferIntVectorToArray<uint32_t>(
+      schema_params->precision_config()->size() * sizeof(uint32_t),
+      schema_params->precision_config(), params->precision_config,
+      error_reporter, "stablehlo_convolution"));
+  params->num_precision_config = schema_params->precision_config()->size();
+  params->input_batch_dimension = schema_params->input_batch_dimension();
+  params->input_feature_dimension = schema_params->input_feature_dimension();
+  params->kernel_input_feature_dimension =
+      schema_params->kernel_input_feature_dimension();
+  params->kernel_output_feature_dimension =
+      schema_params->kernel_output_feature_dimension();
+  params->output_batch_dimension = schema_params->output_batch_dimension();
+  params->output_feature_dimension = schema_params->output_feature_dimension();
+  params->batch_group_count = schema_params->batch_group_count();
+  params->feature_group_count = schema_params->feature_group_count();
+
+  *builtin_data = params.release();
+  return kTfLiteOk;
 }
 
 // We have this parse function instead of directly returning kTfLiteOk from the

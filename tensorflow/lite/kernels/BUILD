@@ -799,6 +799,7 @@ BUILTIN_KERNEL_SRCS = [
     "zeros_like.cc",
     "rfft2d.cc",
     "rng_bit_generator.cc",
+    "stablehlo_convolution.cc"
 ]
 
 VARIABLE_KERNEL_SRCS = [
@@ -887,6 +888,7 @@ cc_library(
         ":variable_op_kernels",
         "@fft2d",
         "@ruy//ruy/profiler:instrumentation",
+        "//tensorflow/core/platform:bfloat16",
         "//tensorflow/lite/c:c_api_types",
         "//tensorflow/lite/c:common",
         "//tensorflow/lite:array",
@@ -1419,6 +1421,21 @@ cc_test(
         "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "stablehlo_convolution_test",
+    srcs = ["stablehlo_convolution_test.cc"],
+    tags = ["tflite_nnapi"],
+    deps = [
+        ":test_main",
+        ":test_util",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/c:common",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_googletest//:gtest",
+        "@flatbuffers",
     ],
 )
 
