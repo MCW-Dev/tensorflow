@@ -38,8 +38,16 @@ struct ConvolutionData {
   enum { kInputlhs, kInputrhs };
   enum { kOutput };
   int scratch_tensor_index;
+  int64_t lhs_transpose_permutations[kMaxDims];
+  int64_t rhs_transpose_permutations[kMaxDims];
+  int64_t output_transpose_permutations[kMaxDims];
   int64_t rank;
   int64_t output_shape[kMaxDims];
+  int64_t pad_input_shape[kMaxDims];
+  int64_t pad_input_strides[kMaxDims];
+  int64_t pad_output_strides[kMaxDims];
+  int64_t pad_input_offset;
+  int64_t pad_output_offset;
 };
 
 int64_t DivNegRoundAwayOrZero(int64_t num, int64_t denum) {
@@ -276,27 +284,241 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
       *reinterpret_cast<ConvolutionData*>(node->user_data);
 
   TfLiteIntArrayFree(node->temporaries);
-  node->temporaries = TfLiteIntArrayCreate(2);
+  node->temporaries = TfLiteIntArrayCreate(8);
+
+  // lhs transpose preapre
+  convolution_data.lhs_transpose_permutations[0] =
+      convolution_params.input_batch_dimension;
+  convolution_data.lhs_transpose_permutations[1] =
+      convolution_params.input_feature_dimension;
+  for (int i = 0; i < convolution_data.rank - 2; ++i) {
+    convolution_data.lhs_transpose_permutations[i + 2] =
+        convolution_params.input_spatial_dimensions[i];
+  }
+
+  node->temporaries->data[0] = convolution_data.scratch_tensor_index;
+  TfLiteTensor* lhs_transpose;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/0, &lhs_transpose));
+  TfLiteIntArray* lhs_transpose_shape =
+      TfLiteIntArrayCreate(convolution_data.rank);
+  for (int i = 0; i < convolution_data.rank; ++i) {
+    lhs_transpose_shape->data[i] =
+        lhs->dims->data[convolution_data.lhs_transpose_permutations[i]];
+  }
+
+  lhs_transpose->type = lhs->type;
+  lhs_transpose->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, lhs_transpose,
+                                                   lhs_transpose_shape));
+
+  // rhs transpose prepare
+  convolution_data.rhs_transpose_permutations[0] =
+      convolution_params.kernel_input_feature_dimension;
+  for (int i = 0; i < convolution_data.rank - 2; ++i) {
+    convolution_data.rhs_transpose_permutations[i + 1] =
+        convolution_params.kernel_spatial_dimensions[i];
+  }
+  convolution_data.rhs_transpose_permutations[convolution_data.rank - 1] =
+      convolution_params.kernel_output_feature_dimension;
+
+  node->temporaries->data[1] = convolution_data.scratch_tensor_index + 1;
+  TfLiteTensor* rhs_transpose;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/1, &rhs_transpose));
+  TfLiteIntArray* rhs_transposed_shape =
+      TfLiteIntArrayCreate(convolution_data.rank);
+  for (int i = 0; i < convolution_data.rank; ++i) {
+    rhs_transposed_shape->data[i] =
+        rhs->dims->data[convolution_data.rhs_transpose_permutations[i]];
+  }
+
+  rhs_transpose->type = rhs->type;
+  rhs_transpose->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, rhs_transpose,
+                                                   rhs_transposed_shape));
+
+  // output transpose preapre
+  convolution_data.output_transpose_permutations[convolution_params
+                                                      .output_batch_dimension] =
+      0;
+  convolution_data.output_transpose_permutations
+      [convolution_params.output_feature_dimension] = 1;
+  for (int i = 0; i < convolution_data.rank - 2; ++i) {
+    convolution_data.output_transpose_permutations
+        [convolution_params.output_spatial_dimensions[i]] = i + 2;
+  }
+
+  node->temporaries->data[2] = convolution_data.scratch_tensor_index + 2;
+  TfLiteTensor* output_transpose;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/2, &output_transpose));
+  TfLiteIntArray* output_transposed_shape =
+      TfLiteIntArrayCreate(convolution_data.rank);
+  output_transposed_shape->data[0] =
+      output->dims->data[convolution_params.output_batch_dimension];
+  output_transposed_shape->data[1] =
+      output->dims->data[convolution_params.output_feature_dimension];
+  for (int i = 0; i < convolution_data.rank - 2; ++i) {
+    output_transposed_shape->data[i + 2] =
+        output->dims->data[convolution_params.output_spatial_dimensions[i]];
+  }
+
+  output_transpose->type = rhs->type;
+  output_transpose->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, output_transpose,
+                                                   output_transposed_shape));
+
+  // pad prepare
+  convolution_data.pad_input_offset = 0;
+  convolution_data.pad_output_offset = 0;
+  int64_t lhs_padded_spatials[convolution_data.rank - 2];
+  for (int i = convolution_data.rank - 1; i > 1; --i) {
+    lhs_padded_spatials[i - 2] = lhs_transpose->dims->data[i] +
+                                 (convolution_params.lhs_dilation[i - 2] - 1) *
+                                     (lhs_transpose->dims->data[i] - 1) +
+                                 convolution_params.padding[2 * (i - 2)] +
+                                 convolution_params.padding[(2 * (i - 2)) + 1];
+  }
+
+  node->temporaries->data[3] = convolution_data.scratch_tensor_index + 3;
+  TfLiteTensor* lhs_padded;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/3, &lhs_padded));
+  TfLiteIntArray* lhs_padded_shape =
+      TfLiteIntArrayCreate(convolution_data.rank);
+  int64_t pad_output_shape[kMaxDims];
+  pad_output_shape[0] = lhs_padded_shape->data[0] =
+      lhs_transpose->dims->data[0];
+  pad_output_shape[1] = lhs_padded_shape->data[1] =
+      lhs_transpose->dims->data[1];
+  for (int i = 0; i < convolution_data.rank - 2; ++i) {
+    pad_output_shape[i + 2] = lhs_padded_shape->data[i + 2] =
+        lhs_padded_spatials[i];
+  }
+
+  lhs_padded->type = rhs->type;
+  lhs_padded->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(
+      context, context->ResizeTensor(context, lhs_padded, lhs_padded_shape));
+
+  int64_t edge_pad_high[kMaxDims];
+  int64_t edge_pad_low[kMaxDims];
+  int64_t interior_pad[kMaxDims];
+  edge_pad_high[0] = edge_pad_low[0] = interior_pad[0] = 0;
+  edge_pad_high[1] = edge_pad_low[1] = interior_pad[1] = 0;
+  for (int64_t i = 2; i < convolution_data.rank; ++i) {
+    edge_pad_low[i] = convolution_params.padding[2 * (i - 2)];
+    edge_pad_high[i] = convolution_params.padding[2 * (i - 2) + 1];
+    interior_pad[i] = convolution_params.lhs_dilation[i - 2] - 1;
+  }
+  int64_t pad_rank = convolution_data.rank;
+  int64_t pad_output_dimension_sizes[kMaxDims];
+  pad_output_dimension_sizes[pad_rank - 1] = 1;
+  convolution_data.pad_output_strides[pad_rank - 1] =
+      interior_pad[pad_rank - 1] + 1;
+  for (int64_t i = pad_rank - 2; i >= 0; --i) {
+    pad_output_dimension_sizes[i] =
+        pad_output_shape[i + 1] * pad_output_dimension_sizes[i + 1];
+    convolution_data.pad_output_strides[i] =
+        pad_output_dimension_sizes[i] * (interior_pad[i] + 1);
+  }
+  for (int64_t i = 0; i < pad_rank; ++i) {
+    convolution_data.pad_output_offset +=
+        std::max<int64_t>(edge_pad_low[i], 0) * pad_output_dimension_sizes[i];
+  }
+  convolution_data.pad_input_strides[pad_rank - 1] = 1;
+  for (int64_t i = pad_rank - 1; i >= 1; --i) {
+    convolution_data.pad_input_strides[i - 1] =
+        lhs_transpose->dims->data[i] * convolution_data.pad_input_strides[i];
+  }
+  for (int64_t i = 0; i < pad_rank; ++i) {
+    convolution_data.pad_input_shape[i] =
+        lhs_transpose->dims->data[i] +
+        DivNegRoundAwayOrZero(edge_pad_low[i], interior_pad[i] + 1) +
+        DivNegRoundAwayOrZero(edge_pad_high[i], interior_pad[i] + 1);
+  }
+  for (int64_t i = 0; i < pad_rank; ++i) {
+    convolution_data.pad_input_offset -=
+        DivNegRoundAwayOrZero(edge_pad_low[i], interior_pad[i] + 1) *
+        convolution_data.pad_input_strides[i];
+    if (edge_pad_low[i] < 0) {
+      int64_t tmp_offset =
+          ((interior_pad[i] + 1 + edge_pad_low[i]) % (interior_pad[i] + 1));
+      if (tmp_offset < 0) {
+        tmp_offset += interior_pad[i] + 1;
+      }
+      convolution_data.pad_output_offset +=
+          tmp_offset * pad_output_dimension_sizes[i];
+    }
+  }
+  // padding prepare end
+
+  // slice prepare
+  int64_t num_slices = convolution_params.batch_group_count *
+                       convolution_params.feature_group_count;
+  int64_t slice_dimension = convolution_data.rank - 1;
+
+  node->temporaries->data[4] = convolution_data.scratch_tensor_index + 4;
+  TfLiteTensor* rhs_slice;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/4, &rhs_slice));
+  TfLiteIntArray* rhs_slice_shape =
+      TfLiteIntArrayCreate(convolution_data.rank);
+  for (size_t i = 0; i < convolution_data.rank; ++i) {
+    if (i == slice_dimension) {
+      rhs_slice_shape->data[i] = (rhs_transpose->dims->data[i] / num_slices);
+    } else {
+      rhs_slice_shape->data[i] = rhs_transpose->dims->data[i];
+    }
+  }
+  rhs_slice->type = rhs->type;
+  rhs_slice->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(context,
+                    context->ResizeTensor(context, rhs_slice, rhs_slice_shape));
+
+  slice_dimension = 0;
+  if (convolution_params.feature_group_count > 1) {
+    slice_dimension = 1;
+  }
+  node->temporaries->data[5] = convolution_data.scratch_tensor_index + 5;
+  TfLiteTensor* lhs_slice;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/5, &lhs_slice));
+  TfLiteIntArray* lhs_slice_shape =
+      TfLiteIntArrayCreate(convolution_data.rank);
+  for (size_t i = 0; i < convolution_data.rank; ++i) {
+    if (i == slice_dimension) {
+      lhs_slice_shape->data[i] = (lhs_padded->dims->data[i] / num_slices);
+    } else {
+      lhs_slice_shape->data[i] = lhs_padded->dims->data[i];
+    }
+  }
+  lhs_slice->type = rhs->type;
+  lhs_slice->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(context,
+                    context->ResizeTensor(context, lhs_slice, lhs_slice_shape));
+  // split prepare end
 
   // matrix multiplication prepare
-  size_t rhs_tensor_size = 1;
+  size_t rhs_slice_tensor_size = 1;
   for (size_t i = 0; i < convolution_data.rank - 1; ++i) {
-    rhs_tensor_size *= rhs->dims->data[i];
+    rhs_slice_tensor_size *= rhs_slice->dims->data[i];
   }
 
   TfLiteIntArray* lhs_new_shape = TfLiteIntArrayCreate(2);
   size_t output_spatial_size = 1;
-  lhs_new_shape->data[1] = rhs_tensor_size;
+  lhs_new_shape->data[1] = rhs_slice_tensor_size;
   for (size_t i = 0; i < convolution_data.rank - 2; ++i) {
     output_spatial_size *=
         output->dims->data[convolution_params.output_spatial_dimensions[i]];
   }
   lhs_new_shape->data[0] = output_spatial_size;
 
-  node->temporaries->data[0] = convolution_data.scratch_tensor_index;
+  node->temporaries->data[6] = convolution_data.scratch_tensor_index + 6;
   TfLiteTensor* lhs_matrix;
   TF_LITE_ENSURE_OK(context,
-                    GetTemporarySafe(context, node, /*index=*/0, &lhs_matrix));
+                    GetTemporarySafe(context, node, /*index=*/6, &lhs_matrix));
   lhs_matrix->type = rhs->type;
   lhs_matrix->allocation_type = kTfLiteArenaRw;
   TF_LITE_ENSURE_OK(context,
@@ -304,12 +526,13 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
 
   TfLiteIntArray* output_matrix_shape = TfLiteIntArrayCreate(2);
   output_matrix_shape->data[0] = lhs_new_shape->data[0];
-  output_matrix_shape->data[1] = rhs->dims->data[convolution_data.rank - 1];
+  output_matrix_shape->data[1] =
+      rhs_slice->dims->data[convolution_data.rank - 1];
 
-  node->temporaries->data[1] = convolution_data.scratch_tensor_index + 1;
+  node->temporaries->data[7] = convolution_data.scratch_tensor_index + 7;
   TfLiteTensor* output_matrix;
   TF_LITE_ENSURE_OK(
-      context, GetTemporarySafe(context, node, /*index=*/1, &output_matrix));
+      context, GetTemporarySafe(context, node, /*index=*/7, &output_matrix));
   output_matrix->type = rhs->type;
   output_matrix->allocation_type = kTfLiteArenaRw;
   TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, output_matrix,
@@ -320,7 +543,7 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
 
 void* Init(TfLiteContext* context, const char* options, size_t options_len) {
   ConvolutionData* convolution_data = new ConvolutionData();
-  context->AddTensors(context, 2, &convolution_data->scratch_tensor_index);
+  context->AddTensors(context, 8, &convolution_data->scratch_tensor_index);
   return convolution_data;
 }
 
@@ -373,8 +596,8 @@ TfLiteStatus ConvolutionImpl(TfLiteContext* context, TfLiteNode* node,
     }
   }
 
-  TfLiteTensor* lhs_matrix = GetTemporary(context, node, 0);
-  TfLiteTensor* output_matrix = GetTemporary(context, node, 1);
+  TfLiteTensor* lhs_matrix = GetTemporary(context, node, 6);
+  TfLiteTensor* output_matrix = GetTemporary(context, node, 7);
 
   DataType* lhs_matrix_buffer = GetTensorData<DataType>(lhs_matrix);
   DataType* output_matrix_buffer = GetTensorData<DataType>(output_matrix);
@@ -471,9 +694,115 @@ template <typename DataType>
 void EvalWithType(TfLiteContext* context, TfLiteNode* node,
                   const TfLiteTensor* lhs, const TfLiteTensor* rhs,
                   TfLiteTensor* output) {
+  ConvolutionData& convolution_data =
+      *reinterpret_cast<ConvolutionData*>(node->user_data);
+  const auto& convolution_params =
+      *reinterpret_cast<TfLiteStablehloConvolutionParams*>(node->builtin_data);
+
+  // Transpose
+  TfLiteTensor* lhs_transpose = GetTemporary(context, node, 0);
+  TfLiteTensor* rhs_transpose = GetTemporary(context, node, 1);
+  TfLiteTensor* output_transpose = GetTemporary(context, node, 2);
+
+  RuntimeShape lhs_transpose_shape(GetTensorShape(lhs_transpose));
+  RuntimeShape lhs_shape(GetTensorShape(lhs));
+  TransposeParams lhs_params;
+  lhs_params.perm_count = convolution_data.rank;
+  for (int i = 0; i < NumDimensions(lhs); ++i) {
+    lhs_params.perm[i] = convolution_data.lhs_transpose_permutations[i];
+  }
+  optimized_ops::Transpose(lhs_params, lhs_shape, GetTensorData<DataType>(lhs),
+                           lhs_transpose_shape,
+                           GetTensorData<DataType>(lhs_transpose));
+
+  RuntimeShape rhs_transposed_shape(GetTensorShape(rhs_transpose));
+  RuntimeShape rhs_shape(GetTensorShape(rhs));
+  TransposeParams rhs_params;
+  rhs_params.perm_count = convolution_data.rank;
+  for (int i = 0; i < NumDimensions(rhs); ++i) {
+    rhs_params.perm[i] = convolution_data.rhs_transpose_permutations[i];
+  }
+  optimized_ops::Transpose(rhs_params, rhs_shape, GetTensorData<DataType>(rhs),
+                           rhs_transposed_shape,
+                           GetTensorData<DataType>(rhs_transpose));
+
+  RuntimeShape output_transposed_shape(GetTensorShape(output_transpose));
+  RuntimeShape output_shape(GetTensorShape(output));
+  TransposeParams output_params;
+  output_params.perm_count = convolution_data.rank;
+  for (int i = 0; i < convolution_data.rank; ++i) {
+    output_params.perm[i] = convolution_data.output_transpose_permutations[i];
+  }
+
+  // pad
+  TfLiteTensor* lhs_padded = GetTemporary(context, node, 3);
+
+  int lhs_pad_size = 1;
+  for (int i = 0; i < convolution_data.rank; ++i)
+    lhs_pad_size *= lhs_padded->dims->data[i];
+  memset(GetTensorData<DataType>(lhs_padded), 0,
+         lhs_pad_size * sizeof(DataType));
+
+  optimized_ops::StridedCopy<DataType>(
+      convolution_data.rank,
+      GetTensorData<DataType>(lhs) + convolution_data.pad_input_offset,
+      convolution_data.pad_input_shape, convolution_data.pad_input_strides,
+      GetTensorData<DataType>(lhs_padded) + convolution_data.pad_output_offset,
+      convolution_data.pad_output_strides, sizeof(DataType),
+      /*depth=*/0);
+
+  // slice
+  TfLiteTensor* lhs_slice = GetTemporary(context, node, 5);
+  TfLiteTensor* rhs_slice = GetTemporary(context, node, 4);
+  RuntimeShape lhs_padded_shape(GetTensorShape(lhs_padded));
+  RuntimeShape lhs_slice_shape(GetTensorShape(lhs_slice));
+  RuntimeShape rhs_slice_shape(GetTensorShape(rhs_slice));
+  SliceParams slice_params;
+  slice_params.begin_count = convolution_data.rank;
+  slice_params.size_count = convolution_data.rank;
+  memset(slice_params.begin, 0, sizeof(slice_params.begin));
+  int32_t lhs_size[convolution_data.rank];
+  int32_t rhs_size[convolution_data.rank];
+  for (int i = 0; i < convolution_data.rank; ++i) {
+    lhs_size[i] = lhs_slice->dims->data[i];
+    rhs_size[i] = rhs_slice->dims->data[i];
+  }
+
   int output_channel = 0;
-  TF_LITE_ENSURE_OK(context, ConvolutionImpl<DataType>(context, node, lhs, rhs,
-                                                       output, output_channel));
+
+  for (int i = 0; i < convolution_params.batch_group_count *
+                          convolution_params.feature_group_count;
+       ++i) {
+    // slicing lhs
+    if (convolution_params.batch_group_count != 1) {
+      slice_params.begin[0] = i * lhs_slice->dims->data[0];
+    } else if (convolution_params.feature_group_count != 1) {
+      slice_params.begin[1] = i * lhs_slice->dims->data[1];
+    }
+    slice_params.begin[convolution_data.rank - 1] = 0;
+    std::copy(lhs_size, lhs_size + convolution_data.rank, slice_params.size);
+    optimized_ops::Slice<DataType>(slice_params, lhs_padded_shape, lhs_padded,
+                                   lhs_slice_shape, lhs_slice);
+
+    // slicing rhs
+    if (convolution_params.batch_group_count != 1) {
+      slice_params.begin[0] = 0;
+    } else if (convolution_params.feature_group_count != 1) {
+      slice_params.begin[1] = 0;
+    }
+    slice_params.begin[convolution_data.rank - 1] =
+        i * rhs_slice->dims->data[convolution_data.rank - 1];
+    std::copy(rhs_size, rhs_size + convolution_data.rank, slice_params.size);
+    optimized_ops::Slice<DataType>(slice_params, GetTensorShape(rhs_transpose),
+                                   rhs_transpose, rhs_slice_shape, rhs_slice);
+
+    TF_LITE_ENSURE_OK(
+        context, ConvolutionImpl<DataType>(context, node, lhs_slice, rhs_slice,
+                                           output_transpose, output_channel));
+  }
+  optimized_ops::Transpose(output_params, output_transposed_shape,
+                           GetTensorData<DataType>(output_transpose),
+                           output_shape, GetTensorData<DataType>(output));
 }
 
 TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {

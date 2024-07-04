@@ -8337,6 +8337,27 @@ inline void AddN(const RuntimeShape& input_shape, const size_t num_inputs,
   }
 }
 
+template <typename T>
+void StridedCopy(const int rank, const T* input,
+                 const int64_t* input_shape, const int64_t* input_strides,
+                 T* output, const int64_t* output_strides,
+                 const int64_t element_size, const int depth) {
+  if (depth + 1 == rank) {
+    for (int64_t i = 0; i < input_shape[depth]; ++i) {
+      std::memcpy(output, input, element_size);
+      input += input_strides[depth];
+      output += output_strides[depth];
+    }
+  } else {
+    for (int64_t i = 0; i < input_shape[depth]; ++i) {
+      StridedCopy<T>(rank, input, input_shape, input_strides, output,
+                            output_strides, element_size, depth + 1);
+      input += input_strides[depth];
+      output += output_strides[depth];
+    }
+  }
+}
+
 }  // namespace optimized_ops
 }  // namespace tflite
 

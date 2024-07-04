@@ -269,6 +269,120 @@ TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork1) {
   EXPECT_THAT(model.GetOutput<int64_t>(), ElementsAreArray(expected_values));
 }
 
+TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork2) {
+  TfLiteStablehloConvolutionParams params = {
+      {1},     // window_strides
+      1,       // num_window_strides
+      {0, 0},  // padding
+      2,       // num_padding
+      {1},     // lhs_dilation
+      1,       // num_lhs_dilation
+      {1},     // rhs_dilation
+      1,       // num_rhs_dilation
+      0,       // input_batch_dimension
+      2,       // input_feature_dimension
+      {1},     // input_spatial_dimensions
+      1,       // num_input_spatial_dimensions
+      1,       // kernel_input_feature_dimension
+      0,       // kernel_output_feature_dimension
+      {2},     // kernel_spatial_dimenstions
+      1,       // nun_kernel_spatial_dimensions
+      0,       // output_batch_dimension
+      1,       // output_feature_dimension
+      {2},     // output_spatial_dimensions
+      1,       // num_output_spatial_dimensions
+      1,       // feature_group_count
+      1,       // batch_group_count
+      {tflite::StablehloPrecisionConfig::StablehloPrecisionConfig_DEFAULT,
+       tflite::StablehloPrecisionConfig::
+           StablehloPrecisionConfig_DEFAULT},  // precision config
+  };
+  StablehloConvolutionOpModel model({TensorType_INT64, {1, 10, 1}},
+                                    {TensorType_INT64, {1, 1, 1}}, params);
+  model.SetLhs<int64_t>({1, 2, 3, 4, 5, 6, 7, 9, 4, 2});
+  model.SetRhs<int64_t>({5});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<int64_t> expected_values = {5,  10, 15, 20, 25,
+                                          30, 35, 45, 20, 10};
+  EXPECT_THAT(model.GetOutput<int64_t>(), ElementsAreArray(expected_values));
+}
+
+TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork3) {
+  TfLiteStablehloConvolutionParams params = {
+      {3, 4},        // window_strides
+      2,             // num_window_strides
+      {1, 1, 1, 1},  // padding
+      4,             // num_padding
+      {1, 1},        // lhs_dilation
+      2,             // num_lhs_dilation
+      {1, 1},        // rhs_dilation
+      2,             // num_rhs_dilation
+      0,             // input_batch_dimension
+      1,             // input_feature_dimension
+      {2, 3},        // input_spatial_dimensions
+      2,             // num_input_spatial_dimensions
+      1,             // kernel_input_feature_dimension
+      0,             // kernel_output_feature_dimension
+      {2, 3},        // kernel_spatial_dimenstions
+      2,             // nun_kernel_spatial_dimensions
+      0,             // output_batch_dimension
+      1,             // output_feature_dimension
+      {2, 3},        // output_spatial_dimensions
+      2,             // num_output_spatial_dimensions
+      1,             // feature_group_count
+      1,             // batch_group_count
+      {tflite::StablehloPrecisionConfig::StablehloPrecisionConfig_DEFAULT,
+       tflite::StablehloPrecisionConfig::
+           StablehloPrecisionConfig_DEFAULT},  // precision config
+  };
+  StablehloConvolutionOpModel model({TensorType_INT64, {1, 1, 4, 5}},
+                                    {TensorType_INT64, {1, 1, 3, 3}}, params);
+  model.SetLhs<int64_t>(
+      {1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5});
+  model.SetRhs<int64_t>({1, 2, 3, 1, 2, 3, 1, 2, 3});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<int64_t> expected_values = {16, 28, 16, 28};
+  EXPECT_THAT(model.GetOutput<int64_t>(), ElementsAreArray(expected_values));
+}
+
+TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork4) {
+  TfLiteStablehloConvolutionParams params = {
+      {4, 4},        // window_strides
+      2,             // num_window_strides
+      {0, 0, 0, 0},  // padding
+      4,             // num_padding
+      {2, 2},        // lhs_dilation
+      2,             // num_lhs_dilation
+      {1, 1},        // rhs_dilation
+      2,             // num_rhs_dilation
+      0,             // input_batch_dimension
+      1,             // input_feature_dimension
+      {2, 3},        // input_spatial_dimensions
+      2,             // num_input_spatial_dimensions
+      1,             // kernel_input_feature_dimension
+      0,             // kernel_output_feature_dimension
+      {2, 3},        // kernel_spatial_dimenstions
+      2,             // nun_kernel_spatial_dimensions
+      0,             // output_batch_dimension
+      1,             // output_feature_dimension
+      {2, 3},        // output_spatial_dimensions
+      2,             // num_output_spatial_dimensions
+      2,             // feature_group_count
+      1,             // batch_group_count
+      {tflite::StablehloPrecisionConfig::StablehloPrecisionConfig_DEFAULT,
+       tflite::StablehloPrecisionConfig::
+           StablehloPrecisionConfig_DEFAULT},  // precision config
+  };
+  StablehloConvolutionOpModel model({TensorType_INT64, {1, 4, 4, 1}},
+                                    {TensorType_INT64, {4, 2, 1, 1}}, params);
+  model.SetLhs<int64_t>(
+      {1, 3, 10, 12, 2, 4, 11, 13, 5, 7, 14, 16, 6, 8, 15, 17});
+  model.SetRhs<int64_t>({1, 1, 1, 1, 1, 1, 1, 1});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<int64_t> expected_values = {3, 21, 3, 21, 11, 29, 11, 29};
+  EXPECT_THAT(model.GetOutput<int64_t>(), ElementsAreArray(expected_values));
+}
+
 }  // namespace
 }  // namespace stablehlo_convolution
 }  // namespace builtin
