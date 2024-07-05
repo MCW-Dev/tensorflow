@@ -21,6 +21,7 @@ limitations under the License.
 #include "tensorflow/lite/core/c/builtin_op_data.h"
 #include "tensorflow/lite/core/c/c_api_types.h"
 #include "tensorflow/lite/core/c/common.h"
+#include "tensorflow/lite/kernels/dequantize.h"
 #include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
 #include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
 #include "tensorflow/lite/kernels/kernel_util.h"
@@ -49,6 +50,16 @@ struct ConvolutionData {
   int64_t pad_input_offset;
   int64_t pad_output_offset;
 };
+
+inline bool IsQuantized(const TfLiteTensor* input) {
+  if (input->quantization.type == kTfLiteAffineQuantization &&
+      input->quantization.params) {
+    auto* quant_params =
+        reinterpret_cast<TfLiteAffineQuantization*>(input->quantization.params);
+    return (quant_params->scale && quant_params->scale->size > 0);
+  }
+  return false;
+}
 
 int64_t DivNegRoundAwayOrZero(int64_t num, int64_t denum) {
   return num < 0 ? (num - denum + 1) / denum : 0;
@@ -103,7 +114,7 @@ TfLiteStatus CheckParameters(TfLiteContext* context, TfLiteNode* node,
   TF_LITE_ENSURE_MSG(
       context, NumDimensions(lhs) == NumDimensions(rhs),
       "'stablehlo.convolution' rank of lhs and rhs must be same");
-  TF_LITE_ENSURE_TYPES_EQ(context,lhs->type,rhs->type);
+  TF_LITE_ENSURE_TYPES_EQ(context, lhs->type, rhs->type);
   TF_LITE_ENSURE_MSG(
       context, convolution_params.num_precision_config == 2,
       "'stablehlo.convolution' size of precision_config must be two.");
@@ -224,6 +235,40 @@ TfLiteStatus CheckParameters(TfLiteContext* context, TfLiteNode* node,
                          convolution_params.feature_group_count == 1,
                      "'stablehlo.convolution' the batch_group_count == 1 or "
                      "feature_group_count == 1");
+  if (IsQuantized(lhs) || IsQuantized(rhs) || IsQuantized(output)) {
+    TF_LITE_ENSURE_MSG(
+        context, IsQuantized(lhs) && IsQuantized(rhs) && IsQuantized(output),
+        "'stablehlo.convolution' lhs.IsQuantized() && "
+        "rhs.IsQuantized() && output.IsQuantized()");
+    if (!dequantize::IsQuantizedPerChannel(rhs)) {
+      TF_LITE_ENSURE_MSG(
+          context, !dequantize::IsQuantizedPerChannel(output),
+          "'stablehlo.convolution' If is_per_tensor_quantized(rhs), then "
+          "is_per_tensor_quantized(output)");
+    }
+  }
+  if (dequantize::IsQuantizedPerChannel(rhs)) {
+    auto* rhs_quant_params =
+        reinterpret_cast<TfLiteAffineQuantization*>(rhs->quantization.params);
+    TF_LITE_ENSURE_MSG(
+        context,
+        rhs_quant_params->quantized_dimension ==
+            convolution_params.kernel_output_feature_dimension,
+        "'stablehlo.convolution' If is_per_axis_quantized(rhs), then "
+        "quantization_dimension(rhs) = "
+        "convolution_params.kernel_output_feature_dimension");
+  }
+  if (dequantize::IsQuantizedPerChannel(output)) {
+    auto* output_quant_params = reinterpret_cast<TfLiteAffineQuantization*>(
+        output->quantization.params);
+    TF_LITE_ENSURE_MSG(context,
+                       output_quant_params->quantized_dimension ==
+                           convolution_params.output_feature_dimension,
+                       "'stablehlo.convolution' If "
+                       "is_per_axis_quantized(output), then "
+                       "quantization_dimension(output) = "
+                       "convolution_params.output_feature_dimension");
+  }
   return kTfLiteOk;
 }
 
@@ -284,7 +329,7 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
       *reinterpret_cast<ConvolutionData*>(node->user_data);
 
   TfLiteIntArrayFree(node->temporaries);
-  node->temporaries = TfLiteIntArrayCreate(8);
+  node->temporaries = TfLiteIntArrayCreate(11);
 
   // lhs transpose preapre
   convolution_data.lhs_transpose_permutations[0] =
@@ -340,7 +385,7 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
 
   // output transpose preapre
   convolution_data.output_transpose_permutations[convolution_params
-                                                      .output_batch_dimension] =
+                                                     .output_batch_dimension] =
       0;
   convolution_data.output_transpose_permutations
       [convolution_params.output_feature_dimension] = 1;
@@ -463,8 +508,7 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
   TfLiteTensor* rhs_slice;
   TF_LITE_ENSURE_OK(context,
                     GetTemporarySafe(context, node, /*index=*/4, &rhs_slice));
-  TfLiteIntArray* rhs_slice_shape =
-      TfLiteIntArrayCreate(convolution_data.rank);
+  TfLiteIntArray* rhs_slice_shape = TfLiteIntArrayCreate(convolution_data.rank);
   for (size_t i = 0; i < convolution_data.rank; ++i) {
     if (i == slice_dimension) {
       rhs_slice_shape->data[i] = (rhs_transpose->dims->data[i] / num_slices);
@@ -485,8 +529,7 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
   TfLiteTensor* lhs_slice;
   TF_LITE_ENSURE_OK(context,
                     GetTemporarySafe(context, node, /*index=*/5, &lhs_slice));
-  TfLiteIntArray* lhs_slice_shape =
-      TfLiteIntArrayCreate(convolution_data.rank);
+  TfLiteIntArray* lhs_slice_shape = TfLiteIntArrayCreate(convolution_data.rank);
   for (size_t i = 0; i < convolution_data.rank; ++i) {
     if (i == slice_dimension) {
       lhs_slice_shape->data[i] = (lhs_padded->dims->data[i] / num_slices);
@@ -538,12 +581,58 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
   TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, output_matrix,
                                                    output_matrix_shape));
 
+  // Quantize prepare
+  TfLiteIntArray* lhs_dequantize_shape =
+      TfLiteIntArrayCreate(convolution_data.rank);
+  for (int i = 0; i < convolution_data.rank; ++i) {
+    lhs_dequantize_shape->data[i] = lhs->dims->data[i];
+  }
+
+  node->temporaries->data[8] = convolution_data.scratch_tensor_index + 8;
+  TfLiteTensor* lhs_dequantize;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/8, &lhs_dequantize));
+  lhs_dequantize->type = kTfLiteFloat32;
+  lhs_dequantize->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, lhs_dequantize,
+                                                   lhs_dequantize_shape));
+
+  TfLiteIntArray* rhs_dequantize_shape =
+      TfLiteIntArrayCreate(convolution_data.rank);
+  for (int i = 0; i < convolution_data.rank; ++i) {
+    rhs_dequantize_shape->data[i] = rhs->dims->data[i];
+  }
+
+  node->temporaries->data[9] = convolution_data.scratch_tensor_index + 9;
+  TfLiteTensor* rhs_dequantize;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/9, &rhs_dequantize));
+  rhs_dequantize->type = kTfLiteFloat32;
+  rhs_dequantize->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, rhs_dequantize,
+                                                   rhs_dequantize_shape));
+
+  TfLiteIntArray* output_dequantize_shape =
+      TfLiteIntArrayCreate(convolution_data.rank);
+  for (int i = 0; i < convolution_data.rank; ++i) {
+    output_dequantize_shape->data[i] = output->dims->data[i];
+  }
+
+  node->temporaries->data[10] = convolution_data.scratch_tensor_index + 10;
+  TfLiteTensor* output_dequantize;
+  TF_LITE_ENSURE_OK(context, GetTemporarySafe(context, node, /*index=*/10,
+                                              &output_dequantize));
+  output_dequantize->type = kTfLiteFloat32;
+  output_dequantize->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, output_dequantize,
+                                                   output_dequantize_shape));
+
   return kTfLiteOk;
 }
 
 void* Init(TfLiteContext* context, const char* options, size_t options_len) {
   ConvolutionData* convolution_data = new ConvolutionData();
-  context->AddTensors(context, 8, &convolution_data->scratch_tensor_index);
+  context->AddTensors(context, 11, &convolution_data->scratch_tensor_index);
   return convolution_data;
 }
 
@@ -805,6 +894,46 @@ void EvalWithType(TfLiteContext* context, TfLiteNode* node,
                            output_shape, GetTensorData<DataType>(output));
 }
 
+template <typename DataType>
+TfLiteStatus EvalQuantize(TfLiteContext* context, TfLiteNode* node,
+                          const TfLiteTensor* lhs, const TfLiteTensor* rhs,
+                          TfLiteTensor* output) {
+  TfLiteTensor* lhs_dequantize = GetTemporary(context, node, 8);
+  TfLiteTensor* rhs_dequantize = GetTemporary(context, node, 9);
+  TfLiteTensor* output_dequantize = GetTemporary(context, node, 10);
+  dequantize::DequantizeImpl<dequantize::KernelType::kGenericOptimized>(
+      context, node, lhs, lhs_dequantize);
+  dequantize::DequantizeImpl<dequantize::KernelType::kGenericOptimized>(
+      context, node, rhs, rhs_dequantize);
+  EvalWithType<float>(context, node, lhs_dequantize, rhs_dequantize,
+                      output_dequantize);
+  RuntimeShape output_shape(GetTensorShape(output));
+  RuntimeShape output_dequantize_shape(GetTensorShape(output_dequantize));
+  if (dequantize::IsQuantizedPerChannel(output)) {
+    const auto* quantization_params =
+        reinterpret_cast<const TfLiteAffineQuantization*>(
+            output->quantization.params);
+    PerChannelQuantizationParams per_channel_op_params;
+    per_channel_op_params.quantized_dimension =
+        quantization_params->quantized_dimension;
+    per_channel_op_params.scale = quantization_params->scale->data;
+    per_channel_op_params.zero_point = quantization_params->zero_point->data;
+    reference_ops::PerChannelQuantize(
+        per_channel_op_params, output_dequantize_shape,
+        GetTensorData<float>(output_dequantize), output_shape,
+        GetTensorData<DataType>(output));
+  } else {
+    tflite::QuantizationParams op_params;
+    op_params.zero_point = output->params.zero_point;
+    op_params.scale = output->params.scale;
+    optimized_ops::AffineQuantize<DataType>(
+        op_params, output_dequantize_shape,
+        GetTensorData<float>(output_dequantize), output_shape,
+        GetTensorData<DataType>(output));
+  }
+  return kTfLiteOk;
+}
+
 TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   const TfLiteTensor* lhs_tensor =
       GetInput(context, node, ConvolutionData::kInputlhs);
@@ -816,9 +945,9 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   TfLiteType data_type = lhs_tensor->type;
 
   if (data_type == kTfLiteInt8) {
-    EvalWithType<int8_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
+    EvalQuantize<int8_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
   } else if (data_type == kTfLiteInt16) {
-    EvalWithType<int16_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
+    EvalQuantize<int16_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
   } else if (data_type == kTfLiteInt32) {
     EvalWithType<int32_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
   } else if (data_type == kTfLiteInt64) {
