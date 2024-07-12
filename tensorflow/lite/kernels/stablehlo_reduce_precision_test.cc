@@ -16,11 +16,11 @@ limitations under the License.
 
 #include <initializer_list>
 #include <vector>
+
 #include "tensorflow/lite/c/c_api_types.h"
 #include "tensorflow/lite/c/common.h"
 #include "tensorflow/lite/kernels/test_util.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-
 
 namespace tflite {
 namespace {
@@ -55,18 +55,7 @@ class ReducePrecisionOpModel : public SingleOpModel {
   int output_;
 };
 
-template <>
-void ReducePrecisionOpModel::SetInput<Eigen::half>(
-    std::initializer_list<Eigen::half> data) {
-  PopulateTensor<Eigen::half>(input1_, data);
-}
-template <>
-void ReducePrecisionOpModel::SetInput<Eigen::bfloat16>(
-    std::initializer_list<Eigen::bfloat16> data) {
-  PopulateTensor<Eigen::bfloat16>(input1_, data);
-}
-
-TEST(StablehloReducePrecisionOpTest, ReducePrecisionWorks1) {
+TEST(StablehloReducePrecisionOpTest, ReducePrecisionFloat32) {
   TfLiteStablehloReducePrecisionParams params = {5, 10};
 
   ReducePrecisionOpModel model({TensorType_FLOAT32, {1}}, params);
@@ -76,7 +65,7 @@ TEST(StablehloReducePrecisionOpTest, ReducePrecisionWorks1) {
   EXPECT_THAT(model.GetOutput<float>(), ElementsAreArray(expected_values));
 }
 
-TEST(StablehloReducePrecisionOpTest, ReducePrecisionWorks2) {
+TEST(StablehloReducePrecisionOpTest, ReducePrecisionFloat32VariedShape) {
   TfLiteStablehloReducePrecisionParams params = {5, 10};
 
   ReducePrecisionOpModel model({TensorType_FLOAT32, {5, 7}}, params);
@@ -100,7 +89,7 @@ TEST(StablehloReducePrecisionOpTest, ReducePrecisionWorks2) {
   EXPECT_THAT(model.GetOutput<float>(), ElementsAreArray(expected_values));
 }
 
-TEST(StablehloReducePrecisionOpTest, ReducePrecisionWorks3) {
+TEST(StablehloReducePrecisionOpTest, ReducePrecisionFloat16) {
   TfLiteStablehloReducePrecisionParams params = {8, 7};
   ReducePrecisionOpModel model({TensorType_FLOAT16, {1}}, params);
   std::initializer_list<Eigen::half> half{Eigen::half{-1.836910e+00f}};
@@ -111,11 +100,10 @@ TEST(StablehloReducePrecisionOpTest, ReducePrecisionWorks3) {
               ElementsAreArray(expected_values));
 }
 
-TEST(StablehloReducePrecisionOpTest, ReducePrecisionWorks4) {
+TEST(StablehloReducePrecisionOpTest, ReducePrecisionBfloat16) {
   TfLiteStablehloReducePrecisionParams params = {8, 23};
   ReducePrecisionOpModel model({TensorType_BFLOAT16, {1}}, params);
-  std::initializer_list<Eigen::bfloat16> input{
-      Eigen::bfloat16(6.875000e-01)};
+  std::initializer_list<Eigen::bfloat16> input{Eigen::bfloat16(6.875000e-01)};
   model.SetInput<Eigen::bfloat16>(input);
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
   std::vector<float> expected_values = {Eigen::bfloat16(6.875000e-01)};

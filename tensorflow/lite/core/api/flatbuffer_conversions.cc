@@ -2430,10 +2430,10 @@ TfLiteStatus ParseStablehloReducePrecision(const Operator* op,
       "Could not get 'stablehlo.reduce_precision' operation parameters.");
     return kTfLiteError;
   }
-    params->exponent_bits = schema_params->exponent_bits();
-    params->mantissa_bits = schema_params->mantissa_bits();
-    *builtin_data = params.release();
-    return kTfLiteOk;
+  params->exponent_bits = schema_params->exponent_bits();
+  params->mantissa_bits = schema_params->mantissa_bits();
+  *builtin_data = params.release();
+  return kTfLiteOk;
 }
 
 // We have this parse function instead of directly returning kTfLiteOk from the

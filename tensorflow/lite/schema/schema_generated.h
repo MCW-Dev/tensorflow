@@ -133,10 +133,6 @@ struct StablehloScatterOptions;
 struct StablehloScatterOptionsBuilder;
 struct StablehloScatterOptionsT;
 
-struct StablehloReducePrecisionOptions;
-struct StablehloReducePrecisionOptionsBuilder;
-struct StablehloReducePrecisionOptionsT;
-
 struct StablehloRngBitGeneratorOptions;
 struct StablehloRngBitGeneratorOptionsBuilder;
 struct StablehloRngBitGeneratorOptionsT;
@@ -1224,12 +1220,11 @@ enum BuiltinOperator : int32_t {
   BuiltinOperator_STABLEHLO_RNG_BIT_GENERATOR = 204,
   BuiltinOperator_REDUCE_WINDOW = 205,
   BuiltinOperator_STABLEHLO_COMPOSITE = 206,
-  BuiltinOperator_STABLEHLO_REDUCE_PRECISION = 207,
   BuiltinOperator_MIN = BuiltinOperator_ADD,
-  BuiltinOperator_MAX = BuiltinOperator_STABLEHLO_REDUCE_PRECISION
+  BuiltinOperator_MAX = BuiltinOperator_STABLEHLO_COMPOSITE
 };
 
-inline const BuiltinOperator (&EnumValuesBuiltinOperator())[208] {
+inline const BuiltinOperator (&EnumValuesBuiltinOperator())[207] {
   static const BuiltinOperator values[] = {
     BuiltinOperator_ADD,
     BuiltinOperator_AVERAGE_POOL_2D,
@@ -1437,14 +1432,13 @@ inline const BuiltinOperator (&EnumValuesBuiltinOperator())[208] {
     BuiltinOperator_DILATE,
     BuiltinOperator_STABLEHLO_RNG_BIT_GENERATOR,
     BuiltinOperator_REDUCE_WINDOW,
-    BuiltinOperator_STABLEHLO_COMPOSITE,
-    BuiltinOperator_STABLEHLO_REDUCE_PRECISION
+    BuiltinOperator_STABLEHLO_COMPOSITE
   };
   return values;
 }
 
 inline const char * const *EnumNamesBuiltinOperator() {
-  static const char * const names[209] = {
+  static const char * const names[208] = {
     "ADD",
     "AVERAGE_POOL_2D",
     "CONCATENATION",
@@ -1652,14 +1646,13 @@ inline const char * const *EnumNamesBuiltinOperator() {
     "STABLEHLO_RNG_BIT_GENERATOR",
     "REDUCE_WINDOW",
     "STABLEHLO_COMPOSITE",
-    "STABLEHLO_REDUCE_PRECISION",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameBuiltinOperator(BuiltinOperator e) {
-  if (::flatbuffers::IsOutRange(e, BuiltinOperator_ADD, BuiltinOperator_STABLEHLO_REDUCE_PRECISION)) return "";
+  if (::flatbuffers::IsOutRange(e, BuiltinOperator_ADD, BuiltinOperator_STABLEHLO_COMPOSITE)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesBuiltinOperator()[index];
 }
@@ -4151,12 +4144,11 @@ enum BuiltinOptions2 : uint8_t {
   BuiltinOptions2_StablehloRngBitGeneratorOptions = 19,
   BuiltinOptions2_ReduceWindowOptions = 20,
   BuiltinOptions2_StableHLOCompositeOptions = 21,
-  BuiltinOptions2_StablehloReducePrecisionOptions = 22,
   BuiltinOptions2_MIN = BuiltinOptions2_NONE,
-  BuiltinOptions2_MAX = BuiltinOptions2_StablehloReducePrecisionOptions
+  BuiltinOptions2_MAX = BuiltinOptions2_StableHLOCompositeOptions
 };
 
-inline const BuiltinOptions2 (&EnumValuesBuiltinOptions2())[23] {
+inline const BuiltinOptions2 (&EnumValuesBuiltinOptions2())[22] {
   static const BuiltinOptions2 values[] = {
     BuiltinOptions2_NONE,
     BuiltinOptions2_StablehloConcatenateOptions,
@@ -4179,14 +4171,13 @@ inline const BuiltinOptions2 (&EnumValuesBuiltinOptions2())[23] {
     BuiltinOptions2_DilateOptions,
     BuiltinOptions2_StablehloRngBitGeneratorOptions,
     BuiltinOptions2_ReduceWindowOptions,
-    BuiltinOptions2_StableHLOCompositeOptions,
-    BuiltinOptions2_StablehloReducePrecisionOptions
+    BuiltinOptions2_StableHLOCompositeOptions
   };
   return values;
 }
 
 inline const char * const *EnumNamesBuiltinOptions2() {
-  static const char * const names[24] = {
+  static const char * const names[23] = {
     "NONE",
     "StablehloConcatenateOptions",
     "StablehloBroadcastInDimOptions",
@@ -4209,14 +4200,13 @@ inline const char * const *EnumNamesBuiltinOptions2() {
     "StablehloRngBitGeneratorOptions",
     "ReduceWindowOptions",
     "StableHLOCompositeOptions",
-    "StablehloReducePrecisionOptions",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameBuiltinOptions2(BuiltinOptions2 e) {
-  if (::flatbuffers::IsOutRange(e, BuiltinOptions2_NONE, BuiltinOptions2_StablehloReducePrecisionOptions)) return "";
+  if (::flatbuffers::IsOutRange(e, BuiltinOptions2_NONE, BuiltinOptions2_StableHLOCompositeOptions)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesBuiltinOptions2()[index];
 }
@@ -4309,10 +4299,6 @@ template<> struct BuiltinOptions2Traits<tflite::StableHLOCompositeOptions> {
   static const BuiltinOptions2 enum_value = BuiltinOptions2_StableHLOCompositeOptions;
 };
 
-template<> struct BuiltinOptions2Traits<tflite::StablehloReducePrecisionOptions> {
-  static const BuiltinOptions2 enum_value = BuiltinOptions2_StablehloReducePrecisionOptions;
-};
-
 template<typename T> struct BuiltinOptions2UnionTraits {
   static const BuiltinOptions2 enum_value = BuiltinOptions2_NONE;
 };
@@ -4399,10 +4385,6 @@ template<> struct BuiltinOptions2UnionTraits<tflite::ReduceWindowOptionsT> {
 
 template<> struct BuiltinOptions2UnionTraits<tflite::StableHLOCompositeOptionsT> {
   static const BuiltinOptions2 enum_value = BuiltinOptions2_StableHLOCompositeOptions;
-};
-
-template<> struct BuiltinOptions2UnionTraits<tflite::StablehloReducePrecisionOptionsT> {
-  static const BuiltinOptions2 enum_value = BuiltinOptions2_StablehloReducePrecisionOptions;
 };
 
 struct BuiltinOptions2Union {
@@ -4602,14 +4584,6 @@ struct BuiltinOptions2Union {
   const tflite::StableHLOCompositeOptionsT *AsStableHLOCompositeOptions() const {
     return type == BuiltinOptions2_StableHLOCompositeOptions ?
       reinterpret_cast<const tflite::StableHLOCompositeOptionsT *>(value) : nullptr;
-  }
-  tflite::StablehloReducePrecisionOptionsT *AsStablehloReducePrecisionOptions() {
-    return type == BuiltinOptions2_StablehloReducePrecisionOptions ?
-      reinterpret_cast<tflite::StablehloReducePrecisionOptionsT *>(value) : nullptr;
-  }
-  const tflite::StablehloReducePrecisionOptionsT *AsStablehloReducePrecisionOptions() const {
-    return type == BuiltinOptions2_StablehloReducePrecisionOptions ?
-      reinterpret_cast<const tflite::StablehloReducePrecisionOptionsT *>(value) : nullptr;
   }
 };
 
@@ -7697,69 +7671,6 @@ inline ::flatbuffers::Offset<StablehloScatterOptions> CreateStablehloScatterOpti
 }
 
 ::flatbuffers::Offset<StablehloScatterOptions> CreateStablehloScatterOptions(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloScatterOptionsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
-
-struct StablehloReducePrecisionOptionsT : public ::flatbuffers::NativeTable {
-  typedef StablehloReducePrecisionOptions TableType;
-  int32_t exponent_bits = 0;
-  int32_t mantissa_bits = 0;
-};
-
-struct StablehloReducePrecisionOptions FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
-  typedef StablehloReducePrecisionOptionsT NativeTableType;
-  typedef StablehloReducePrecisionOptionsBuilder Builder;
-  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_EXPONENT_BITS = 4,
-    VT_MANTISSA_BITS = 6
-  };
-  int32_t exponent_bits() const {
-    return GetField<int32_t>(VT_EXPONENT_BITS, 0);
-  }
-  int32_t mantissa_bits() const {
-    return GetField<int32_t>(VT_MANTISSA_BITS, 0);
-  }
-  bool Verify(::flatbuffers::Verifier &verifier) const {
-    return VerifyTableStart(verifier) &&
-           VerifyField<int32_t>(verifier, VT_EXPONENT_BITS, 4) &&
-           VerifyField<int32_t>(verifier, VT_MANTISSA_BITS, 4) &&
-           verifier.EndTable();
-  }
-  StablehloReducePrecisionOptionsT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  void UnPackTo(StablehloReducePrecisionOptionsT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  static ::flatbuffers::Offset<StablehloReducePrecisionOptions> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloReducePrecisionOptionsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
-};
-
-struct StablehloReducePrecisionOptionsBuilder {
-  typedef StablehloReducePrecisionOptions Table;
-  ::flatbuffers::FlatBufferBuilder &fbb_;
-  ::flatbuffers::uoffset_t start_;
-  void add_exponent_bits(int32_t exponent_bits) {
-    fbb_.AddElement<int32_t>(StablehloReducePrecisionOptions::VT_EXPONENT_BITS, exponent_bits, 0);
-  }
-  void add_mantissa_bits(int32_t mantissa_bits) {
-    fbb_.AddElement<int32_t>(StablehloReducePrecisionOptions::VT_MANTISSA_BITS, mantissa_bits, 0);
-  }
-  explicit StablehloReducePrecisionOptionsBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
-        : fbb_(_fbb) {
-    start_ = fbb_.StartTable();
-  }
-  ::flatbuffers::Offset<StablehloReducePrecisionOptions> Finish() {
-    const auto end = fbb_.EndTable(start_);
-    auto o = ::flatbuffers::Offset<StablehloReducePrecisionOptions>(end);
-    return o;
-  }
-};
-
-inline ::flatbuffers::Offset<StablehloReducePrecisionOptions> CreateStablehloReducePrecisionOptions(
-    ::flatbuffers::FlatBufferBuilder &_fbb,
-    int32_t exponent_bits = 0,
-    int32_t mantissa_bits = 0) {
-  StablehloReducePrecisionOptionsBuilder builder_(_fbb);
-  builder_.add_mantissa_bits(mantissa_bits);
-  builder_.add_exponent_bits(exponent_bits);
-  return builder_.Finish();
-}
-
-::flatbuffers::Offset<StablehloReducePrecisionOptions> CreateStablehloReducePrecisionOptions(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloReducePrecisionOptionsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
 struct StablehloRngBitGeneratorOptionsT : public ::flatbuffers::NativeTable {
   typedef StablehloRngBitGeneratorOptions TableType;
@@ -15358,9 +15269,6 @@ struct Operator FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const tflite::StableHLOCompositeOptions *builtin_options_2_as_StableHLOCompositeOptions() const {
     return builtin_options_2_type() == tflite::BuiltinOptions2_StableHLOCompositeOptions ? static_cast<const tflite::StableHLOCompositeOptions *>(builtin_options_2()) : nullptr;
   }
-  const tflite::StablehloReducePrecisionOptions *builtin_options_2_as_StablehloReducePrecisionOptions() const {
-    return builtin_options_2_type() == tflite::BuiltinOptions2_StablehloReducePrecisionOptions ? static_cast<const tflite::StablehloReducePrecisionOptions *>(builtin_options_2()) : nullptr;
-  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint32_t>(verifier, VT_OPCODE_INDEX, 4) &&
@@ -15976,10 +15884,6 @@ template<> inline const tflite::ReduceWindowOptions *Operator::builtin_options_2
 
 template<> inline const tflite::StableHLOCompositeOptions *Operator::builtin_options_2_as<tflite::StableHLOCompositeOptions>() const {
   return builtin_options_2_as_StableHLOCompositeOptions();
-}
-
-template<> inline const tflite::StablehloReducePrecisionOptions *Operator::builtin_options_2_as<tflite::StablehloReducePrecisionOptions>() const {
-  return builtin_options_2_as_StablehloReducePrecisionOptions();
 }
 
 struct OperatorBuilder {
@@ -17700,35 +17604,6 @@ inline ::flatbuffers::Offset<StablehloScatterOptions> CreateStablehloScatterOpti
       _index_vector_dim,
       _unique_indices,
       _update_computation_subgraph_index);
-}
-
-inline StablehloReducePrecisionOptionsT *StablehloReducePrecisionOptions::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
-  auto _o = std::unique_ptr<StablehloReducePrecisionOptionsT>(new StablehloReducePrecisionOptionsT());
-  UnPackTo(_o.get(), _resolver);
-  return _o.release();
-}
-
-inline void StablehloReducePrecisionOptions::UnPackTo(StablehloReducePrecisionOptionsT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
-  (void)_o;
-  (void)_resolver;
-  { auto _e = exponent_bits(); _o->exponent_bits = _e; }
-  { auto _e = mantissa_bits(); _o->mantissa_bits = _e; }
-}
-
-inline ::flatbuffers::Offset<StablehloReducePrecisionOptions> StablehloReducePrecisionOptions::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloReducePrecisionOptionsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
-  return CreateStablehloReducePrecisionOptions(_fbb, _o, _rehasher);
-}
-
-inline ::flatbuffers::Offset<StablehloReducePrecisionOptions> CreateStablehloReducePrecisionOptions(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloReducePrecisionOptionsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
-  (void)_rehasher;
-  (void)_o;
-  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const StablehloReducePrecisionOptionsT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
-  auto _exponent_bits = _o->exponent_bits;
-  auto _mantissa_bits = _o->mantissa_bits;
-  return tflite::CreateStablehloReducePrecisionOptions(
-      _fbb,
-      _exponent_bits,
-      _mantissa_bits);
 }
 
 inline StablehloRngBitGeneratorOptionsT *StablehloRngBitGeneratorOptions::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
@@ -24527,10 +24402,6 @@ inline bool VerifyBuiltinOptions2(::flatbuffers::Verifier &verifier, const void 
       auto ptr = reinterpret_cast<const tflite::StableHLOCompositeOptions *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case BuiltinOptions2_StablehloReducePrecisionOptions: {
-      auto ptr = reinterpret_cast<const tflite::StablehloReducePrecisionOptions *>(obj);
-      return verifier.VerifyTable(ptr);
-    }
     default: return true;
   }
 }
@@ -24634,10 +24505,6 @@ inline void *BuiltinOptions2Union::UnPack(const void *obj, BuiltinOptions2 type,
       auto ptr = reinterpret_cast<const tflite::StableHLOCompositeOptions *>(obj);
       return ptr->UnPack(resolver);
     }
-    case BuiltinOptions2_StablehloReducePrecisionOptions: {
-      auto ptr = reinterpret_cast<const tflite::StablehloReducePrecisionOptions *>(obj);
-      return ptr->UnPack(resolver);
-    }
     default: return nullptr;
   }
 }
@@ -24729,10 +24596,6 @@ inline ::flatbuffers::Offset<void> BuiltinOptions2Union::Pack(::flatbuffers::Fla
       auto ptr = reinterpret_cast<const tflite::StableHLOCompositeOptionsT *>(value);
       return CreateStableHLOCompositeOptions(_fbb, ptr, _rehasher).Union();
     }
-    case BuiltinOptions2_StablehloReducePrecisionOptions: {
-      auto ptr = reinterpret_cast<const tflite::StablehloReducePrecisionOptionsT *>(value);
-      return CreateStablehloReducePrecisionOptions(_fbb, ptr, _rehasher).Union();
-    }
     default: return 0;
   }
 }
@@ -24821,10 +24684,6 @@ inline BuiltinOptions2Union::BuiltinOptions2Union(const BuiltinOptions2Union &u)
     }
     case BuiltinOptions2_StableHLOCompositeOptions: {
       value = new tflite::StableHLOCompositeOptionsT(*reinterpret_cast<tflite::StableHLOCompositeOptionsT *>(u.value));
-      break;
-    }
-    case BuiltinOptions2_StablehloReducePrecisionOptions: {
-      value = new tflite::StablehloReducePrecisionOptionsT(*reinterpret_cast<tflite::StablehloReducePrecisionOptionsT *>(u.value));
       break;
     }
     default:
@@ -24936,11 +24795,6 @@ inline void BuiltinOptions2Union::Reset() {
     }
     case BuiltinOptions2_StableHLOCompositeOptions: {
       auto ptr = reinterpret_cast<tflite::StableHLOCompositeOptionsT *>(value);
-      delete ptr;
-      break;
-    }
-    case BuiltinOptions2_StablehloReducePrecisionOptions: {
-      auto ptr = reinterpret_cast<tflite::StablehloReducePrecisionOptionsT *>(value);
       delete ptr;
       break;
     }

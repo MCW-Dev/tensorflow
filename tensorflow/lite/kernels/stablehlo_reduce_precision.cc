@@ -21,6 +21,7 @@ limitations under the License.
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
 #include "tensorflow/lite/kernels/kernel_util.h"
+#include "tensorflow/lite/core/c/common.h"
 
 namespace tflite {
 namespace ops {
@@ -42,6 +43,9 @@ struct FloatingPointTraits {
                                             kMaxExponent - kMinExponent + 1)) ^
                                         31) +
                                        1;
+  static_assert((std::is_same_v<DataType, float> && sizeof(DataType) == 4) ||
+                    sizeof(DataType) == 2,
+                "DataType must be float with sizeof 4 or uint16_t");
   using UIntType =
       std::conditional_t<std::is_same_v<DataType, float>, uint32_t, uint16_t>;
 };
@@ -68,9 +72,8 @@ TfLiteStatus ReducePrecisionOp(const TfLiteTensor* operand,
       FloatingPointTraits<DataType>::kMantissaBits;
   const int32_t src_exponent_bits =
       FloatingPointTraits<DataType>::kExponentBits;
-
-  UIntType last_mantissa_bit_mask = static_cast<UIntType>(1)
-                                    << (src_mantissa_bits - mantissa_bits);
+  UIntType last_mantissa_bit_mask = static_cast<UIntType>(1) << std::max(
+                                        0, (src_mantissa_bits - mantissa_bits));
   UIntType base_rounding_bias = (last_mantissa_bit_mask >> 1) - 1;
   UIntType truncation_mask = ~(last_mantissa_bit_mask - 1);
   UIntType sign_bit_mask = static_cast<UIntType>(1)
@@ -84,6 +87,11 @@ TfLiteStatus ReducePrecisionOp(const TfLiteTensor* operand,
   UIntType reduced_max_exponent = exponent_bias + reduced_exponent_bias;
   UIntType reduced_min_exponent = exponent_bias - reduced_exponent_bias;
   for (int i = 0; i < num_elements; ++i) {
+    if (std::isnan(input[i])) {
+      output[i] = mantissa_bits > 0 ? input[i]
+                                    : std::numeric_limits<DataType>::infinity();
+      continue;
+    }
     UIntType int_val;
     std::memcpy(&int_val, &input[i], sizeof(UIntType));
     int_val = ReducePrecision(int_val, exponent_bits, mantissa_bits,
@@ -92,10 +100,6 @@ TfLiteStatus ReducePrecisionOp(const TfLiteTensor* operand,
                               truncation_mask, sign_bit_mask, exp_bits_mask,
                               reduced_max_exponent, reduced_min_exponent);
     std::memcpy(&output[i], &int_val, sizeof(DataType));
-    if (std::isnan(input[i])) {
-      output[i] = mantissa_bits > 0 ? input[i]
-                                    : std::numeric_limits<DataType>::infinity();
-    }
   }
   return TfLiteStatus::kTfLiteOk;
 }
@@ -110,10 +114,10 @@ UIntType ReducePrecision(UIntType int_val, int32_t exponent_bits,
                          UIntType reduced_max_exponent,
                          UIntType reduced_min_exponent) {
   if (mantissa_bits < src_mantissa_bits) {
-    UIntType x_last_mantissa_bit = (int_val & last_mantissa_bit_mask) >>
-                                   (src_mantissa_bits - mantissa_bits);
-    UIntType xRoundingBias = x_last_mantissa_bit + base_rounding_bias;
-    int_val = int_val + xRoundingBias;
+    UIntType last_mantissa_bit = (int_val & last_mantissa_bit_mask) >>
+                                 (src_mantissa_bits - mantissa_bits);
+    UIntType rounding_bias = last_mantissa_bit + base_rounding_bias;
+    int_val = int_val + rounding_bias;
     int_val = int_val & truncation_mask;
   }
   if (exponent_bits < src_exponent_bits) {
@@ -140,6 +144,7 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_OK(context,
                     GetOutputSafe(context, node, kOutputTensor, &output));
   TF_LITE_ENSURE_TYPES_EQ(context, input->type, output->type);
+  TF_LITE_ENSURE_EQ(context,HaveSameShapes(input,output),1);
   const TfLiteStablehloReducePrecisionParams* data =
       reinterpret_cast<TfLiteStablehloReducePrecisionParams*>(
           node->builtin_data);
