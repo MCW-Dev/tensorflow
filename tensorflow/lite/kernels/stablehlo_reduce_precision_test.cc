@@ -55,17 +55,6 @@ class ReducePrecisionOpModel : public SingleOpModel {
   int output_;
 };
 
-template <>
-void ReducePrecisionOpModel::SetInput<Eigen::half>(
-    std::initializer_list<Eigen::half> data) {
-  PopulateTensor<Eigen::half>(input1_, data);
-}
-template <>
-void ReducePrecisionOpModel::SetInput<Eigen::bfloat16>(
-    std::initializer_list<Eigen::bfloat16> data) {
-  PopulateTensor<Eigen::bfloat16>(input1_, data);
-}
-
 TEST(StablehloReducePrecisionOpTest, ReducePrecisionWorks1) {
   TfLiteStablehloReducePrecisionParams params = {5, 10};
 
