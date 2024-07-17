@@ -1944,7 +1944,7 @@ cc_test(
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest",
         "@flatbuffers",
-    ],
+    ]
 )
 
 cc_test(
