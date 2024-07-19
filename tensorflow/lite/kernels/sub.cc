@@ -20,6 +20,7 @@ limitations under the License.
 #include <algorithm>
 #include <limits>
 
+#include "Eigen/Core"
 #include "tensorflow/lite/core/c/builtin_op_data.h"
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/kernels/internal/compatibility.h"
@@ -366,6 +367,15 @@ void EvalSub(TfLiteContext* context, TfLiteNode* node, TfLiteSubParams* params,
       EvalSubImpl<kernel_type, float>(context, node, params, data, input1,
                                       input2, requires_broadcast, output);
       break;
+    case kTfLiteFloat16:
+      EvalSubImpl<kernel_type, Eigen::half>(context, node, params, data, input1,
+                                            input2, requires_broadcast, output);
+      break;
+    case kTfLiteBFloat16:
+      EvalSubImpl<kernel_type, Eigen::bfloat16>(context, node, params, data,
+                                                input1, input2,
+                                                requires_broadcast, output);
+      break;
     case kTfLiteInt64:
       EvalSubImpl<kernel_type, int64_t>(context, node, params, data, input1,
                                         input2, requires_broadcast, output);
@@ -463,7 +473,8 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_OK(context,
                     GetOutputSafe(context, node, kOutputTensor, &output));
 
-  if (output->type == kTfLiteFloat32 || output->type == kTfLiteInt32 ||
+  if (output->type == kTfLiteFloat32 || output->type == kTfLiteBFloat16 ||
+      output->type == kTfLiteFloat16 || output->type == kTfLiteInt32 ||
       output->type == kTfLiteInt64) {
     EvalSub<kernel_type>(context, node, params, data, input1, input2, output);
   } else if (output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||
