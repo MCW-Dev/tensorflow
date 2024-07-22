@@ -54,7 +54,8 @@ struct OpData {
 };
 
 bool IsNumericSupportedType(const TfLiteType type) {
-  return type == kTfLiteFloat32;
+  return type == kTfLiteFloat32 || type == kTfLiteBFloat16 ||
+         type == kTfLiteFloat16;
 }
 
 bool IsLogicalSupportedType(const TfLiteType type) {
@@ -63,15 +64,20 @@ bool IsLogicalSupportedType(const TfLiteType type) {
 
 bool IsAbsSupportedType(const TfLiteType type) {
   return type == kTfLiteFloat32 || type == kTfLiteInt8 ||
-         type == kTfLiteInt16 || type == kTfLiteInt32;
+         type == kTfLiteInt16 || type == kTfLiteInt32 ||
+         type == kTfLiteBFloat16 || type == kTfLiteFloat16;
 }
 
 bool IsRsqrtSupportedType(const TfLiteType type) {
-  return type == kTfLiteFloat32 || type == kTfLiteInt8 || type == kTfLiteInt16;
+  return type == kTfLiteFloat32 || type == kTfLiteInt8 ||
+         type == kTfLiteInt16 || type == kTfLiteFloat16 ||
+         type == kTfLiteBFloat16;
 }
 
 bool IsLogSupportedType(const TfLiteType type) {
-  return type == kTfLiteFloat32 || type == kTfLiteInt8 || type == kTfLiteInt16;
+  return type == kTfLiteFloat32 || type == kTfLiteInt8 ||
+         type == kTfLiteInt16 || type == kTfLiteFloat16 ||
+         type == kTfLiteBFloat16;
 }
 
 inline void SetAbsOutputMultiplier(const float input_scale,
@@ -240,9 +246,10 @@ inline TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
                      expected_type);
 }
 
+template <typename T>
 inline TfLiteStatus EvalNumeric(TfLiteContext* context, TfLiteNode* node,
-                                float float_func(float)) {
-  return EvalImpl<float>(context, node, float_func, kTfLiteFloat32);
+                                T float_func(T), TfLiteType type) {
+  return EvalImpl<T>(context, node, float_func, type);
 }
 
 inline TfLiteStatus EvalLogical(TfLiteContext* context, TfLiteNode* node,
@@ -295,6 +302,11 @@ TfLiteStatus AbsEval(TfLiteContext* context, TfLiteNode* node) {
                  : AbsEvalQuantized<int16_t>(context, node, type);
     case kTfLiteInt32:
       return EvalImpl<int32_t>(context, node, std::abs<int32_t>, type);
+    case kTfLiteFloat16:
+      return EvalImpl<Eigen::half>(context, node, std::abs<Eigen::half>, type);
+    case kTfLiteBFloat16:
+      return EvalImpl<Eigen::bfloat16>(context, node, std::abs<Eigen::bfloat16>,
+                                       type);
     default:
       TF_LITE_KERNEL_LOG(context, "Current data type %s is not supported.",
                          TfLiteTypeGetName(type));
@@ -303,11 +315,47 @@ TfLiteStatus AbsEval(TfLiteContext* context, TfLiteNode* node) {
 }
 
 TfLiteStatus SinEval(TfLiteContext* context, TfLiteNode* node) {
-  return EvalNumeric(context, node, std::sin);
+  const TfLiteTensor* input;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, 0, &input));
+  switch (input->type) {
+    case kTfLiteFloat16:
+      return EvalNumeric<Eigen::half>(
+          context, node, [](Eigen::half x) { return Eigen::half(std::sin(x)); },
+          kTfLiteFloat16);
+    case kTfLiteBFloat16:
+      return EvalNumeric<Eigen::bfloat16>(
+          context, node,
+          [](Eigen::bfloat16 x) { return Eigen::bfloat16(std::sin(x)); },
+          kTfLiteBFloat16);
+    case kTfLiteFloat32:
+      return EvalNumeric<float>(context, node, std::sin, kTfLiteFloat32);
+    default:
+      TF_LITE_KERNEL_LOG(context, "Current data type %s is not supported.",
+                         TfLiteTypeGetName(input->type));
+      return kTfLiteError;
+  }
 }
 
 TfLiteStatus CosEval(TfLiteContext* context, TfLiteNode* node) {
-  return EvalNumeric(context, node, std::cos);
+  const TfLiteTensor* input;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, 0, &input));
+  switch (input->type) {
+    case kTfLiteFloat16:
+      return EvalNumeric<Eigen::half>(
+          context, node, [](Eigen::half x) { return Eigen::half(std::cos(x)); },
+          kTfLiteFloat16);
+    case kTfLiteBFloat16:
+      return EvalNumeric<Eigen::bfloat16>(
+          context, node,
+          [](Eigen::bfloat16 x) { return Eigen::bfloat16(std::cos(x)); },
+          kTfLiteBFloat16);
+    case kTfLiteFloat32:
+      return EvalNumeric<float>(context, node, std::cos, kTfLiteFloat32);
+    default:
+      TF_LITE_KERNEL_LOG(context, "Current data type %s is not supported.",
+                         TfLiteTypeGetName(input->type));
+      return kTfLiteError;
+  }
 }
 
 TfLiteStatus LogEval(TfLiteContext* context, TfLiteNode* node) {
@@ -319,7 +367,7 @@ TfLiteStatus LogEval(TfLiteContext* context, TfLiteNode* node) {
   auto op_data = reinterpret_cast<OpData*>(node->user_data);
   switch (input->type) {
     case kTfLiteFloat32:
-      return EvalNumeric(context, node, std::log);
+      return EvalNumeric<float>(context, node, std::log, kTfLiteFloat32);
     case kTfLiteInt8:
       reference_integer_ops::LookupTable(
           GetTensorData<int8_t>(input),
@@ -332,6 +380,15 @@ TfLiteStatus LogEval(TfLiteContext* context, TfLiteNode* node) {
           MatchingFlatSize(GetTensorShape(input), GetTensorShape(output)),
           op_data->lut_int16, GetTensorData<int16_t>(output));
       return kTfLiteOk;
+    case kTfLiteFloat16:
+      return EvalNumeric<Eigen::half>(
+          context, node, [](Eigen::half x) { return Eigen::half(std::log(x)); },
+          kTfLiteFloat16);
+    case kTfLiteBFloat16:
+      return EvalNumeric<Eigen::bfloat16>(
+          context, node,
+          [](Eigen::bfloat16 x) { return Eigen::bfloat16(std::log(x)); },
+          kTfLiteBFloat16);
     default:
       TF_LITE_KERNEL_LOG(context, "Current data type %s is not supported.",
                          TfLiteTypeGetName(input->type));
@@ -340,7 +397,24 @@ TfLiteStatus LogEval(TfLiteContext* context, TfLiteNode* node) {
 }
 
 TfLiteStatus SqrtEval(TfLiteContext* context, TfLiteNode* node) {
-  return EvalNumeric(context, node, std::sqrt);
+  switch (input->type) {
+    case kTfLiteFloat16:
+      return EvalNumeric<Eigen::half>(
+          context, node,
+          [](Eigen::half x) { return Eigen::half(std::sqrt(x)); },
+          kTfLiteFloat16);
+    case kTfLiteBFloat16:
+      return EvalNumeric<Eigen::bfloat16>(
+          context, node,
+          [](Eigen::bfloat16 x) { return Eigen::bfloat16(std::sqrt(x)); },
+          kTfLiteBFloat16);
+    case kTfLiteFloat32:
+      return EvalNumeric<float>(context, node, std::sqrt, kTfLiteFloat32);
+    default:
+      TF_LITE_KERNEL_LOG(context, "Current data type %s is not supported.",
+                         TfLiteTypeGetName(input->type));
+      return kTfLiteError;
+  }
 }
 
 TfLiteStatus RsqrtEvalQuantizedInt8(TfLiteContext* context, TfLiteNode* node,
@@ -407,6 +481,15 @@ TfLiteStatus RsqrtEval(TfLiteContext* context, TfLiteNode* node) {
       return RsqrtEvalQuantizedInt8(context, node, type);
     case kTfLiteInt16:
       return RsqrtEvalQuantizedInt16(context, node, type);
+    case kTfLiteFloat16:
+      return EvalImpl<Eigen::half>(
+          context, node,
+          [](Eigen::half x) { return Eigen::half((1 / std::sqrt(x))); }, type);
+    case kTfLiteBFloat16:
+      return EvalImpl<Eigen::bfloat16>(
+          context, node,
+          [](Eigen::bfloat16 x) { return Eigen::bfloat16((1 / std::sqrt(x))); },
+          type);
     default:
       TF_LITE_KERNEL_LOG(context, "Current data type %s is not supported.",
                          TfLiteTypeGetName(type));
