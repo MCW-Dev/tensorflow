@@ -51,7 +51,7 @@ class FloorOpModel : public SingleOpModel {
 
 TEST(FloorOpTest, SingleDim) {
   FloorOpModel model({2}, TensorType_FLOAT32);
-  model.PopulateTensor<float>(model.input(), {8.5f, 0.0f});
+  model.PopulateTensor<float>(model.input(), {8.5, 0.0});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
   EXPECT_THAT(model.GetOutput<float>(), ElementsAreArray({8, 0}));
   EXPECT_THAT(model.GetOutputShape(), ElementsAreArray({2}));
@@ -133,7 +133,6 @@ TEST(FloorOpTest, MultiDimsbf16) {
               ElementsAreArray({1, 8, 1, 9, 1, -2, -9, -2, -10, -2}));
   EXPECT_THAT(model.GetOutputShape(), ElementsAreArray({2, 1, 1, 5}));
 }
-
 
 }  // namespace
 }  // namespace tflite
