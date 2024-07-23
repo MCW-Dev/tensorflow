@@ -16,6 +16,7 @@ limitations under the License.
 #define TENSORFLOW_LITE_KERNELS_INTERNAL_REFERENCE_FLOOR_H_
 
 #include <cmath>
+#include<Eigen/Core>
 
 #include "tensorflow/lite/kernels/internal/types.h"
 
@@ -30,6 +31,25 @@ inline void Floor(const RuntimeShape& input_shape, const float* input_data,
   for (int i = 0; i < flat_size; i++) {
     int offset = i;
     output_data[offset] = std::floor(input_data[offset]);
+  }
+}
+inline void Floor(const RuntimeShape& input_shape, const Eigen::half* input_data,
+                  const RuntimeShape& output_shape, Eigen::half* output_data) {
+  const int flat_size = MatchingFlatSize(input_shape, output_shape);
+
+  for (int i = 0; i < flat_size; i++) {
+    int offset = i;
+    output_data[offset] = static_cast<Eigen::half>(std::floor(input_data[offset]));
+  }
+}
+
+inline void Floor(const RuntimeShape& input_shape, const Eigen::bfloat16* input_data,
+                  const RuntimeShape& output_shape, Eigen::bfloat16* output_data) {
+  const int flat_size = MatchingFlatSize(input_shape, output_shape);
+
+  for (int i = 0; i < flat_size; i++) {
+    int offset = i;
+    output_data[offset] = static_cast<Eigen::bfloat16>(std::floor(input_data[offset]));
   }
 }
 
