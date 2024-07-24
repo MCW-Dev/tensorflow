@@ -19,7 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
-
+#include "Eigen/Core"
 #include "tensorflow/lite/kernels/internal/compatibility.h"
 #include "tensorflow/lite/kernels/internal/runtime_shape.h"
 
@@ -663,6 +663,12 @@ struct ArithmeticParams {
   // int16_t activation params.
   int16_t int16_activation_min;
   int16_t int16_activation_max;
+  //Eigen half
+  Eigen::half Eigen_half_activation_min;
+  Eigen::half Eigen_half_activation_max;
+  //bf 16
+  Eigen::bfloat16 bf16_activation_min;
+  Eigen::bfloat16 bf16_activation_max;
 
   // Processed output dimensions.
   // Let input "a" be the one that broadcasts in the faster-changing dimension.
@@ -1043,6 +1049,30 @@ template <typename P>
 inline void SetActivationParams(int64_t min, int64_t max, P* params) {
   params->int64_activation_min = min;
   params->int64_activation_max = max;
+}
+
+template <typename P>
+inline void SetActivationParams(Eigen::half min, Eigen::half max, P* params) {
+  params->Eigen_half_activation_min = min;
+  params->Eigen_half_activation_max = max;
+}
+
+template <typename P>
+inline void SetActivationParams(Eigen::bfloat16 min, Eigen::bfloat16 max, P* params) {
+  params->bf16_activation_min = min;
+  params->bf16_activation_max = max;
+}
+
+template <typename P>
+inline void GetActivationParams(const  P& params, Eigen::half* min, Eigen::half* max) {
+  *min = params.Eigen_half_activation_min;;
+  *max = params.Eigen_half_activation_max;
+}
+
+template <typename P>
+inline void GetActivationParams(const  P& params, Eigen::bfloat16* min, Eigen::bfloat16* max) {
+  *min = params.bf16_activation_min;;
+  *max = params.bf16_activation_max;
 }
 
 template <typename P>
