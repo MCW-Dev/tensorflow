@@ -60,8 +60,7 @@ TfLiteStatus Atan2(const TfLiteTensor* input_y, const TfLiteTensor* input_x,
 
   const int64_t num_elements = NumElements(input_y);
   for (int64_t i = 0; i < num_elements; ++i) {
-    data_output[i] = static_cast<Float>(
-        std::atan2((data_y[i]), data_x[i]));
+    data_output[i] = static_cast<Float>(std::atan2((data_y[i]), data_x[i]));
   }
   return TfLiteStatus::kTfLiteOk;
 }
