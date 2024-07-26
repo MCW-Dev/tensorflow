@@ -472,6 +472,7 @@ enum BuiltinOperator : int32 {
   STABLEHLO_RNG_BIT_GENERATOR = 204,
   REDUCE_WINDOW = 205 (deprecated),
   STABLEHLO_COMPOSITE = 206, // WARNING: No runtime support
+  STABLEHLO_COUNT_LEADING_ZEROS = 209,
 }
 // LINT.ThenChange(nnapi_linter/linter.proto)
 
@@ -1495,6 +1496,9 @@ table StableHLOCompositeOptions {
   composite_attributes:[ubyte];
   composite_attributes_format:CustomOptionsFormat;
   version:int32;
+}
+
+table StablehloCountLeadingZerosOptions {
 }
 
 // An operator takes tensors as inputs and outputs. The type of operation being
