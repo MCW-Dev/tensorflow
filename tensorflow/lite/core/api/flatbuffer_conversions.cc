@@ -925,6 +925,10 @@ TfLiteStatus ParseOpDataTfLite(const Operator* op, BuiltinOperator op_type,
       return ParseStablehloComposite(op, error_reporter, allocator,
                                      builtin_data);
     }
+    case BuiltinOperator_STABLEHLO_COUNT_LEADING_ZEROS: {
+      return ParseStablehloCountLeadingZeros(op, error_reporter, allocator,
+                                             builtin_data);
+    }
     // TODO: skip param parsing for now since ops below don't have kernels
     case BuiltinOperator_STABLEHLO_SLICE:
     case BuiltinOperator_STABLEHLO_BROADCAST_IN_DIM:
@@ -2408,6 +2412,13 @@ TfLiteStatus ParseStablehloComposite(const Operator* op,
       error_reporter,
       "Could not get 'stablehlo.composite' operation parameters.");
   return kTfLiteError;
+}
+
+TfLiteStatus ParseStablehloCountLeadingZeros(const Operator* op,
+                                             ErrorReporter* error_reporter,
+                                             BuiltinDataAllocator* allocator,
+                                             void** builtin_data) {
+  return kTfLiteOk;
 }
 
 // We have this parse function instead of directly returning kTfLiteOk from the

@@ -767,6 +767,7 @@ BUILTIN_KERNEL_SRCS = [
     "stablehlo_gather.cc",
     "stablehlo_add.cc",
     "stablehlo_composite.cc",
+    "stablehlo_count_leading_zeros.cc",
     "stablehlo_multiply.cc",
     "stablehlo_pad.cc",
     "stablehlo_reduce_window.cc",
@@ -3391,6 +3392,18 @@ cc_test(
     name = "rng_bit_generator_test",
     size = "small",
     srcs = ["rng_bit_generator_test.cc"],
+    deps = [
+        ":test_main",
+        ":test_util",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "stablehlo_count_leading_zeros_test",
+    size = "small",
+    srcs = ["stablehlo_count_leading_zeros_test.cc"],
     deps = [
         ":test_main",
         ":test_util",
