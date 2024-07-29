@@ -37,6 +37,11 @@ limitations under the License.
 #include "tensorflow/lite/kernels/kernel_util.h"
 #include "tensorflow/lite/kernels/op_macros.h"
 
+// to make add.cc work with f16 and bf16 the following line must be commented -
+// line: 701 and 1557 in "tensorflow/lite/kernels/BUILD", line: 62 in
+// "tensorflow/lite/core/kernels/builtin_op_kernels.h" and line: 58 in
+// "tensorflow/lite/core/kernels/register.cc"
+
 namespace tflite {
 namespace ops {
 namespace builtin {
@@ -293,6 +298,34 @@ void EvalAdd(TfLiteContext* context, TfLiteNode* node, TfLiteAddParams* params,
         TF_LITE_ADD(optimized_ops, Add, float);
       }
     }
+  } else if (output->type == kTfLiteFloat16) {
+    if (kernel_type == kReference) {
+      if (need_broadcast) {
+        TF_LITE_ADD(reference_ops, BroadcastAdd6DSlow, Eigen::half);
+      } else {
+        TF_LITE_ADD(reference_ops, Add, Eigen::half);
+      }
+    } else {
+      if (need_broadcast) {
+        TF_LITE_ADD(optimized_ops, BroadcastAddDispatch, Eigen::half);
+      } else {
+        TF_LITE_ADD(optimized_ops, Add, Eigen::half);
+      }
+    }
+  } else if (output->type == kTfLiteBFloat16) {
+    if (kernel_type == kReference) {
+      if (need_broadcast) {
+        TF_LITE_ADD(reference_ops, BroadcastAdd6DSlow, Eigen::bfloat16);
+      } else {
+        TF_LITE_ADD(reference_ops, Add, Eigen::bfloat16);
+      }
+    } else {
+      if (need_broadcast) {
+        TF_LITE_ADD(optimized_ops, BroadcastAddDispatch, Eigen::bfloat16);
+      } else {
+        TF_LITE_ADD(optimized_ops, Add, Eigen::bfloat16);
+      }
+    }
   } else if (output->type == kTfLiteInt16) {
     int16_t output_activation_min, output_activation_max;
     CalculateActivationRange(params->activation, &output_activation_min,
@@ -417,7 +450,8 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_OK(context,
                     GetOutputSafe(context, node, kOutputTensor, &output));
 
-  if (output->type == kTfLiteFloat32 || output->type == kTfLiteInt32 ||
+  if (output->type == kTfLiteFloat32 || output->type == kTfLiteFloat16 ||
+      output->type == kTfLiteBFloat16 || output->type == kTfLiteInt32 ||
       output->type == kTfLiteInt64 ||
       (output->quantization.type == kTfLiteNoQuantization &&
        output->type == kTfLiteInt16)) {
