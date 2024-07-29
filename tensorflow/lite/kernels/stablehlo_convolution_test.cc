@@ -104,7 +104,7 @@ class StablehloConvolutionOpModel : public SingleOpModel {
   int output_;
 };
 
-TEST(StablehloConvolutionOpTest, kBF16TestTypesTensorsWork) {
+TEST(StablehloConvolutionOpTest, ConvolutionBFloat16) {
   TfLiteStablehloConvolutionParams params = {
       {1, 1},        // window_strides
       2,             // num_window_strides
@@ -149,7 +149,7 @@ TEST(StablehloConvolutionOpTest, kBF16TestTypesTensorsWork) {
               Pointwise(FloatNear(1e-5), expected_values));
 }
 
-TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork1) {
+TEST(StablehloConvolutionOpTest, ConvolutionInt64) {
   TfLiteStablehloConvolutionParams params = {
       {1},     // window_strides
       1,       // num_window_strides

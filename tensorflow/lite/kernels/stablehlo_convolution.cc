@@ -32,9 +32,10 @@ namespace stablehlo_convolution {
 namespace {
 
 static constexpr int kMaxDims = 6;
+static constexpr int kMaxTemporaryTensors = 2;
 
 struct ConvolutionData {
-  enum { kInputlhs, kInputrhs };
+  enum { kInputLhs, kInputRhs };
   enum { kOutput };
   int scratch_tensor_index;
   int64_t rank;
@@ -45,9 +46,7 @@ int64_t DivNegRoundAwayOrZero(int64_t num, int64_t denum) {
   return num < 0 ? (num - denum + 1) / denum : 0;
 }
 
-TfLiteIntArray* BuildOuputTensorDims(TfLiteNode* node) {
-  ConvolutionData& convolution_data =
-      *reinterpret_cast<ConvolutionData*>(node->user_data);
+TfLiteIntArray* BuildOuputTensorDims(ConvolutionData& convolution_data) {
   TfLiteIntArray* dims = TfLiteIntArrayCreate(convolution_data.rank);
   for (int64_t i = 0; i < convolution_data.rank; ++i) {
     dims->data[i] = convolution_data.output_shape[i];
@@ -98,8 +97,9 @@ TfLiteStatus PrepareOutput(TfLiteContext* context, TfLiteNode* node,
         .output_shape[convolution_params.output_spatial_dimensions[i]] =
         expected_output_shape;
   }
-  TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, output,
-                                                   BuildOuputTensorDims(node)));
+  TF_LITE_ENSURE_OK(
+      context, context->ResizeTensor(context, output,
+                                     BuildOuputTensorDims(convolution_data)));
   return kTfLiteOk;
 }
 
@@ -110,6 +110,8 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
       *reinterpret_cast<TfLiteStablehloConvolutionParams*>(node->builtin_data);
   ConvolutionData& convolution_data =
       *reinterpret_cast<ConvolutionData*>(node->user_data);
+  context->AddTensors(context, kMaxTemporaryTensors,
+                      &convolution_data.scratch_tensor_index);
 
   TfLiteIntArrayFree(node->temporaries);
   node->temporaries = TfLiteIntArrayCreate(2);
@@ -156,7 +158,6 @@ TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
 
 void* Init(TfLiteContext* context, const char* options, size_t options_len) {
   ConvolutionData* convolution_data = new ConvolutionData();
-  context->AddTensors(context, 2, &convolution_data->scratch_tensor_index);
   return convolution_data;
 }
 
@@ -166,9 +167,9 @@ void Free(TfLiteContext* context, void* node_data) {
 
 TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   const TfLiteTensor* lhs_tensor =
-      GetInput(context, node, ConvolutionData::kInputlhs);
+      GetInput(context, node, ConvolutionData::kInputLhs);
   const TfLiteTensor* rhs_tensor =
-      GetInput(context, node, ConvolutionData::kInputrhs);
+      GetInput(context, node, ConvolutionData::kInputRhs);
   TfLiteTensor* output_tensor =
       GetOutput(context, node, ConvolutionData::kOutput);
 
@@ -311,9 +312,9 @@ void EvalWithType(TfLiteContext* context, TfLiteNode* node,
 
 TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   const TfLiteTensor* lhs_tensor =
-      GetInput(context, node, ConvolutionData::kInputlhs);
+      GetInput(context, node, ConvolutionData::kInputLhs);
   const TfLiteTensor* rhs_tensor =
-      GetInput(context, node, ConvolutionData::kInputrhs);
+      GetInput(context, node, ConvolutionData::kInputRhs);
   TfLiteTensor* output_tensor =
       GetOutput(context, node, ConvolutionData::kOutput);
 

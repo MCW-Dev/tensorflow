@@ -685,7 +685,7 @@ typedef struct {
   int64_t feature_group_count;
   int64_t batch_group_count;
   uint32_t
-      precision_config[TFLITE_STABLEHLO_CONVOLUTION_PARAMS_MAX_DIMENSION_COUNT];
+      precision_config[2];
   int num_precision_config;
 } TfLiteStablehloConvolutionParams;
 
