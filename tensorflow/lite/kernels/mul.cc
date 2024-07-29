@@ -46,6 +46,12 @@ limitations under the License.
 #include "tensorflow/lite/minimal_logging.h"
 #endif  // TFLITE_KERNEL_USE_XNNPACK
 
+// to make mul.cc work with f16 and bf16 the following line must be commented -
+// line: 701 in "tensorflow/lite/kernels/BUILD", line: 62 in
+// "tensorflow/lite/core/kernels/builtin_op_kernels.h" and line: 58 in
+// "tensorflow/lite/core/kernels/register.cc"
+// without commenting conv, it causes compilation errors in Eigen library
+// headers
 namespace tflite {
 namespace ops {
 namespace builtin {
@@ -242,6 +248,18 @@ void EvalMul(TfLiteContext* context, TfLiteNode* node, TfLiteMulParams* params,
         TF_LITE_MUL(optimized_ops, Mul, float);
       }
     }
+  } else if (output->type == kTfLiteFloat16) {
+    if (need_broadcast) {
+      TF_LITE_MUL(reference_ops, BroadcastMul6DSlow, Eigen::half);
+    } else {
+      TF_LITE_MUL(reference_ops, Mul, Eigen::half);
+    }
+  } else if (output->type == kTfLiteBFloat16) {
+    if (need_broadcast) {
+      TF_LITE_MUL(reference_ops, BroadcastMul6DSlow, Eigen::bfloat16);
+    } else {
+      TF_LITE_MUL(reference_ops, Mul, Eigen::bfloat16);
+    }
   } else if (output->type == kTfLiteInt16) {
     int16_t output_activation_min, output_activation_max;
     CalculateActivationRange(params->activation, &output_activation_min,
@@ -387,7 +405,8 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node, OpData* data,
                       TfLiteMulParams* params, const TfLiteTensor* input1,
                       const TfLiteTensor* input2, TfLiteTensor* output) {
   bool output_quantized = output->quantization.type != kTfLiteNoQuantization;
-  if (output->type == kTfLiteFloat32 || output->type == kTfLiteInt32 ||
+  if (output->type == kTfLiteFloat32 || output->type == kTfLiteFloat16 ||
+      output->type == kTfLiteBFloat16 || output->type == kTfLiteInt32 ||
       output->type == kTfLiteInt64 || output->type == kTfLiteComplex64 ||
       (!output_quantized && output->type == kTfLiteInt16) ||
       output->type == kTfLiteUInt32) {
@@ -398,10 +417,11 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node, OpData* data,
         context, EvalQuantized<kernel_type>(context, node, params, data, input1,
                                             input2, output));
   } else {
-    TF_LITE_KERNEL_LOG(context,
-                       "Mul only supports FLOAT32, COMPLEX32, INT8, INT16,"
-                       " INT32, INT64 and quantized UINT8 now, got %d.",
-                       output->type);
+    TF_LITE_KERNEL_LOG(
+        context,
+        "Mul only supports FLOAT32, COMPLEX32, INT8, INT16, FLOAT16, BFLOAT16"
+        " INT32, INT64 and quantized UINT8 now, got %d.",
+        output->type);
     return kTfLiteError;
   }
 
