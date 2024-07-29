@@ -610,7 +610,7 @@ typedef struct {
   int num_rhs_contracting_dimensions;
   int num_precision_configs;
   uint32_t
-      precision_config[TFLITE_STABLEHLO_DOT_GENERAL_PARAMS_MAX_DIMENSION_COUNT];
+      precision_config[2];
 } TfLiteStablehloDotGeneralParams;
 
 typedef struct {

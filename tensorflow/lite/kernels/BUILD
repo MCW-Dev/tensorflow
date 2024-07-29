@@ -888,7 +888,6 @@ cc_library(
         ":variable_op_kernels",
         "@fft2d",
         "@ruy//ruy/profiler:instrumentation",
-        "//tensorflow/core/platform:bfloat16",
         "//tensorflow/lite/c:c_api_types",
         "//tensorflow/lite/c:common",
         "//tensorflow/lite:array",

@@ -85,22 +85,7 @@ class StablehloDotGeneralOpModel : public SingleOpModel {
   int output_;
 };
 
-template <>
-void StablehloDotGeneralOpModel::SetInputs<Eigen::half>(
-    std::initializer_list<Eigen::half> data_lhs,
-    std::initializer_list<Eigen::half> data_rhs) {
-  PopulateTensor<Eigen::half>(lhs_, data_lhs);
-  PopulateTensor<Eigen::half>(rhs_, data_rhs);
-}
-template <>
-void StablehloDotGeneralOpModel::SetInputs<Eigen::bfloat16>(
-    std::initializer_list<Eigen::bfloat16> data_lhs,
-    std::initializer_list<Eigen::bfloat16> data_rhs) {
-  PopulateTensor<Eigen::bfloat16>(lhs_, data_lhs);
-  PopulateTensor<Eigen::bfloat16>(rhs_, data_rhs);
-}
-
-TEST(StablehloDotGeneralModelTest, F32TestWorks1) {
+TEST(StablehloDotGeneralModelTest, DotGeneralFloat32) {
   TfLiteStablehloDotGeneralParams params = {
       {0},  // lhs_batching_dimensions;
       1,    // num_lhs_batching_dimensions
@@ -128,7 +113,7 @@ TEST(StablehloDotGeneralModelTest, F32TestWorks1) {
   EXPECT_THAT(model.GetOutput<float>(), Pointwise(FloatEq(), expected_values));
 }
 
-TEST(StablehloDotGeneralModelTest, F16TestWorks1) {
+TEST(StablehloDotGeneralModelTest, DotGeneralFloat16) {
   TfLiteStablehloDotGeneralParams params = {
       {0},  // lhs_batching_dimensions;
       1,    // num_lhs_batching_dimensions
@@ -164,7 +149,7 @@ TEST(StablehloDotGeneralModelTest, F16TestWorks1) {
               Pointwise(FloatNear(1e-5), expected_values));
 }
 
-TEST(StablehloDotGeneralModelTest, BFloat16Works1) {
+TEST(StablehloDotGeneralModelTest, DotGeneralBFloat16) {
   TfLiteStablehloDotGeneralParams params = {
       {0},  // lhs_batching_dimensions;
       1,    // num_lhs_batching_dimensions
