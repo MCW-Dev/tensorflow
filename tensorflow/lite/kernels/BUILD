@@ -1425,7 +1425,7 @@ cc_test(
 
 cc_test(
     name = "stablehlo_convolution_test",
-srcs = ["stablehlo_convolution_test.cc"],
+    srcs = ["stablehlo_convolution_test.cc"],
     deps = [
         ":test_main",
         ":test_util",
