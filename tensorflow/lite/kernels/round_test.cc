@@ -13,11 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <gtest/gtest.h>
-
 #include <initializer_list>
 #include <vector>
 
+#include <gtest/gtest.h>
 #include "Eigen/Core"
 #include "tensorflow/lite/kernels/test_util.h"
 #include "tensorflow/lite/schema/schema_generated.h"
@@ -30,9 +29,9 @@ using ::testing::ElementsAreArray;
 template <typename T>
 class RoundOpModel : public SingleOpModel {
  public:
-  RoundOpModel(std::initializer_list<int> input_shape, TensorType input_type) {
-    input_ = AddInput(input_type);
-    output_ = AddOutput(input_type);
+  RoundOpModel(std::initializer_list<int> input_shape) {
+    input_ = AddInput(GetTensorType<T>());
+    output_ = AddOutput(GetTensorType<T>());
     SetBuiltinOp(BuiltinOperator_ROUND, BuiltinOptions_NONE, 0);
     BuildInterpreter({
         input_shape,
@@ -50,7 +49,7 @@ class RoundOpModel : public SingleOpModel {
 };
 
 TEST(RoundOpTest, SingleDim) {
-  RoundOpModel<float> model({6}, TensorType_FLOAT32);
+  RoundOpModel<float> model({6});
   model.PopulateTensor<float>(model.input(), {8.5, 0.0, 3.5, 4.2, -3.5, -4.5});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
   EXPECT_THAT(model.GetOutput(), ElementsAreArray({8, 0, 4, 4, -4, -4}));
@@ -58,7 +57,7 @@ TEST(RoundOpTest, SingleDim) {
 }
 
 TEST(RoundOpTest, MultiDims) {
-  RoundOpModel<float> model({2, 1, 1, 6}, TensorType_FLOAT32);
+  RoundOpModel<float> model({2, 1, 1, 6});
   model.PopulateTensor<float>(
       model.input(), {0.0001, 8.0001, 0.9999, 9.9999, 0.5, -0.0001, -8.0001,
                       -0.9999, -9.9999, -0.5, -2.5, 1.5});
@@ -69,7 +68,7 @@ TEST(RoundOpTest, MultiDims) {
 }
 
 TEST(RoundOpTest, Float16SingleDim) {
-  RoundOpModel<Eigen::half> model({6}, TensorType_FLOAT16);
+  RoundOpModel<Eigen::half> model({6});
   model.PopulateTensor<Eigen::half>(
       model.input(), {Eigen::half(8.5), Eigen::half(0.0), Eigen::half(3.5),
                       Eigen::half(4.2), Eigen::half(-3.5), Eigen::half(-4.5)});
@@ -82,7 +81,7 @@ TEST(RoundOpTest, Float16SingleDim) {
 }
 
 TEST(RoundOpTest, Float16MultiDims) {
-  RoundOpModel<Eigen::half> model({2, 1, 1, 6}, TensorType_FLOAT16);
+  RoundOpModel<Eigen::half> model({2, 1, 1, 6});
   model.PopulateTensor<Eigen::half>(
       model.input(),
       {Eigen::half(0.0001), Eigen::half(8.0001), Eigen::half(0.9999),
@@ -100,7 +99,7 @@ TEST(RoundOpTest, Float16MultiDims) {
 }
 
 TEST(RoundOpTest, BFloat16SingleDim) {
-  RoundOpModel<Eigen::bfloat16> model({6}, TensorType_BFLOAT16);
+  RoundOpModel<Eigen::bfloat16> model({6});
   model.PopulateTensor<Eigen::bfloat16>(
       model.input(),
       {Eigen::bfloat16(8.5), Eigen::bfloat16(0.0), Eigen::bfloat16(3.5),
@@ -114,7 +113,7 @@ TEST(RoundOpTest, BFloat16SingleDim) {
 }
 
 TEST(RoundOpTest, BFloat16MultiDims) {
-  RoundOpModel<Eigen::bfloat16> model({2, 1, 1, 6}, TensorType_BFLOAT16);
+  RoundOpModel<Eigen::bfloat16> model({2, 1, 1, 6});
   model.PopulateTensor<Eigen::bfloat16>(
       model.input(),
       {Eigen::bfloat16(0.0001), Eigen::bfloat16(8.0001),

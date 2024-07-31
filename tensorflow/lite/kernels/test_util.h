@@ -15,8 +15,6 @@ limitations under the License.
 #ifndef TENSORFLOW_LITE_KERNELS_TEST_UTIL_H_
 #define TENSORFLOW_LITE_KERNELS_TEST_UTIL_H_
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -39,6 +37,8 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include "absl/algorithm/container.h"
 #include "absl/types/span.h"
 #include "flatbuffers/flatbuffers.h"  // from @flatbuffers
@@ -1171,6 +1171,7 @@ TFLITE_TENSOR_TYPE_ASSOC(Eigen::half, TensorType_FLOAT16);
 TFLITE_TENSOR_TYPE_ASSOC(float, TensorType_FLOAT32);
 TFLITE_TENSOR_TYPE_ASSOC(double, TensorType_FLOAT64);
 TFLITE_TENSOR_TYPE_ASSOC(std::string, TensorType_STRING);
+TFLITE_TENSOR_TYPE_ASSOC(Eigen::bfloat16, TensorType_BFLOAT16);
 
 #undef TFLITE_TENSOR_TYPE_ASSOC
 
