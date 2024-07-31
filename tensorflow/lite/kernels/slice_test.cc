@@ -12,13 +12,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#include <gtest/gtest.h>
 #include <stdint.h>
 
 #include <initializer_list>
 #include <string>
 #include <vector>
 
+#include <gtest/gtest.h>
+#include "Eigen/Core"
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/kernels/test_util.h"
 #include "tensorflow/lite/schema/schema_generated.h"
