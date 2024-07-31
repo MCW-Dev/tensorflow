@@ -20,9 +20,9 @@ limitations under the License.
 #ifndef TENSORFLOW_LITE_KERNELS_SUBGRAPH_TEST_UTIL_H_
 #define TENSORFLOW_LITE_KERNELS_SUBGRAPH_TEST_UTIL_H_
 
-#include <gtest/gtest.h>
 #include <stdint.h>
 
+#include <gtest/gtest.h>
 #include <memory>
 #include <string>
 #include <vector>

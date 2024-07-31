@@ -11,13 +11,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <gtest/gtest.h>
-
 #include <initializer_list>
 #include <vector>
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include "Eigen/Core"
-#include "subgraph_test_util.h"
+#include "tensorflow/lite/kernels/subgraph_test_util.h"
 #include "tensorflow/lite/c/c_api_types.h"
 #include "tensorflow/lite/c/common.h"
 #include "tensorflow/lite/core/subgraph.h"
@@ -89,7 +89,7 @@ void SortOpModel::SetInput<Eigen::bfloat16>(
   PopulateTensor<Eigen::bfloat16>(inputs_[index], data);
 }
 
-TEST(StablehloSortOpTest, SortWorks1) {
+TEST(StablehloSortOpTest, SortInt32) {
   ComparisonDirection comparison_direction = ComparisonDirection::kGT;
   TfLiteStablehloSortParams params = {5, true, 1};
   int num_inputs = 1;
@@ -112,7 +112,7 @@ TEST(StablehloSortOpTest, SortWorks1) {
   EXPECT_THAT(model.GetOutput<int>(0), ElementsAreArray(expected_values_0));
 }
 
-TEST(StablehloSortOpTest, SortWorks2) {
+TEST(StablehloSortOpTest, SortFloat32) {
   ComparisonDirection comparison_direction = ComparisonDirection::kLE;
   TfLiteStablehloSortParams params = {0, false, 1};
   int num_inputs = 2;
@@ -142,7 +142,7 @@ TEST(StablehloSortOpTest, SortWorks2) {
   EXPECT_THAT(model.GetOutput<float>(1), ElementsAreArray(expected_values_1));
 }
 
-TEST(StablehloSortOpTest, SortWorks3) {
+TEST(StablehloSortOpTest, SortInt32UnstableSort) {
   ComparisonDirection comparison_direction = ComparisonDirection::kLE;
   TfLiteStablehloSortParams params = {1, false, 1};
   int num_inputs = 3;
@@ -163,7 +163,7 @@ TEST(StablehloSortOpTest, SortWorks3) {
   EXPECT_THAT(model.GetOutput<int>(2), ElementsAreArray(expected_values_2));
 }
 
-TEST(StablehloSortOpTest, QuantizedSortWorks1) {
+TEST(StablehloSortOpTest, SortQuantized) {
   ComparisonDirection comparison_direction = ComparisonDirection::kLE;
   TfLiteStablehloSortParams params = {1, true, 1};
   int num_inputs = 2;

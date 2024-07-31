@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "tensorflow/lite/kernels/subgraph_test_util.h"
 
-#include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -24,6 +23,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include <gtest/gtest.h>
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/c/c_api_types.h"
 #include "tensorflow/lite/core/c/builtin_op_data.h"
@@ -82,6 +82,7 @@ void AddTileNode(Subgraph* subgraph, int input0, int input1, int output) {
   subgraph->AddNodeWithParameters({input0, input1}, {output}, {}, nullptr, 0,
                                   nullptr, tile_reg, &node_index);
 }
+
 void AddLessEqualNode(Subgraph* subgraph, int input0, int input1, int output) {
   int node_index;
   auto* less_equal_reg = ops::builtin::Register_LESS_EQUAL();
@@ -1014,38 +1015,39 @@ void SubgraphBuilder::BuildLessEqualCondSubgraph(Subgraph* subgraph, int rhs) {
   subgraph->AddNodeWithParameters({kInput1, kInput2}, {kOutput}, {}, nullptr, 0,
                                   nullptr, le_reg, &node_index);
 }
+
 // BuildComparatorSubgraph is a user-defined subgraph that is user-controlled.
 // If a composite subgraph is needed, it has to be added as a separate Builder
 // function.
 void SubgraphBuilder::BuildComparatorSubgraph(
     Subgraph* subgraph, ComparisonDirection comparison_direction,
     int num_inputs, int lhs, int rhs, TfLiteType type) {
-  const int kMaxInputs = 2 * num_inputs;
-  std::vector<int> inputs(kMaxInputs);
+  const int max_inputs = 2 * num_inputs;
+  std::vector<int> inputs(max_inputs);
   std::iota(inputs.begin(), inputs.end(), 0);
-  const int kTensorCount = kMaxInputs + 1;
+  const int kTensorCount = max_inputs + 1;
   int first_new_tensor_index;
   ASSERT_EQ(subgraph->AddTensors(kTensorCount, &first_new_tensor_index),
             kTfLiteOk);
   ASSERT_EQ(first_new_tensor_index, 0);
   ASSERT_EQ(subgraph->SetInputs(inputs), kTfLiteOk);
-  ASSERT_EQ(subgraph->SetOutputs({kMaxInputs}), kTfLiteOk);
+  ASSERT_EQ(subgraph->SetOutputs({max_inputs}), kTfLiteOk);
 
   for (int i = 0; i < kTensorCount; ++i) {
     SetupTensor(subgraph, i, type);
   }
   switch (comparison_direction) {
     case ComparisonDirection::kLE:
-      AddLessEqualNode(subgraph, lhs, rhs, kMaxInputs);
+      AddLessEqualNode(subgraph, lhs, rhs, max_inputs);
       break;
     case ComparisonDirection::kGE:
-      AddGreaterEqualNode(subgraph, lhs, rhs, kMaxInputs);
+      AddGreaterEqualNode(subgraph, lhs, rhs, max_inputs);
       break;
     case ComparisonDirection::kGT:
-      AddGreaterNode(subgraph, lhs, rhs, kMaxInputs);
+      AddGreaterNode(subgraph, lhs, rhs, max_inputs);
       break;
     case ComparisonDirection::kLT:
-      AddLessNode(subgraph, lhs, rhs, kMaxInputs);
+      AddLessNode(subgraph, lhs, rhs, max_inputs);
       break;
     default:
       TF_LITE_FATAL(

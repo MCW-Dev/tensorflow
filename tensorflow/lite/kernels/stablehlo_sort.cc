@@ -38,17 +38,6 @@ namespace stablehlo_sort {
 constexpr int kInputTensor = 0;
 constexpr int kOutputTensor = 0;
 
-std::vector<int> FlatToTensorIndex(int flat_index, const int dims,
-                                   const RuntimeShape& shape) {
-  int div = 1;
-  std ::vector<int> index(dims);
-  for (int i = dims - 1; i >= 0; --i) {
-    index[i] = (flat_index / div) % shape.Dims(i);
-    div *= shape.Dims(i);
-  }
-  return index;
-}
-
 template <typename DataType>
 TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
                       const std::vector<const TfLiteTensor*>& operands,
@@ -60,49 +49,39 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
   auto* subgraphs = this_subgraph->GetSubgraphs();
   Subgraph& comparator_subgraph =
       *(*subgraphs)[data->comparator_subgraph_index];
-  const int num_inputs = node->inputs->size;
-  const int num_outputs = node->outputs->size;
 
   const TfLiteTensor* operand = operands[0];
   const int rank = NumDimensions(operand);
   const int operand_size = NumElements(operand);
-
-  std::vector<int> operand_index(rank);
-  std::vector<int> output_index(rank);
-  std::vector<DataType> args(operands.size() * 2);
-
   const int dim_size = GetTensorShape(operand).Dims(dimension);
   std::vector<int> indices(dim_size);
+  std::vector<int> current_index(rank, 0);
   for (int k = 0; k < operand_size; ++k) {
-    auto result_it = FlatToTensorIndex(k, rank, GetTensorShape(operand));
-    if (result_it[dimension] != 0) continue;
+    if (current_index[dimension] != 0) {
+      NextIndex(rank, GetTensorShape(operand).DimsData(), current_index.data());
+      continue;
+    }
     std::iota(indices.begin(), indices.end(), 0);
 
-    auto comparator_wrapper = [&](int64_t lhs_handle,
-                                  int64_t rhs_handle) -> bool {
-      auto lhs_index = result_it;
-      auto rhs_index = result_it;
-      lhs_index[dimension] = lhs_handle;
-      rhs_index[dimension] = rhs_handle;
+    auto comparator_wrapper = [&](int lhs_indices, int rhs_indices) -> bool {
+      auto lhs_index = current_index;
+      auto rhs_index = current_index;
+      lhs_index[dimension] = lhs_indices;
+      rhs_index[dimension] = rhs_indices;
       const DataType* operand_data = GetTensorData<DataType>(operand);
       int flat_lhs_index = TensorIndexToFlat(lhs_index.data(), lhs_index.size(),
                                              GetTensorShape(operand));
       int flat_rhs_index = TensorIndexToFlat(rhs_index.data(), rhs_index.size(),
                                              GetTensorShape(operand));
-      for (int x = 0; x < operands.size(); ++x) {
-        args[2 * x] = GetTensorData<DataType>(operands[x])[flat_lhs_index];
-        args[(2 * x) + 1] =
-            GetTensorData<DataType>(operands[x])[flat_rhs_index];
-      }
       for (int i = 0; i < comparator_subgraph.inputs().size(); ++i) {
         TfLiteTensor* subgraph_input =
             comparator_subgraph.tensor(comparator_subgraph.inputs()[i]);
-        if (operands[0]->type == kTfLiteInt8 ||
-            operands[0]->type == kTfLiteInt16) {
-          subgraph_input->params.scale = operands[0]->params.scale;
-          subgraph_input->params.zero_point = operands[0]->params.zero_point;
-        }
-        std::memcpy(subgraph_input->data.raw, &args[i], sizeof(DataType));
+        std::memcpy(
+            subgraph_input->data.raw,
+            (i % 2 == 0
+                 ? &GetTensorData<DataType>(operands[i / 2])[flat_lhs_index]
+                 : &GetTensorData<DataType>(operands[i / 2])[flat_rhs_index]),
+            sizeof(DataType));
       }
 
       TF_LITE_ENSURE_OK(context, comparator_subgraph.Invoke());
@@ -122,8 +101,8 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
          ++operand_handle) {
       int64_t result_handle = indices[operand_handle];
       for (int i = 0; i < operands.size(); ++i) {
-        auto operand_index = result_it;
-        auto output_index = result_it;
+        auto operand_index = current_index;
+        auto output_index = current_index;
         operand_index[dimension] = operand_handle;
         output_index[dimension] = result_handle;
         const DataType* operand_data = GetTensorData<DataType>(operands[i]);
@@ -138,6 +117,8 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
         output_data[flat_output_index] = operand_val;
       }
     }
+
+    NextIndex(rank, GetTensorShape(operand).DimsData(), current_index.data());
   }
   return kTfLiteOk;
 }
@@ -172,10 +153,10 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
     int input_idx = comparator_subgraph->inputs()[i];
     TfLiteTensor* comparator_subgraph_input =
         comparator_subgraph->tensor(input_idx);
+    comparator_subgraph_input->params.scale = input->params.scale;
+    comparator_subgraph_input->params.zero_point = input->params.zero_point;
     TF_LITE_ENSURE_OK(context, comparator_subgraph->AllocateTensors());
   }
-  TfLiteTensor* subgraph_output =
-      comparator_subgraph->tensor(comparator_subgraph->outputs()[0]);
   TF_LITE_ENSURE_MSG(context, node->inputs->size > 0,
                      "'stablehlo.sort' Input should not be empty.");
 
@@ -187,12 +168,6 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
     TF_LITE_ENSURE_MSG(
         context, input_tensor->type == output_tensor->type,
         "'stablehlo.sort' Input and Output tensor types must be the same.");
-  }
-  for (int i = 0; i < node->inputs->size; ++i) {
-    const TfLiteTensor* input_tensor;
-    TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, i, &input_tensor));
-    TfLiteTensor* output_tensor;
-    TF_LITE_ENSURE_OK(context, GetOutputSafe(context, node, i, &output_tensor));
     TF_LITE_ENSURE_MSG(
         context, input_tensor->dims->size == output_tensor->dims->size,
         "'stablehlo.sort' Input and Output tensor shapes must be the same.");
@@ -227,7 +202,7 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   TfLiteType data_type = inputs[0]->type;
   const TfLiteStablehloSortParams* data =
       reinterpret_cast<TfLiteStablehloSortParams*>(node->builtin_data);
-  long dimension = data->dimension;
+  int64_t dimension = data->dimension;
   bool is_stable = data->is_stable;
 
   if (data_type == kTfLiteFloat32) {
@@ -246,7 +221,8 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
     return EvalImpl<int16_t>(context, node, inputs, dimension, is_stable,
                              outputs);
   } else if (data_type == kTfLiteInt32) {
-    return EvalImpl<int>(context, node, inputs, dimension, is_stable, outputs);
+    return EvalImpl<int32_t>(context, node, inputs, dimension, is_stable,
+                             outputs);
   } else {
     TF_LITE_KERNEL_LOG(context, "(Index Type: %s) currently not supported.\n",
                        TfLiteTypeGetName(data_type));
