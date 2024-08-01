@@ -213,6 +213,8 @@ TfLiteRegistration* Register_STABLEHLO_MAXIMUM();
 
 TfLiteRegistration* Register_STABLEHLO_MINIMUM();
 
+TfLiteRegistration* Register_STABLEHLO_CONVOLUTION();
+
 TfLiteRegistration*
 Register_STABLEHLO_RESHAPE();  // WARNING: not implemented, using this op will
                                // crash the runtime
@@ -225,9 +227,6 @@ Register_STABLEHLO_CONCATENATE();  // WARNING: not implemented, using this op
 TfLiteRegistration*
 Register_STABLEHLO_BROADCAST_IN_DIM();  // WARNING: not implemented, using this
                                         // op will crash the runtime
-TfLiteRegistration*
-Register_STABLEHLO_CONVOLUTION();  // WARNING: not implemented, using this
-                                   // op will crash the runtime
 TfLiteRegistration*
 Register_STABLEHLO_SLICE();  // WARNING: not implemented, using this
                              // op will crash the runtime
