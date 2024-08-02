@@ -104,6 +104,44 @@ class StablehloConvolutionOpModel : public SingleOpModel {
   int output_;
 };
 
+TEST(StablehloConvolutionOpTest, ConvolutionFloat32) {
+  TfLiteStablehloConvolutionParams params = {
+      {1, 1},        // window_strides
+      2,             // num_window_strides
+      {0, 0, 0, 0},  // padding
+      4,             // num_padding
+      {1, 1},        // lhs_dilation
+      2,             // num_lhs_dilation
+      {1, 1},        // rhs_dilation
+      2,             // num_rhs_dilation
+      0,             // input_batch_dimension
+      1,             // input_feature_dimension
+      {2, 3},        // input_spatial_dimensions
+      2,             // num_input_spatial_dimensions
+      1,             // kernel_input_feature_dimension
+      0,             // kernel_output_feature_dimension
+      {2, 3},        // kernel_spatial_dimenstions
+      2,             // nun_kernel_spatial_dimensions
+      0,             // output_batch_dimension
+      1,             // output_feature_dimension
+      {2, 3},        // output_spatial_dimensions
+      2,             // num_output_spatial_dimensions
+      1,             // feature_group_count
+      1,             // batch_group_count
+      {tflite::StablehloPrecisionConfig::StablehloPrecisionConfig_DEFAULT,
+       tflite::StablehloPrecisionConfig::
+           StablehloPrecisionConfig_DEFAULT},  // precision config
+  };
+  StablehloConvolutionOpModel model({TensorType_FLOAT32, {1, 1, 2, 2}},
+                                    {TensorType_FLOAT32, {1, 1, 1, 1}}, params);
+  model.SetLhs<float>({1.16, 2.43, 3.81, 4.77});
+  model.SetRhs<float>({2.21});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<float> expected_values = {2.5636, 5.3703, 8.4201, 10.5417};
+  EXPECT_THAT(model.GetOutput<float>(),
+              Pointwise(FloatNear(1e-5), expected_values));
+}
+
 TEST(StablehloConvolutionOpTest, ConvolutionBFloat16) {
   TfLiteStablehloConvolutionParams params = {
       {1, 1},        // window_strides
@@ -146,6 +184,50 @@ TEST(StablehloConvolutionOpTest, ConvolutionBFloat16) {
       Eigen::bfloat16(2.54688), Eigen::bfloat16(5.375), Eigen::bfloat16(8.375),
       Eigen::bfloat16(10.5625)};
   EXPECT_THAT(model.GetOutput<Eigen::bfloat16>(),
+              Pointwise(FloatNear(1e-5), expected_values));
+}
+
+TEST(StablehloConvolutionOpTest, ConvolutionFloat16) {
+  TfLiteStablehloConvolutionParams params = {
+      {1, 1},        // window_strides
+      2,             // num_window_strides
+      {0, 0, 0, 0},  // padding
+      4,             // num_padding
+      {1, 1},        // lhs_dilation
+      2,             // num_lhs_dilation
+      {1, 1},        // rhs_dilation
+      2,             // num_rhs_dilation
+      0,             // input_batch_dimension
+      1,             // input_feature_dimension
+      {2, 3},        // input_spatial_dimensions
+      2,             // num_input_spatial_dimensions
+      1,             // kernel_input_feature_dimension
+      0,             // kernel_output_feature_dimension
+      {2, 3},        // kernel_spatial_dimenstions
+      2,             // nun_kernel_spatial_dimensions
+      0,             // output_batch_dimension
+      1,             // output_feature_dimension
+      {2, 3},        // output_spatial_dimensions
+      2,             // num_output_spatial_dimensions
+      1,             // feature_group_count
+      1,             // batch_group_count
+      {tflite::StablehloPrecisionConfig::StablehloPrecisionConfig_DEFAULT,
+       tflite::StablehloPrecisionConfig::
+           StablehloPrecisionConfig_DEFAULT},  // precision config
+  };
+  StablehloConvolutionOpModel model({TensorType_FLOAT16, {1, 1, 2, 2}},
+                                    {TensorType_FLOAT16, {1, 1, 1, 1}}, params);
+  std::initializer_list<Eigen::half> lhs_data{
+      Eigen::half(1.16), Eigen::half(2.43), Eigen::half(3.81),
+      Eigen::half(4.77)};
+  std::initializer_list<Eigen::half> rhs_data{Eigen::half(2.21)};
+  model.SetLhs<Eigen::half>(lhs_data);
+  model.SetRhs<Eigen::half>(rhs_data);
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::initializer_list<Eigen::half> expected_values = {
+      Eigen::half(2.56445), Eigen::half(5.37109), Eigen::half(8.42188),
+      Eigen::half(10.5469)};
+  EXPECT_THAT(model.GetOutput<Eigen::half>(),
               Pointwise(FloatNear(1e-5), expected_values));
 }
 

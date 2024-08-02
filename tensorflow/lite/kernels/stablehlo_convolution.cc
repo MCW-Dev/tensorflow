@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cstdint>
+#include <unordered_set>
 #include <vector>
 
 #include "Eigen/Core"  // from @eigen_archive
@@ -52,6 +53,169 @@ TfLiteIntArray* BuildOuputTensorDims(ConvolutionData& convolution_data) {
     dims->data[i] = convolution_data.output_shape[i];
   }
   return dims;
+}
+
+bool IsUnique(const int64_t& batch_dimension, const int64_t& feature_dimension,
+              const int64_t* operand, size_t N) {
+  std::unordered_set<int64_t> seen_elements;
+  if (!seen_elements.insert(batch_dimension).second) {
+    return false;
+  }
+  if (!seen_elements.insert(feature_dimension).second) {
+    return false;
+  }
+  for (int i = 0; i < N; ++i) {
+    if (!seen_elements.insert(operand[i]).second) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsGreaterThanZero(const int64_t* operand, size_t N) {
+  return std::all_of(operand, operand + N, [](int64_t x) { return x > 0; });
+}
+
+bool IsInRange(const int64_t& batch_dimension, const int64_t& feature_dimension,
+               const int64_t* operand, size_t N) {
+  auto is_in_range = [N](int64_t v) { return v >= 0 && v < N; };
+  if (!is_in_range(batch_dimension) || !is_in_range(feature_dimension)) {
+    return false;
+  }
+  return std::all_of(operand, operand + N - 2, is_in_range);
+}
+
+TfLiteStatus CheckParameters(TfLiteContext* context, TfLiteNode* node,
+                             const TfLiteTensor* lhs, const TfLiteTensor* rhs,
+                             TfLiteTensor* output) {
+  const TfLiteStablehloConvolutionParams& convolution_params =
+      *reinterpret_cast<TfLiteStablehloConvolutionParams*>(node->builtin_data);
+
+  TF_LITE_ENSURE_MSG(
+      context, NumDimensions(lhs) == NumDimensions(rhs),
+      "'stablehlo.convolution' rank of lhs and rhs must be same");
+  TF_LITE_ENSURE_TYPES_EQ(context,lhs->type,rhs->type);
+  TF_LITE_ENSURE_MSG(
+      context, convolution_params.num_precision_config == 2,
+      "'stablehlo.convolution' size of precision_config must be two.");
+  TF_LITE_ENSURE_MSG(
+      context, convolution_params.num_window_strides == NumDimensions(lhs) - 2,
+      "'stablehlo.convolution' size of window_stride must be rank - 2");
+  TF_LITE_ENSURE_MSG(context,
+                     convolution_params.num_window_strides ==
+                             convolution_params.num_padding / 2 ||
+                         convolution_params.num_window_strides ==
+                             convolution_params.num_lhs_dilation ||
+                         convolution_params.num_window_strides ==
+                             convolution_params.num_rhs_dilation ||
+                         convolution_params.num_window_strides ==
+                             convolution_params.num_input_spatial_dimensions ||
+                         convolution_params.num_window_strides ==
+                             convolution_params.num_kernel_spatial_dimensions ||
+                         convolution_params.num_window_strides ==
+                             convolution_params.num_output_spatial_dimensions,
+                     "'stablehlo.convolution' operation parameter array "
+                     "sizes are not consistent.");
+  TF_LITE_ENSURE_MSG(context,
+                     IsGreaterThanZero(convolution_params.window_strides,
+                                       convolution_params.num_window_strides),
+                     "'stablehlo.convolution' the window_stride must be > 0");
+  TF_LITE_ENSURE_MSG(context,
+                     IsGreaterThanZero(convolution_params.lhs_dilation,
+                                       convolution_params.num_lhs_dilation),
+                     "'stablehlo.convolution' the lhs_dilation must be > 0");
+  TF_LITE_ENSURE_MSG(context,
+                     IsGreaterThanZero(convolution_params.rhs_dilation,
+                                       convolution_params.num_rhs_dilation),
+                     "'stablehlo.convolution' the rhs_dilation must be > 0");
+  TF_LITE_ENSURE_MSG(context,
+                     lhs->dims->data[convolution_params.input_batch_dimension] %
+                             convolution_params.batch_group_count ==
+                         0,
+                     "'stablehlo.convolution' dim(lhs,input_batch_dimension) % "
+                     "batch_group_count = 0");
+  TF_LITE_ENSURE_MSG(
+      context,
+      lhs->dims->data[convolution_params.input_feature_dimension] %
+              convolution_params.feature_group_count ==
+          0,
+      "'stablehlo.convolution' dim(lhs,input_feature_dimension) % "
+      "(feature_group_count) = 0");
+  TF_LITE_ENSURE_MSG(
+      context,
+      IsInRange(convolution_params.input_batch_dimension,
+                convolution_params.input_feature_dimension,
+                convolution_params.input_spatial_dimensions,
+                NumDimensions(lhs)),
+      "'stablehlo.convolution' the input_dimensions must be >= 0 and < rank");
+  TF_LITE_ENSURE_MSG(
+      context,
+      IsUnique(convolution_params.input_batch_dimension,
+               convolution_params.input_feature_dimension,
+               convolution_params.input_spatial_dimensions,
+               convolution_params.num_input_spatial_dimensions),
+      "'stablehlo.convolution' the input_dimensions must be unique");
+  TF_LITE_ENSURE_MSG(
+      context,
+      rhs->dims->data[convolution_params.kernel_input_feature_dimension] ==
+          lhs->dims->data[convolution_params.input_feature_dimension] /
+              convolution_params.feature_group_count,
+      "'stablehlo.convolution' dim(rhs,kernel_input_feature_dimension) = "
+      "Dim(lhs,input_feature_dimension) / feature_group_count");
+  TF_LITE_ENSURE_MSG(
+      context,
+      rhs->dims->data[convolution_params.kernel_output_feature_dimension] %
+              convolution_params.batch_group_count ==
+          0,
+      "'stablehlo.convolution' dim(rhs,kernel_output_feature_dimension) % "
+      "batch_group_count = 0");
+  TF_LITE_ENSURE_MSG(
+      context,
+      rhs->dims->data[convolution_params.kernel_output_feature_dimension] %
+              convolution_params.feature_group_count ==
+          0,
+      "'stablehlo.convolution' dim(rhs,kernel_output_feature_dimension) % "
+      "(feature_group_count) = 0");
+  TF_LITE_ENSURE_MSG(
+      context,
+      IsInRange(convolution_params.kernel_output_feature_dimension,
+                convolution_params.kernel_input_feature_dimension,
+                convolution_params.kernel_spatial_dimensions,
+                NumDimensions(lhs)),
+      "'stablehlo.convolution' the kernel_dimensions must be >= 0 and < rank");
+  TF_LITE_ENSURE_MSG(
+      context,
+      IsUnique(convolution_params.kernel_output_feature_dimension,
+               convolution_params.kernel_input_feature_dimension,
+               convolution_params.kernel_spatial_dimensions,
+               convolution_params.num_kernel_spatial_dimensions),
+      "'stablehlo.convolution' the kernel_dimensions must be unique");
+  TF_LITE_ENSURE_MSG(
+      context,
+      IsInRange(convolution_params.output_batch_dimension,
+                convolution_params.output_feature_dimension,
+                convolution_params.output_spatial_dimensions,
+                NumDimensions(lhs)),
+      "'stablehlo.convolution' the output_dimensions must be >= 0 and < rank");
+  TF_LITE_ENSURE_MSG(
+      context,
+      IsUnique(convolution_params.output_batch_dimension,
+               convolution_params.output_feature_dimension,
+               convolution_params.output_spatial_dimensions,
+               convolution_params.num_output_spatial_dimensions),
+      "'stablehlo.convolution' the output_dimensions must be unique");
+  TF_LITE_ENSURE_MSG(
+      context, convolution_params.feature_group_count > 0,
+      "'stablehlo.convolution' the feature_group_count must be > 0");
+  TF_LITE_ENSURE_MSG(
+      context, convolution_params.batch_group_count > 0,
+      "'stablehlo.convolution' the batch_group_count must be > 0");
+  TF_LITE_ENSURE_MSG(context,
+                     convolution_params.batch_group_count == 1 ||
+                         convolution_params.feature_group_count == 1,
+                     "'stablehlo.convolution' the batch_group_count == 1 or "
+                     "feature_group_count == 1");
+  return kTfLiteOk;
 }
 
 TfLiteStatus PrepareOutput(TfLiteContext* context, TfLiteNode* node,
@@ -172,6 +336,9 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
       GetInput(context, node, ConvolutionData::kInputRhs);
   TfLiteTensor* output_tensor =
       GetOutput(context, node, ConvolutionData::kOutput);
+
+  TF_LITE_ENSURE_OK(context, CheckParameters(context, node, lhs_tensor,
+                                             rhs_tensor, output_tensor));
 
   TF_LITE_ENSURE_OK(context, PrepareOutput(context, node, lhs_tensor,
                                            rhs_tensor, output_tensor));
