@@ -105,7 +105,7 @@ TEST(NegOpModel, NegInt64) {
 
 class NegOpQuantizedModel : public NegOpModel {
  public:
-  NegOpQuantizedModel(TensorData input, TensorData output)
+  NegOpQuantizedModel(const TensorData &input, const TensorData &output)
       : NegOpModel(SymmetricInt16Scaling(std::move(input)),
                    SymmetricInt16Scaling(std::move(output))) {}
 
@@ -130,7 +130,7 @@ class NegOpQuantizedModel : public NegOpModel {
 
 template <typename T>
 float GetTolerance(float min, float max) {
-  float kQuantizedStep =
+  const float kQuantizedStep =
       2.0 * (max - min) /
       (std::numeric_limits<T>::max() - std::numeric_limits<T>::min());
   return kQuantizedStep;
@@ -138,9 +138,9 @@ float GetTolerance(float min, float max) {
 
 template <TensorType tensor_type, typename integer_dtype>
 void QuantizedTests() {
-  float kQuantizedTolerance = GetTolerance<integer_dtype>(-128.0, 128.0);
-  std::vector<float> input = {-128.0f, -9, 0, 8, 127};
-  std::vector<float> result = {128.0f, 9, 0, -8, -127};
+  const float kQuantizedTolerance = GetTolerance<integer_dtype>(-128.0, 128.0);
+  const std::vector<float> input = {-128.0f, -9, 0, 8, 127};
+  const std::vector<float> result = {128.0f, 9, 0, -8, -127};
 
   NegOpQuantizedModel m({tensor_type, {5}, -128.0, 128.0},
                         {tensor_type, {5}, -128.0, 128.0});
