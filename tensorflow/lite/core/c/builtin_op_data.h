@@ -37,6 +37,7 @@ extern "C" {
 #define TFLITE_STABLEHLO_GATHER_PARAMS_MAX_DIMENSION_COUNT 8
 #define TFLITE_STABLEHLO_REDUCE_WINDOW_PARAMS_MAX_DIMENSION_COUNT 8
 #define TFLITE_STABLEHLO_PAD_PARAMS_MAX_DIMENSION_COUNT 8
+#define TFLITE_STABLEHLO_CONVOLUTION_PARAMS_MAX_DIMENSION_COUNT 6
 
 // TODO(aselle): Consider using "if this then that" for testing.
 
@@ -653,6 +654,40 @@ typedef struct {
   const uint8_t* attributes;
   size_t attributes_size;
 } TfLiteStablehloCompositeParams;
+
+typedef struct {
+  // See the stablehlo spec for the explanation of the attributes:
+  // https://github.com/openxla/stablehlo/blob/main/docs/spec.md#convolution
+  int64_t
+      window_strides[TFLITE_STABLEHLO_CONVOLUTION_PARAMS_MAX_DIMENSION_COUNT];
+  int num_window_strides;
+  int64_t padding[TFLITE_STABLEHLO_CONVOLUTION_PARAMS_MAX_DIMENSION_COUNT];
+  int num_padding;
+  int64_t lhs_dilation[TFLITE_STABLEHLO_CONVOLUTION_PARAMS_MAX_DIMENSION_COUNT];
+  int num_lhs_dilation;
+  int64_t rhs_dilation[TFLITE_STABLEHLO_CONVOLUTION_PARAMS_MAX_DIMENSION_COUNT];
+  int num_rhs_dilation;
+  int64_t input_batch_dimension;
+  int64_t input_feature_dimension;
+  int64_t input_spatial_dimensions
+      [TFLITE_STABLEHLO_CONVOLUTION_PARAMS_MAX_DIMENSION_COUNT];
+  int num_input_spatial_dimensions;
+  int64_t kernel_input_feature_dimension;
+  int64_t kernel_output_feature_dimension;
+  int64_t kernel_spatial_dimensions
+      [TFLITE_STABLEHLO_CONVOLUTION_PARAMS_MAX_DIMENSION_COUNT];
+  int num_kernel_spatial_dimensions;
+  int64_t output_batch_dimension;
+  int64_t output_feature_dimension;
+  int64_t output_spatial_dimensions
+      [TFLITE_STABLEHLO_CONVOLUTION_PARAMS_MAX_DIMENSION_COUNT];
+  int num_output_spatial_dimensions;
+  int64_t feature_group_count;
+  int64_t batch_group_count;
+  uint32_t
+      precision_config[2];
+  int num_precision_config;
+} TfLiteStablehloConvolutionParams;
 
 #ifdef __cplusplus
 }  // extern "C"
