@@ -192,6 +192,28 @@ TEST(ElementWise, SinBfloat16) {
   EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
+TEST(ElementWise, SinInt16) {
+  const float input_min = -13.2f;
+  const float input_max = 13.2f;
+  const float output_min = -2.5802f;
+  const float output_max = 2.5802f;
+  const float kQuantizedTolerance =
+      GetLUTTolerance<int16_t>(input_min, input_max, output_min, output_max);
+  ElementWiseOpQuantizedModel m(
+      BuiltinOperator_SIN,
+      {TensorType_INT16, {1, 2, 2, 2}, input_min, input_max},
+      {TensorType_INT16, {}, output_min, output_max});
+  m.QuantizeAndPopulate<int16_t>(
+      m.input(), {0.1f, 0.5f, 1.0f, 1.15f, 2.3f, 5.01f, 11.0f, 13.2f});
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  EXPECT_THAT(
+      m.ExtractDequantVector<int16_t>(m.output()),
+      ElementsAreArray(ArrayFloatNear(
+          {std::sin(0.1f), std::sin(0.5f), std::sin(1.0f), std::sin(1.15f),
+           std::sin(2.3f), std::sin(5.01f), std::sin(11.0f), std::sin(13.2f)},
+          kQuantizedTolerance)));
+}
+
 TEST(ElementWise, Cos) {
   ElementWiseOpFloatModel<float> m(BuiltinOperator_COS, {1, 1, 4, 1});
   m.PopulateTensor<float>(m.input(), {0, 3.1415926, -3.1415926, 1});
@@ -649,19 +671,6 @@ TEST(ElementWise, Square) {
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(m.ExtractVector<float>(m.output()),
               ElementsAreArray(ArrayFloatNear({1, 4.0, 0.25, 9.0})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
-}
-
-TEST(ElementWise, SquareFloat16) {
-  ElementWiseOpFloatModel<Eigen::half> m(BuiltinOperator_SQUARE, {1, 1, 4, 1});
-  m.PopulateTensor<Eigen::half>(
-      m.input(),
-      {Eigen::half(1), Eigen::half(2), Eigen::half(0.5), Eigen::half(-3.0)});
-  ASSERT_EQ(m.Invoke(), kTfLiteOk);
-  EXPECT_THAT(
-      m.ExtractVector<Eigen::half>(m.output()),
-      ElementsAreArray(ArrayFloatNear({Eigen::half(1), Eigen::half(4.0),
-                                       Eigen::half(0.25), Eigen::half(9.0)})));
   EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 

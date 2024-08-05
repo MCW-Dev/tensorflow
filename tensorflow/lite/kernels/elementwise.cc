@@ -40,6 +40,7 @@ namespace {
 const char kAbsName[] = "Abs";
 const char kLogName[] = "Log";
 const char kRsqrtName[] = "Rsqrt";
+const char kSinName[] = "Sin";
 
 struct OpData {
   int32_t multiplier;
@@ -56,6 +57,11 @@ struct OpData {
 bool IsNumericSupportedType(const TfLiteType type) {
   return type == kTfLiteFloat32 || type == kTfLiteBFloat16 ||
          type == kTfLiteFloat16;
+}
+
+bool IsSinSupportedType(const TfLiteType type) {
+  return type == kTfLiteFloat32 || type == kTfLiteBFloat16 ||
+         type == kTfLiteFloat16 || type == kTfLiteInt16;
 }
 
 bool IsLogicalSupportedType(const TfLiteType type) {
@@ -120,6 +126,26 @@ void LogLUTPrepare(TfLiteType type, OpData* op_data, float input_scale,
                          output_zero_point, lut_func, lut_func_params,
                          op_data->lut_int16);
   }
+}
+
+void SinLUTPrepare(TfLiteType type, OpData* op_data, float input_scale,
+                   int32_t input_zero_point, float output_scale,
+                   int32_t output_zero_point) {
+  const float output_min = (std::numeric_limits<int16>::min() -   output_zero_point) * output_scale;
+  const void* lut_func_params = static_cast<const void*>(&output_min);
+  const auto lut_func = [](float value, const void* lut_func_params) {
+    if (value <= 0.0f) {
+      const float output_min = *static_cast<const float*>(lut_func_params);
+      return output_min;
+    }
+
+    return std::sin(value);
+  };
+
+  LUTPopulate<int16_t>(input_scale, input_zero_point, output_scale,
+                       output_zero_point, lut_func, lut_func_params,
+                       op_data->lut_int16);
+  
 }
 
 typedef bool (*IsSupportedType)(TfLiteType);
@@ -191,6 +217,9 @@ TfLiteStatus GenericPrepare(TfLiteContext* context, TfLiteNode* node,
       }
     } else if (op_name == kLogName) {
       LogLUTPrepare(input->type, op_data, input_scale, op_data->input_offset,
+                    output_scale, op_data->output_offset);
+    } else if (op_name == kSinName) {
+      SinLUTPrepare(input->type, op_data, input_scale, op_data->input_offset,
                     output_scale, op_data->output_offset);
     }
   }
@@ -317,6 +346,10 @@ TfLiteStatus AbsEval(TfLiteContext* context, TfLiteNode* node) {
 TfLiteStatus SinEval(TfLiteContext* context, TfLiteNode* node) {
   const TfLiteTensor* input;
   TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, 0, &input));
+  TfLiteTensor* output;
+  TF_LITE_ENSURE_OK(context, GetOutputSafe(context, node, 0, &output));
+
+  auto op_data = reinterpret_cast<OpData*>(node->user_data);
   switch (input->type) {
     case kTfLiteFloat16:
       return EvalNumeric<Eigen::half>(
@@ -329,6 +362,12 @@ TfLiteStatus SinEval(TfLiteContext* context, TfLiteNode* node) {
           kTfLiteBFloat16);
     case kTfLiteFloat32:
       return EvalNumeric<float>(context, node, std::sin, kTfLiteFloat32);
+    case kTfLiteInt16:
+      reference_integer_ops::LookupTable(
+          GetTensorData<int16_t>(input),
+          MatchingFlatSize(GetTensorShape(input), GetTensorShape(output)),
+          op_data->lut_int16, GetTensorData<int16_t>(output));
+      return kTfLiteOk;
     default:
       TF_LITE_KERNEL_LOG(context, "Current data type %s is not supported.",
                          TfLiteTypeGetName(input->type));
@@ -536,11 +575,12 @@ TfLiteRegistration* Register_ABS() {
   return &r;
 }
 
-GENERIC_PREPARE(PrepareSin, elementwise::IsNumericSupportedType, "Sin")
+GENERIC_PREPARE(PrepareSin, elementwise::IsSinSupportedType, elementwise::kSinName)
 
 TfLiteRegistration* Register_SIN() {
-  static TfLiteRegistration r = {/*init=*/nullptr, /*free=*/nullptr, PrepareSin,
-                                 elementwise::SinEval};
+  static TfLiteRegistration r = {elementwise::ElementWiseQuantizedInit,
+                                 elementwise::ElementWiseQuantizedFree,
+                                 PrepareSin, elementwise::SinEval};
   return &r;
 }
 
