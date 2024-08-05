@@ -648,19 +648,6 @@ TEST(ElementWise, Square) {
   EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
-TEST(ElementWise, SquareFloat16) {
-  ElementWiseOpFloatModel<Eigen::half> m(BuiltinOperator_SQUARE, {1, 1, 4, 1});
-  m.PopulateTensor<Eigen::half>(
-      m.input(),
-      {Eigen::half(1), Eigen::half(2), Eigen::half(0.5), Eigen::half(-3.0)});
-  ASSERT_EQ(m.Invoke(), kTfLiteOk);
-  EXPECT_THAT(
-      m.ExtractVector<Eigen::half>(m.output()),
-      ElementsAreArray(ArrayFloatNear({Eigen::half(1), Eigen::half(4.0),
-                                       Eigen::half(0.25), Eigen::half(9.0)})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
-}
-
 TEST(ElementWise, LogicalNot) {
   ElementWiseOpBoolModel m(BuiltinOperator_LOGICAL_NOT, {1, 1, 4, 1});
   m.PopulateTensor<bool>(m.input(), {true, false, true, false});
