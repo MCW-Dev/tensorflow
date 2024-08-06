@@ -202,6 +202,7 @@ Register_STABLEHLO_LOGISTIC();  // WARNING: not implemented, using this op will
                                 // crash the runtime
 
 TfLiteRegistration* Register_STABLEHLO_ADD();
+TfLiteRegistration* Register_STABLEHLO_OR();
 
 TfLiteRegistration*
 Register_STABLEHLO_DIVIDE();  // WARNING: not implemented, using this op will
