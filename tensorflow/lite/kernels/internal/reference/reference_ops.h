@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <stdint.h>
 #include <sys/types.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -847,7 +846,7 @@ inline void Pow(const RuntimeShape& input1_shape, const T* input1_data,
   const int flat_size =
       MatchingFlatSize(input1_shape, input2_shape, output_shape);
   for (int i = 0; i < flat_size; ++i) {
-    output_data[i] = std::pow(input1_data[i], input2_data[i]);
+    output_data[i] = static_cast<T>(std::pow(input1_data[i], input2_data[i]));
   }
 }
 
@@ -878,7 +877,7 @@ inline void BroadcastPow4DSlow(const RuntimeShape& unextended_input1_shape,
           auto in2_idx = SubscriptToIndex(desc2, b, y, x, c);
           auto in1_val = input1_data[in1_idx];
           auto in2_val = input2_data[in2_idx];
-          output_data[out_idx] = std::pow(in1_val, in2_val);
+          output_data[out_idx] = static_cast<T>(std::pow(in1_val, in2_val));
         }
       }
     }
