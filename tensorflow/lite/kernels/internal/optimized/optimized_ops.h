@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 #ifndef TENSORFLOW_LITE_KERNELS_INTERNAL_OPTIMIZED_OPTIMIZED_OPS_H_
 #define TENSORFLOW_LITE_KERNELS_INTERNAL_OPTIMIZED_OPTIMIZED_OPS_H_
-
 #include <assert.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -1947,6 +1946,38 @@ inline void MulElementwise(int size, const ArithmeticParams& params,
   }
 }
 
+#ifndef EIGEN_TFLITE
+inline void MulElementwise(int size, const ArithmeticParams& params,
+                           const Eigen::half* input1_data,
+                           const Eigen::half* input2_data,
+                           Eigen::half* output_data) {
+  const Eigen::half output_activation_min = params.Eigen_half_activation_min;
+  const Eigen::half output_activation_max = params.Eigen_half_activation_max;
+
+  int i = 0;
+  for (; i < size; i++) {
+    auto x = input1_data[i] * input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(x, output_activation_min,
+                                                  output_activation_max);
+  }
+}
+
+inline void MulElementwise(int size, const ArithmeticParams& params,
+                           const Eigen::bfloat16* input1_data,
+                           const Eigen::bfloat16* input2_data,
+                           Eigen::bfloat16* output_data) {
+  const Eigen::bfloat16 output_activation_min = params.bf16_activation_min;
+  const Eigen::bfloat16 output_activation_max = params.bf16_activation_max;
+
+  int i = 0;
+  for (; i < size; i++) {
+    auto x = input1_data[i] * input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax<Eigen::bfloat16>(
+        x, output_activation_min, output_activation_max);
+  }
+}
+#endif
+
 inline void MulElementwise(int32_t n, const ArithmeticParams& params,
                            const int32_t* __restrict lhs,
                            const int32_t* __restrict rhs,
@@ -2003,11 +2034,11 @@ inline void MulElementwise(int32_t n, const ArithmeticParams& params,
                                           activation_max_val);
   }
 }
-
+template <typename T>
 inline void Mul(const ArithmeticParams& params,
-                const RuntimeShape& input1_shape, const float* input1_data,
-                const RuntimeShape& input2_shape, const float* input2_data,
-                const RuntimeShape& output_shape, float* output_data) {
+                const RuntimeShape& input1_shape, const T* input1_data,
+                const RuntimeShape& input2_shape, const T* input2_data,
+                const RuntimeShape& output_shape, T* output_data) {
   ruy::profiler::ScopeLabel label("Mul");
 
   const int flat_size =
@@ -2284,6 +2315,32 @@ inline void MulSimpleBroadcast(int size, const ArithmeticParams& params,
         x, params.float_activation_min, params.float_activation_max);
   }
 }
+
+#ifndef EIGEN_TFLITE
+inline void MulSimpleBroadcast(int size, const ArithmeticParams& params,
+                               const Eigen::half broadcast_value,
+                               const Eigen::half* input2_data,
+                               Eigen::half* output_data) {
+  int i = 0;
+  for (; i < size; ++i) {
+    Eigen::half x = broadcast_value * input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(
+        x, params.Eigen_half_activation_min, params.Eigen_half_activation_max);
+  }
+}
+
+inline void MulSimpleBroadcast(int size, const ArithmeticParams& params,
+                               const Eigen::bfloat16 broadcast_value,
+                               const Eigen::bfloat16* input2_data,
+                               Eigen::bfloat16* output_data) {
+  int i = 0;
+  for (; i < size; ++i) {
+    Eigen::bfloat16 x = broadcast_value * input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(x, params.bf16_activation_min,
+                                                  params.bf16_activation_max);
+  }
+}
+#endif
 
 inline void Mul(const ArithmeticParams& params,
                 const RuntimeShape& input1_shape, const uint8_t* input1_data,
@@ -6206,7 +6263,17 @@ inline void BroadcastPow4D(const RuntimeShape& unextended_input1_shape,
       if (std::is_same<T, float>::value) {
         params.float_activation_max = std::numeric_limits<float>::max();
         params.float_activation_min = std::numeric_limits<float>::lowest();
-      } else if (std::is_same<T, int>::value) {
+      }
+      #ifndef EIGEN_TFLITE
+      else if (std::is_same<T, Eigen::half>::value) {
+        params.Eigen_half_activation_max = std::numeric_limits<Eigen::half>::max();
+        params.Eigen_half_activation_min = std::numeric_limits<Eigen::half>::lowest();
+      }else if (std::is_same<T, Eigen::bfloat16>::value) {
+        params.bf16_activation_max = std::numeric_limits<Eigen::bfloat16>::max();
+        params.bf16_activation_min = std::numeric_limits<Eigen::bfloat16>::lowest();
+      }
+      #endif
+      else if (std::is_same<T, int>::value) {
         params.quantized_activation_max = std::numeric_limits<int>::max();
         params.quantized_activation_min = std::numeric_limits<int>::lowest();
       }
