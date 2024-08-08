@@ -657,6 +657,10 @@ struct StableHLOCompositeOptions;
 struct StableHLOCompositeOptionsBuilder;
 struct StableHLOCompositeOptionsT;
 
+struct StablehloCountLeadingZerosOptions;
+struct StablehloCountLeadingZerosOptionsBuilder;
+struct StablehloCountLeadingZerosOptionsT;
+
 struct Operator;
 struct OperatorBuilder;
 struct OperatorT;
@@ -1220,11 +1224,12 @@ enum BuiltinOperator : int32_t {
   BuiltinOperator_STABLEHLO_RNG_BIT_GENERATOR = 204,
   BuiltinOperator_REDUCE_WINDOW = 205,
   BuiltinOperator_STABLEHLO_COMPOSITE = 206,
+  BuiltinOperator_STABLEHLO_COUNT_LEADING_ZEROS = 209,
   BuiltinOperator_MIN = BuiltinOperator_ADD,
-  BuiltinOperator_MAX = BuiltinOperator_STABLEHLO_COMPOSITE
+  BuiltinOperator_MAX = BuiltinOperator_STABLEHLO_COUNT_LEADING_ZEROS
 };
 
-inline const BuiltinOperator (&EnumValuesBuiltinOperator())[207] {
+inline const BuiltinOperator (&EnumValuesBuiltinOperator())[208] {
   static const BuiltinOperator values[] = {
     BuiltinOperator_ADD,
     BuiltinOperator_AVERAGE_POOL_2D,
@@ -1432,13 +1437,14 @@ inline const BuiltinOperator (&EnumValuesBuiltinOperator())[207] {
     BuiltinOperator_DILATE,
     BuiltinOperator_STABLEHLO_RNG_BIT_GENERATOR,
     BuiltinOperator_REDUCE_WINDOW,
-    BuiltinOperator_STABLEHLO_COMPOSITE
+    BuiltinOperator_STABLEHLO_COMPOSITE,
+    BuiltinOperator_STABLEHLO_COUNT_LEADING_ZEROS
   };
   return values;
 }
 
 inline const char * const *EnumNamesBuiltinOperator() {
-  static const char * const names[208] = {
+  static const char * const names[211] = {
     "ADD",
     "AVERAGE_POOL_2D",
     "CONCATENATION",
@@ -1646,13 +1652,16 @@ inline const char * const *EnumNamesBuiltinOperator() {
     "STABLEHLO_RNG_BIT_GENERATOR",
     "REDUCE_WINDOW",
     "STABLEHLO_COMPOSITE",
+    "",
+    "",
+    "STABLEHLO_COUNT_LEADING_ZEROS",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameBuiltinOperator(BuiltinOperator e) {
-  if (::flatbuffers::IsOutRange(e, BuiltinOperator_ADD, BuiltinOperator_STABLEHLO_COMPOSITE)) return "";
+  if (::flatbuffers::IsOutRange(e, BuiltinOperator_ADD, BuiltinOperator_STABLEHLO_COUNT_LEADING_ZEROS)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesBuiltinOperator()[index];
 }
@@ -14754,6 +14763,45 @@ inline ::flatbuffers::Offset<StableHLOCompositeOptions> CreateStableHLOComposite
 
 ::flatbuffers::Offset<StableHLOCompositeOptions> CreateStableHLOCompositeOptions(::flatbuffers::FlatBufferBuilder &_fbb, const StableHLOCompositeOptionsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
+struct StablehloCountLeadingZerosOptionsT : public ::flatbuffers::NativeTable {
+  typedef StablehloCountLeadingZerosOptions TableType;
+};
+
+struct StablehloCountLeadingZerosOptions FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef StablehloCountLeadingZerosOptionsT NativeTableType;
+  typedef StablehloCountLeadingZerosOptionsBuilder Builder;
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           verifier.EndTable();
+  }
+  StablehloCountLeadingZerosOptionsT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(StablehloCountLeadingZerosOptionsT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<StablehloCountLeadingZerosOptions> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloCountLeadingZerosOptionsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct StablehloCountLeadingZerosOptionsBuilder {
+  typedef StablehloCountLeadingZerosOptions Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  explicit StablehloCountLeadingZerosOptionsBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<StablehloCountLeadingZerosOptions> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<StablehloCountLeadingZerosOptions>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<StablehloCountLeadingZerosOptions> CreateStablehloCountLeadingZerosOptions(
+    ::flatbuffers::FlatBufferBuilder &_fbb) {
+  StablehloCountLeadingZerosOptionsBuilder builder_(_fbb);
+  return builder_.Finish();
+}
+
+::flatbuffers::Offset<StablehloCountLeadingZerosOptions> CreateStablehloCountLeadingZerosOptions(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloCountLeadingZerosOptionsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
 struct OperatorT : public ::flatbuffers::NativeTable {
   typedef Operator TableType;
   uint32_t opcode_index = 0;
@@ -21094,6 +21142,29 @@ inline ::flatbuffers::Offset<StableHLOCompositeOptions> CreateStableHLOComposite
       _composite_attributes,
       _composite_attributes_format,
       _version);
+}
+
+inline StablehloCountLeadingZerosOptionsT *StablehloCountLeadingZerosOptions::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<StablehloCountLeadingZerosOptionsT>(new StablehloCountLeadingZerosOptionsT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void StablehloCountLeadingZerosOptions::UnPackTo(StablehloCountLeadingZerosOptionsT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+}
+
+inline ::flatbuffers::Offset<StablehloCountLeadingZerosOptions> StablehloCountLeadingZerosOptions::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloCountLeadingZerosOptionsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateStablehloCountLeadingZerosOptions(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<StablehloCountLeadingZerosOptions> CreateStablehloCountLeadingZerosOptions(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloCountLeadingZerosOptionsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const StablehloCountLeadingZerosOptionsT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  return tflite::CreateStablehloCountLeadingZerosOptions(
+      _fbb);
 }
 
 inline OperatorT *Operator::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
