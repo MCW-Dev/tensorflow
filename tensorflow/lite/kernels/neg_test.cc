@@ -105,7 +105,7 @@ TEST(NegOpModel, NegInt64) {
 
 class NegOpQuantizedModel : public NegOpModel {
  public:
-  NegOpQuantizedModel(const TensorData &input, const TensorData &output)
+  NegOpQuantizedModel(const TensorData& input, const TensorData& output)
       : NegOpModel(SymmetricInt16Scaling(std::move(input)),
                    SymmetricInt16Scaling(std::move(output))) {}
 
