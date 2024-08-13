@@ -57,32 +57,38 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   TfLiteTensor* output;
   TF_LITE_ENSURE_OK(context,
                     GetOutputSafe(context, node, kOutputTensor, &output));
-  if(input->type == kTfLiteFloat32){
-  if (type == kGenericOptimized) {
-    optimized_ops::Floor(GetTensorShape(input), GetTensorData<float>(input),
-                         GetTensorShape(output), GetTensorData<float>(output));
-  } else {
-    reference_ops::Floor(GetTensorShape(input), GetTensorData<float>(input),
-                         GetTensorShape(output), GetTensorData<float>(output));
+  if (input->type == kTfLiteFloat32) {
+    if (type == kGenericOptimized) {
+      optimized_ops::Floor(GetTensorShape(input), GetTensorData<float>(input),
+                           GetTensorShape(output),
+                           GetTensorData<float>(output));
+    } else {
+      reference_ops::Floor(GetTensorShape(input), GetTensorData<float>(input),
+                           GetTensorShape(output),
+                           GetTensorData<float>(output));
+    }
   }
+  if (input->type == kTfLiteFloat16) {
+    if (type == kGenericOptimized) {
+      optimized_ops::Floor(
+          GetTensorShape(input), GetTensorData<Eigen::half>(input),
+          GetTensorShape(output), GetTensorData<Eigen::half>(output));
+    } else {
+      reference_ops::Floor(
+          GetTensorShape(input), GetTensorData<Eigen::half>(input),
+          GetTensorShape(output), GetTensorData<Eigen::half>(output));
+    }
   }
-  if(input->type == kTfLiteFloat16){
-  if (type == kGenericOptimized) {
-    optimized_ops::Floor(GetTensorShape(input), GetTensorData<Eigen::half>(input),
-                         GetTensorShape(output), GetTensorData<Eigen::half>(output));
-  } else {
-    reference_ops::Floor(GetTensorShape(input), GetTensorData<Eigen::half>(input),
-                         GetTensorShape(output), GetTensorData<Eigen::half>(output));
-  }
-  }
-  if(input->type == kTfLiteBFloat16){
-  if (type == kGenericOptimized) {
-    optimized_ops::Floor(GetTensorShape(input), GetTensorData<Eigen::bfloat16>(input),
-                         GetTensorShape(output), GetTensorData<Eigen::bfloat16>(output));
-  } else {
-    reference_ops::Floor(GetTensorShape(input), GetTensorData<Eigen::bfloat16>(input),
-                         GetTensorShape(output), GetTensorData<Eigen::bfloat16>(output));
-  }
+  if (input->type == kTfLiteBFloat16) {
+    if (type == kGenericOptimized) {
+      optimized_ops::Floor(
+          GetTensorShape(input), GetTensorData<Eigen::bfloat16>(input),
+          GetTensorShape(output), GetTensorData<Eigen::bfloat16>(output));
+    } else {
+      reference_ops::Floor(
+          GetTensorShape(input), GetTensorData<Eigen::bfloat16>(input),
+          GetTensorShape(output), GetTensorData<Eigen::bfloat16>(output));
+    }
   }
 
   return kTfLiteOk;
