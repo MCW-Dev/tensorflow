@@ -29,7 +29,6 @@ namespace reference_ops {
 template <typename T>
 inline void Tanh(const RuntimeShape& input_shape, const T* input_data,
                  const RuntimeShape& output_shape, T* output_data) {
-  ruy::profiler::ScopeLabel label("Tanh");
   const int flat_size = MatchingFlatSize(input_shape, output_shape);
 
   for (int i = 0; i < flat_size; i++) {
