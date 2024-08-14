@@ -21,7 +21,6 @@ limitations under the License.
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <Eigen/Core>
 #include "flatbuffers/flatbuffers.h"  // from @flatbuffers
 #include "tensorflow/lite/kernels/test_util.h"
 #include "tensorflow/lite/schema/schema_generated.h"
@@ -110,23 +109,23 @@ TEST(ConcatenationOpTest, ThreeDimensionalOneInput) {
 }
 
 TEST(ConcatenationOpTest, ThreeDimensionalOneInputBFloat16) {
-  ConcatenationOpModel<Eigen::bfloat16> m0({TensorType_BFLOAT16, {2, 1, 2}},
-                                           /*axis=*/1,
-                                           /*num_inputs=*/1);
-  m0.SetInput(0, {Eigen::bfloat16{1.0f}, Eigen::bfloat16{3.0f},
-                  Eigen::bfloat16{4.0f}, Eigen::bfloat16{7.0f}});
-  ASSERT_EQ(m0.Invoke(), kTfLiteOk);
-  EXPECT_THAT(m0.GetOutput(), ElementsAreArray({1, 3, 4, 7}));
+  ConcatenationOpModel<Eigen::bfloat16> m({TensorType_BFLOAT16, {2, 1, 2}},
+                                          /*axis=*/1,
+                                          /*num_inputs=*/1);
+  m.SetInput(0, {Eigen::bfloat16{1.0f}, Eigen::bfloat16{3.0f},
+                 Eigen::bfloat16{4.0f}, Eigen::bfloat16{7.0f}});
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 3, 4, 7}));
 }
 
 TEST(ConcatenationOpTest, ThreeDimensionalOneInputFloat16) {
-  ConcatenationOpModel<Eigen::half> m0({TensorType_FLOAT16, {2, 1, 2}},
-                                       /*axis=*/1,
-                                       /*num_inputs=*/1);
-  m0.SetInput(0, {Eigen::half{1.0f}, Eigen::half{3.0f}, Eigen::half{4.0f},
-                  Eigen::half{7.0f}});
-  ASSERT_EQ(m0.Invoke(), kTfLiteOk);
-  EXPECT_THAT(m0.GetOutput(), ElementsAreArray({1, 3, 4, 7}));
+  ConcatenationOpModel<Eigen::half> m({TensorType_FLOAT16, {2, 1, 2}},
+                                      /*axis=*/1,
+                                      /*num_inputs=*/1);
+  m.SetInput(0, {Eigen::half{1.0f}, Eigen::half{3.0f}, Eigen::half{4.0f},
+                 Eigen::half{7.0f}});
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 3, 4, 7}));
 }
 
 TEST(ConcatenationOpTest, ThreeDimensionalOneInputUInt32) {
@@ -174,44 +173,44 @@ TEST(ConcatenationOpTest, FiveDimensionalTwoInput) {
 }
 
 TEST(ConcatenationOpTest, FiveDimensionalTwoInputBFloat16) {
-  ConcatenationOpModel<Eigen::bfloat16> m0(
+  ConcatenationOpModel<Eigen::bfloat16> m(
       {TensorType_BFLOAT16, {2, 1, 2, 1, 3}},
       /*axis=*/0,
       /*num_inputs=*/2);
-  m0.SetInput(
+  m.SetInput(
       0,
       {Eigen::bfloat16{1.0f}, Eigen::bfloat16{2.0f}, Eigen::bfloat16{3.0f},
        Eigen::bfloat16{4.0f}, Eigen::bfloat16{5.0f}, Eigen::bfloat16{6.0f},
        Eigen::bfloat16{7.0f}, Eigen::bfloat16{8.0f}, Eigen::bfloat16{9.0f},
        Eigen::bfloat16{10.0f}, Eigen::bfloat16{11.0f}, Eigen::bfloat16{12.0f}});
-  m0.SetInput(
+  m.SetInput(
       1,
       {Eigen::bfloat16{13.0f}, Eigen::bfloat16{14.0f}, Eigen::bfloat16{15.0f},
        Eigen::bfloat16{16.0f}, Eigen::bfloat16{17.0f}, Eigen::bfloat16{18.0f},
        Eigen::bfloat16{19.0f}, Eigen::bfloat16{20.0f}, Eigen::bfloat16{21.0f},
        Eigen::bfloat16{22.0f}, Eigen::bfloat16{23.0f}, Eigen::bfloat16{24.0f}});
-  ASSERT_EQ(m0.Invoke(), kTfLiteOk);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(
-      m0.GetOutput(),
+      m.GetOutput(),
       ElementsAreArray({1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12,
                         13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24}));
 }
 
 TEST(ConcatenationOpTest, FiveDimensionalTwoInputFloat16) {
-  ConcatenationOpModel<Eigen::half> m0({TensorType_FLOAT16, {2, 1, 2, 1, 3}},
-                                       /*axis=*/0,
-                                       /*num_inputs=*/2);
-  m0.SetInput(0, {Eigen::half{1.0f}, Eigen::half{2.0f}, Eigen::half{3.0f},
-                  Eigen::half{4.0f}, Eigen::half{5.0f}, Eigen::half{6.0f},
-                  Eigen::half{7.0f}, Eigen::half{8.0f}, Eigen::half{9.0f},
-                  Eigen::half{10.0f}, Eigen::half{11.0f}, Eigen::half{12.0f}});
-  m0.SetInput(1, {Eigen::half{13.0f}, Eigen::half{14.0f}, Eigen::half{15.0f},
-                  Eigen::half{16.0f}, Eigen::half{17.0f}, Eigen::half{18.0f},
-                  Eigen::half{19.0f}, Eigen::half{20.0f}, Eigen::half{21.0f},
-                  Eigen::half{22.0f}, Eigen::half{23.0f}, Eigen::half{24.0f}});
-  ASSERT_EQ(m0.Invoke(), kTfLiteOk);
+  ConcatenationOpModel<Eigen::half> m({TensorType_FLOAT16, {2, 1, 2, 1, 3}},
+                                      /*axis=*/0,
+                                      /*num_inputs=*/2);
+  m.SetInput(0, {Eigen::half{1.0f}, Eigen::half{2.0f}, Eigen::half{3.0f},
+                 Eigen::half{4.0f}, Eigen::half{5.0f}, Eigen::half{6.0f},
+                 Eigen::half{7.0f}, Eigen::half{8.0f}, Eigen::half{9.0f},
+                 Eigen::half{10.0f}, Eigen::half{11.0f}, Eigen::half{12.0f}});
+  m.SetInput(1, {Eigen::half{13.0f}, Eigen::half{14.0f}, Eigen::half{15.0f},
+                 Eigen::half{16.0f}, Eigen::half{17.0f}, Eigen::half{18.0f},
+                 Eigen::half{19.0f}, Eigen::half{20.0f}, Eigen::half{21.0f},
+                 Eigen::half{22.0f}, Eigen::half{23.0f}, Eigen::half{24.0f}});
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
   EXPECT_THAT(
-      m0.GetOutput(),
+      m.GetOutput(),
       ElementsAreArray({1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12,
                         13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24}));
 }

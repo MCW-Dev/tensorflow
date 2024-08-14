@@ -20,7 +20,7 @@ limitations under the License.
 #include <cstring>
 #include <limits>
 
-#include <Eigen/Core>
+#include "Eigen/Core"  // from @eigen_archive
 #include "tensorflow/lite/core/c/builtin_op_data.h"
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/kernels/internal/compatibility.h"
