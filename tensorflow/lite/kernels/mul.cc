@@ -46,12 +46,6 @@ limitations under the License.
 #include "tensorflow/lite/minimal_logging.h"
 #endif  // TFLITE_KERNEL_USE_XNNPACK
 
-// to make mul.cc work with f16 and bf16 the following line must be commented -
-// line: 701 in "tensorflow/lite/kernels/BUILD", line: 62 in
-// "tensorflow/lite/core/kernels/builtin_op_kernels.h" and line: 58 in
-// "tensorflow/lite/core/kernels/register.cc"
-// without commenting conv, it causes compilation errors in Eigen library
-// headers
 namespace tflite {
 namespace ops {
 namespace builtin {
@@ -249,16 +243,32 @@ void EvalMul(TfLiteContext* context, TfLiteNode* node, TfLiteMulParams* params,
       }
     }
   } else if (output->type == kTfLiteFloat16) {
-    if (need_broadcast) {
-      TF_LITE_MUL(reference_ops, BroadcastMul6DSlow, Eigen::half);
+    if (kernel_type == kReference) {
+      if (need_broadcast) {
+        TF_LITE_MUL(reference_ops, BroadcastMul6DSlow, Eigen::half);
+      } else {
+        TF_LITE_MUL(reference_ops, Mul, Eigen::half);
+      }
     } else {
-      TF_LITE_MUL(reference_ops, Mul, Eigen::half);
+      if (need_broadcast) {
+        TF_LITE_MUL(optimized_ops, BroadcastMulDispatch, Eigen::half);
+      } else {
+        TF_LITE_MUL(optimized_ops, Mul, Eigen::half);
+      }
     }
   } else if (output->type == kTfLiteBFloat16) {
-    if (need_broadcast) {
-      TF_LITE_MUL(reference_ops, BroadcastMul6DSlow, Eigen::bfloat16);
+    if (kernel_type == kReference) {
+      if (need_broadcast) {
+        TF_LITE_MUL(reference_ops, BroadcastMul6DSlow, Eigen::bfloat16);
+      } else {
+        TF_LITE_MUL(reference_ops, Mul, Eigen::bfloat16);
+      }
     } else {
-      TF_LITE_MUL(reference_ops, Mul, Eigen::bfloat16);
+      if (need_broadcast) {
+        TF_LITE_MUL(optimized_ops, BroadcastMulDispatch, Eigen::bfloat16);
+      } else {
+        TF_LITE_MUL(optimized_ops, Mul, Eigen::bfloat16);
+      }
     }
   } else if (output->type == kTfLiteInt16) {
     int16_t output_activation_min, output_activation_max;
