@@ -15,6 +15,7 @@ limitations under the License.
 #include <stddef.h>
 #include <stdint.h>
 
+#include "Eigen/Core"
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/kernels/internal/reference/binary_function.h"
 #include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
