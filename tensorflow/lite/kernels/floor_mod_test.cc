@@ -112,7 +112,7 @@ TEST(FloorModModel, Float16BroadcastFloorMod) {
       {Eigen::half(10), Eigen::half(-9), Eigen::half(-11), Eigen::half(7)});
   model.PopulateTensor<Eigen::half>(model.input2(), {Eigen::half(-3)});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
-  EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+  ASSERT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
   EXPECT_THAT(model.GetOutput(), ElementsAre(-2, 0, -2, -2));
 }
 
@@ -125,7 +125,7 @@ TEST(FloorModModel, BFloat16BroadcastFloorMod) {
                        Eigen::bfloat16(-11), Eigen::bfloat16(7)});
   model.PopulateTensor<Eigen::bfloat16>(model.input2(), {Eigen::bfloat16(-3)});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
-  EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+  ASSERT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
   EXPECT_THAT(model.GetOutput(), ElementsAre(-2, 0, -2, -2));
 }
 
