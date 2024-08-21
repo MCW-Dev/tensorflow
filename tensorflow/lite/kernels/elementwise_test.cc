@@ -173,10 +173,10 @@ TEST(ElementWise, SinFloat16) {
       m.input(), {Eigen::half(-4.940800e-02), Eigen::half(-6.596680e-01),
                   Eigen::half(7.641600e-01), Eigen::half(4.597660e+00)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::half>(m.output()),
               ElementsAreArray(ArrayFloatNear({-4.937740e-02, -6.127930e-01,
                                                6.918940e-01, -9.936520e-01})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, SinBfloat16) {
@@ -186,10 +186,10 @@ TEST(ElementWise, SinBfloat16) {
       {Eigen::bfloat16(-2.250000e+00), Eigen::bfloat16(6.468750e+00),
        Eigen::bfloat16(1.007810e+00), Eigen::bfloat16(1.796880e-01)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::bfloat16>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {-7.773430e-01, 1.845700e-01, 8.437500e-01, 1.787110e-01})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, SinInt16) {
@@ -206,6 +206,7 @@ TEST(ElementWise, SinInt16) {
   m.QuantizeAndPopulate<int16_t>(
       m.input(), {0.1f, 0.5f, 1.0f, 1.15f, 2.3f, 5.01f, 11.0f, 13.2f});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 2, 2, 2}));
   EXPECT_THAT(
       m.ExtractDequantVector<int16_t>(m.output()),
       ElementsAreArray(ArrayFloatNear(
@@ -229,10 +230,10 @@ TEST(ElementWise, CosFloat16) {
       m.input(), {Eigen::half(-9.057610e-01), Eigen::half(-1.757810e+00),
                   Eigen::half(4.667970e-01), Eigen::half(2.005860e+00)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::half>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {6.171880e-01, -1.859130e-01, 8.930660e-01, -4.213870e-01})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, CosBfloat16) {
@@ -242,10 +243,10 @@ TEST(ElementWise, CosBfloat16) {
       {Eigen::bfloat16(4.093750e+00), Eigen::bfloat16(-2.609380e+00),
        Eigen::bfloat16(3.453130e+00), Eigen::bfloat16(5.843750e+00)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::bfloat16>(m.output()),
               ElementsAreArray(ArrayFloatNear({-5.781250e-01, -8.632810e-01,
                                                -9.531250e-01, 9.062500e-01})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, Log) {
@@ -263,10 +264,10 @@ TEST(ElementWise, LogFloat16) {
       m.input(), {Eigen::half(1.576170e+00), Eigen::half(5.097660e+00),
                   Eigen::half(4.453130e+00), Eigen::half(4.390630e+00)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::half>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {4.550780e-01, 1.628910e+00, 1.493160e+00, 1.479490e+00})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, LogBfloat16) {
@@ -276,10 +277,10 @@ TEST(ElementWise, LogBfloat16) {
       {Eigen::bfloat16(1.914060e+00), Eigen::bfloat16(1.570310e+00),
        Eigen::bfloat16(2.187500e+00), Eigen::bfloat16(1.460940e+00)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::bfloat16>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {6.484380e-01, 4.511720e-01, 7.812500e-01, 3.789060e-01})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, LogInt8) {
@@ -439,11 +440,11 @@ TEST(ElementWise, AbsFloat16) {
       m.input(), {Eigen::half(1.576170e+00), Eigen::half(5.097660e+00),
                   Eigen::half(4.453130e+00), Eigen::half(4.390630e+00)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::half>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {Eigen::half(1.576170e+00), Eigen::half(5.097660e+00),
                    Eigen::half(4.453130e+00), Eigen::half(4.390630e+00)})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, AbsBfloat16) {
@@ -453,10 +454,10 @@ TEST(ElementWise, AbsBfloat16) {
       {Eigen::bfloat16(-1.914060e+00), Eigen::bfloat16(-1.570310e+00),
        Eigen::bfloat16(2.187500e+00), Eigen::bfloat16(-1.460940e+00)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::bfloat16>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {1.914060e+00, 1.570310e+00, 2.187500e+00, 1.460940e+00})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, Sqrt) {
@@ -473,11 +474,11 @@ TEST(ElementWise, SqrtFloat16) {
   m.PopulateTensor<Eigen::half>(m.input(), {Eigen::half(0), Eigen::half(1),
                                             Eigen::half(2), Eigen::half(4)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(
       m.ExtractVector<Eigen::half>(m.output()),
       ElementsAreArray(ArrayFloatNear({Eigen::half(0), Eigen::half(1),
                                        Eigen::half(1.41421), Eigen::half(2)})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, SqrtBfloat16) {
@@ -487,11 +488,11 @@ TEST(ElementWise, SqrtBfloat16) {
       m.input(), {Eigen::bfloat16(0), Eigen::bfloat16(1), Eigen::bfloat16(2),
                   Eigen::bfloat16(4)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::bfloat16>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {Eigen::bfloat16(0), Eigen::bfloat16(1),
                    Eigen::bfloat16(1.41421), Eigen::bfloat16(2)})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, Rsqrt) {
@@ -509,11 +510,11 @@ TEST(ElementWise, RsqrtFloat16) {
       m.input(), {Eigen::half(3.244140e+00), Eigen::half(3.066410e+00),
                   Eigen::half(7.031250e-02), Eigen::half(5.570310e+00)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::half>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {Eigen::half(5.551760e-01), Eigen::half(5.712890e-01),
                    Eigen::half(3.771480e+00), Eigen::half(4.235840e-01)})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, RsqrtBfloat16) {
@@ -524,10 +525,10 @@ TEST(ElementWise, RsqrtBfloat16) {
       {Eigen::bfloat16(1.304630e-03), Eigen::bfloat16(1.570310e+00),
        Eigen::bfloat16(6.156250e+00), Eigen::bfloat16(6.562500e-01)});
   ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  ASSERT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
   EXPECT_THAT(m.ExtractVector<Eigen::bfloat16>(m.output()),
               ElementsAreArray(ArrayFloatNear(
                   {2.762500e+01, 7.968750e-01, 4.023440e-01, 1.234380e+00})));
-  EXPECT_THAT(m.GetTensorShape(m.output()), ElementsAreArray({1, 1, 4, 1}));
 }
 
 TEST(ElementWise, RsqrtInt8) {

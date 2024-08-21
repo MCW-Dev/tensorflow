@@ -131,7 +131,8 @@ void LogLUTPrepare(TfLiteType type, OpData* op_data, float input_scale,
 void SinLUTPrepare(TfLiteType type, OpData* op_data, float input_scale,
                    int32_t input_zero_point, float output_scale,
                    int32_t output_zero_point) {
-  const float output_min = (std::numeric_limits<int16>::min() -   output_zero_point) * output_scale;
+  const float output_min =
+      (std::numeric_limits<int16>::min() - output_zero_point) * output_scale;
   const void* lut_func_params = static_cast<const void*>(&output_min);
   const auto lut_func = [](float value, const void* lut_func_params) {
     if (value <= 0.0f) {
@@ -145,7 +146,6 @@ void SinLUTPrepare(TfLiteType type, OpData* op_data, float input_scale,
   LUTPopulate<int16_t>(input_scale, input_zero_point, output_scale,
                        output_zero_point, lut_func, lut_func_params,
                        op_data->lut_int16);
-  
 }
 
 typedef bool (*IsSupportedType)(TfLiteType);
@@ -575,7 +575,8 @@ TfLiteRegistration* Register_ABS() {
   return &r;
 }
 
-GENERIC_PREPARE(PrepareSin, elementwise::IsSinSupportedType, elementwise::kSinName)
+GENERIC_PREPARE(PrepareSin, elementwise::IsSinSupportedType,
+                elementwise::kSinName)
 
 TfLiteRegistration* Register_SIN() {
   static TfLiteRegistration r = {elementwise::ElementWiseQuantizedInit,
