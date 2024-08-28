@@ -769,6 +769,7 @@ BUILTIN_KERNEL_SRCS = [
     "stablehlo_composite.cc",
     "stablehlo_multiply.cc",
     "stablehlo_pad.cc",
+    "stablehlo_reduce.cc",
     "stablehlo_reduce_window.cc",
     "stablehlo_min_max.cc",
     "stablehlo_scatter.cc",
@@ -1378,6 +1379,21 @@ cc_test(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "stablehlo_reduce_test",
+    srcs = ["stablehlo_reduce_test.cc"],
+    tags = ["tflite_nnapi"],
+    deps = [
+        ":subgraph_test_util",
+        ":test_main",
+        ":test_util",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/core/c:common",
+        "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest",
     ],
 )
