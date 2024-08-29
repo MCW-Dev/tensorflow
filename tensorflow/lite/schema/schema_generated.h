@@ -657,10 +657,6 @@ struct StableHLOCompositeOptions;
 struct StableHLOCompositeOptionsBuilder;
 struct StableHLOCompositeOptionsT;
 
-struct StablehloShiftLeftOptions;
-struct StablehloShiftLeftOptionsBuilder;
-struct StablehloShiftLeftOptionsT;
-
 struct Operator;
 struct OperatorBuilder;
 struct OperatorT;
@@ -1224,12 +1220,11 @@ enum BuiltinOperator : int32_t {
   BuiltinOperator_STABLEHLO_RNG_BIT_GENERATOR = 204,
   BuiltinOperator_REDUCE_WINDOW = 205,
   BuiltinOperator_STABLEHLO_COMPOSITE = 206,
-  BuiltinOperator_STABLEHLO_SHIFT_LEFT = 211,
   BuiltinOperator_MIN = BuiltinOperator_ADD,
-  BuiltinOperator_MAX = BuiltinOperator_STABLEHLO_SHIFT_LEFT
+  BuiltinOperator_MAX = BuiltinOperator_STABLEHLO_COMPOSITE
 };
 
-inline const BuiltinOperator (&EnumValuesBuiltinOperator())[208] {
+inline const BuiltinOperator (&EnumValuesBuiltinOperator())[207] {
   static const BuiltinOperator values[] = {
     BuiltinOperator_ADD,
     BuiltinOperator_AVERAGE_POOL_2D,
@@ -1437,14 +1432,13 @@ inline const BuiltinOperator (&EnumValuesBuiltinOperator())[208] {
     BuiltinOperator_DILATE,
     BuiltinOperator_STABLEHLO_RNG_BIT_GENERATOR,
     BuiltinOperator_REDUCE_WINDOW,
-    BuiltinOperator_STABLEHLO_COMPOSITE,
-    BuiltinOperator_STABLEHLO_SHIFT_LEFT
+    BuiltinOperator_STABLEHLO_COMPOSITE
   };
   return values;
 }
 
 inline const char * const *EnumNamesBuiltinOperator() {
-  static const char * const names[213] = {
+  static const char * const names[208] = {
     "ADD",
     "AVERAGE_POOL_2D",
     "CONCATENATION",
@@ -1652,18 +1646,13 @@ inline const char * const *EnumNamesBuiltinOperator() {
     "STABLEHLO_RNG_BIT_GENERATOR",
     "REDUCE_WINDOW",
     "STABLEHLO_COMPOSITE",
-    "",
-    "",
-    "",
-    "",
-    "STABLEHLO_SHIFT_LEFT",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameBuiltinOperator(BuiltinOperator e) {
-  if (::flatbuffers::IsOutRange(e, BuiltinOperator_ADD, BuiltinOperator_STABLEHLO_SHIFT_LEFT)) return "";
+  if (::flatbuffers::IsOutRange(e, BuiltinOperator_ADD, BuiltinOperator_STABLEHLO_COMPOSITE)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesBuiltinOperator()[index];
 }
@@ -4155,12 +4144,11 @@ enum BuiltinOptions2 : uint8_t {
   BuiltinOptions2_StablehloRngBitGeneratorOptions = 19,
   BuiltinOptions2_ReduceWindowOptions = 20,
   BuiltinOptions2_StableHLOCompositeOptions = 21,
-  BuiltinOptions2_StablehloShiftLeftOptions = 22,
   BuiltinOptions2_MIN = BuiltinOptions2_NONE,
-  BuiltinOptions2_MAX = BuiltinOptions2_StablehloShiftLeftOptions
+  BuiltinOptions2_MAX = BuiltinOptions2_StableHLOCompositeOptions
 };
 
-inline const BuiltinOptions2 (&EnumValuesBuiltinOptions2())[23] {
+inline const BuiltinOptions2 (&EnumValuesBuiltinOptions2())[22] {
   static const BuiltinOptions2 values[] = {
     BuiltinOptions2_NONE,
     BuiltinOptions2_StablehloConcatenateOptions,
@@ -4183,14 +4171,13 @@ inline const BuiltinOptions2 (&EnumValuesBuiltinOptions2())[23] {
     BuiltinOptions2_DilateOptions,
     BuiltinOptions2_StablehloRngBitGeneratorOptions,
     BuiltinOptions2_ReduceWindowOptions,
-    BuiltinOptions2_StableHLOCompositeOptions,
-    BuiltinOptions2_StablehloShiftLeftOptions
+    BuiltinOptions2_StableHLOCompositeOptions
   };
   return values;
 }
 
 inline const char * const *EnumNamesBuiltinOptions2() {
-  static const char * const names[24] = {
+  static const char * const names[23] = {
     "NONE",
     "StablehloConcatenateOptions",
     "StablehloBroadcastInDimOptions",
@@ -4213,14 +4200,13 @@ inline const char * const *EnumNamesBuiltinOptions2() {
     "StablehloRngBitGeneratorOptions",
     "ReduceWindowOptions",
     "StableHLOCompositeOptions",
-    "StablehloShiftLeftOptions",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameBuiltinOptions2(BuiltinOptions2 e) {
-  if (::flatbuffers::IsOutRange(e, BuiltinOptions2_NONE, BuiltinOptions2_StablehloShiftLeftOptions)) return "";
+  if (::flatbuffers::IsOutRange(e, BuiltinOptions2_NONE, BuiltinOptions2_StableHLOCompositeOptions)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesBuiltinOptions2()[index];
 }
@@ -4313,10 +4299,6 @@ template<> struct BuiltinOptions2Traits<tflite::StableHLOCompositeOptions> {
   static const BuiltinOptions2 enum_value = BuiltinOptions2_StableHLOCompositeOptions;
 };
 
-template<> struct BuiltinOptions2Traits<tflite::StablehloShiftLeftOptions> {
-  static const BuiltinOptions2 enum_value = BuiltinOptions2_StablehloShiftLeftOptions;
-};
-
 template<typename T> struct BuiltinOptions2UnionTraits {
   static const BuiltinOptions2 enum_value = BuiltinOptions2_NONE;
 };
@@ -4403,10 +4385,6 @@ template<> struct BuiltinOptions2UnionTraits<tflite::ReduceWindowOptionsT> {
 
 template<> struct BuiltinOptions2UnionTraits<tflite::StableHLOCompositeOptionsT> {
   static const BuiltinOptions2 enum_value = BuiltinOptions2_StableHLOCompositeOptions;
-};
-
-template<> struct BuiltinOptions2UnionTraits<tflite::StablehloShiftLeftOptionsT> {
-  static const BuiltinOptions2 enum_value = BuiltinOptions2_StablehloShiftLeftOptions;
 };
 
 struct BuiltinOptions2Union {
@@ -4606,14 +4584,6 @@ struct BuiltinOptions2Union {
   const tflite::StableHLOCompositeOptionsT *AsStableHLOCompositeOptions() const {
     return type == BuiltinOptions2_StableHLOCompositeOptions ?
       reinterpret_cast<const tflite::StableHLOCompositeOptionsT *>(value) : nullptr;
-  }
-  tflite::StablehloShiftLeftOptionsT *AsStablehloShiftLeftOptions() {
-    return type == BuiltinOptions2_StablehloShiftLeftOptions ?
-      reinterpret_cast<tflite::StablehloShiftLeftOptionsT *>(value) : nullptr;
-  }
-  const tflite::StablehloShiftLeftOptionsT *AsStablehloShiftLeftOptions() const {
-    return type == BuiltinOptions2_StablehloShiftLeftOptions ?
-      reinterpret_cast<const tflite::StablehloShiftLeftOptionsT *>(value) : nullptr;
   }
 };
 
@@ -14784,45 +14754,6 @@ inline ::flatbuffers::Offset<StableHLOCompositeOptions> CreateStableHLOComposite
 
 ::flatbuffers::Offset<StableHLOCompositeOptions> CreateStableHLOCompositeOptions(::flatbuffers::FlatBufferBuilder &_fbb, const StableHLOCompositeOptionsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
-struct StablehloShiftLeftOptionsT : public ::flatbuffers::NativeTable {
-  typedef StablehloShiftLeftOptions TableType;
-};
-
-struct StablehloShiftLeftOptions FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
-  typedef StablehloShiftLeftOptionsT NativeTableType;
-  typedef StablehloShiftLeftOptionsBuilder Builder;
-  bool Verify(::flatbuffers::Verifier &verifier) const {
-    return VerifyTableStart(verifier) &&
-           verifier.EndTable();
-  }
-  StablehloShiftLeftOptionsT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  void UnPackTo(StablehloShiftLeftOptionsT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
-  static ::flatbuffers::Offset<StablehloShiftLeftOptions> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloShiftLeftOptionsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
-};
-
-struct StablehloShiftLeftOptionsBuilder {
-  typedef StablehloShiftLeftOptions Table;
-  ::flatbuffers::FlatBufferBuilder &fbb_;
-  ::flatbuffers::uoffset_t start_;
-  explicit StablehloShiftLeftOptionsBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
-        : fbb_(_fbb) {
-    start_ = fbb_.StartTable();
-  }
-  ::flatbuffers::Offset<StablehloShiftLeftOptions> Finish() {
-    const auto end = fbb_.EndTable(start_);
-    auto o = ::flatbuffers::Offset<StablehloShiftLeftOptions>(end);
-    return o;
-  }
-};
-
-inline ::flatbuffers::Offset<StablehloShiftLeftOptions> CreateStablehloShiftLeftOptions(
-    ::flatbuffers::FlatBufferBuilder &_fbb) {
-  StablehloShiftLeftOptionsBuilder builder_(_fbb);
-  return builder_.Finish();
-}
-
-::flatbuffers::Offset<StablehloShiftLeftOptions> CreateStablehloShiftLeftOptions(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloShiftLeftOptionsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
-
 struct OperatorT : public ::flatbuffers::NativeTable {
   typedef Operator TableType;
   uint32_t opcode_index = 0;
@@ -15337,9 +15268,6 @@ struct Operator FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   const tflite::StableHLOCompositeOptions *builtin_options_2_as_StableHLOCompositeOptions() const {
     return builtin_options_2_type() == tflite::BuiltinOptions2_StableHLOCompositeOptions ? static_cast<const tflite::StableHLOCompositeOptions *>(builtin_options_2()) : nullptr;
-  }
-  const tflite::StablehloShiftLeftOptions *builtin_options_2_as_StablehloShiftLeftOptions() const {
-    return builtin_options_2_type() == tflite::BuiltinOptions2_StablehloShiftLeftOptions ? static_cast<const tflite::StablehloShiftLeftOptions *>(builtin_options_2()) : nullptr;
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -15956,10 +15884,6 @@ template<> inline const tflite::ReduceWindowOptions *Operator::builtin_options_2
 
 template<> inline const tflite::StableHLOCompositeOptions *Operator::builtin_options_2_as<tflite::StableHLOCompositeOptions>() const {
   return builtin_options_2_as_StableHLOCompositeOptions();
-}
-
-template<> inline const tflite::StablehloShiftLeftOptions *Operator::builtin_options_2_as<tflite::StablehloShiftLeftOptions>() const {
-  return builtin_options_2_as_StablehloShiftLeftOptions();
 }
 
 struct OperatorBuilder {
@@ -21172,29 +21096,6 @@ inline ::flatbuffers::Offset<StableHLOCompositeOptions> CreateStableHLOComposite
       _version);
 }
 
-inline StablehloShiftLeftOptionsT *StablehloShiftLeftOptions::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
-  auto _o = std::unique_ptr<StablehloShiftLeftOptionsT>(new StablehloShiftLeftOptionsT());
-  UnPackTo(_o.get(), _resolver);
-  return _o.release();
-}
-
-inline void StablehloShiftLeftOptions::UnPackTo(StablehloShiftLeftOptionsT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
-  (void)_o;
-  (void)_resolver;
-}
-
-inline ::flatbuffers::Offset<StablehloShiftLeftOptions> StablehloShiftLeftOptions::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloShiftLeftOptionsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
-  return CreateStablehloShiftLeftOptions(_fbb, _o, _rehasher);
-}
-
-inline ::flatbuffers::Offset<StablehloShiftLeftOptions> CreateStablehloShiftLeftOptions(::flatbuffers::FlatBufferBuilder &_fbb, const StablehloShiftLeftOptionsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
-  (void)_rehasher;
-  (void)_o;
-  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const StablehloShiftLeftOptionsT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
-  return tflite::CreateStablehloShiftLeftOptions(
-      _fbb);
-}
-
 inline OperatorT *Operator::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
   auto _o = std::unique_ptr<OperatorT>(new OperatorT());
   UnPackTo(_o.get(), _resolver);
@@ -24501,10 +24402,6 @@ inline bool VerifyBuiltinOptions2(::flatbuffers::Verifier &verifier, const void 
       auto ptr = reinterpret_cast<const tflite::StableHLOCompositeOptions *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case BuiltinOptions2_StablehloShiftLeftOptions: {
-      auto ptr = reinterpret_cast<const tflite::StablehloShiftLeftOptions *>(obj);
-      return verifier.VerifyTable(ptr);
-    }
     default: return true;
   }
 }
@@ -24608,10 +24505,6 @@ inline void *BuiltinOptions2Union::UnPack(const void *obj, BuiltinOptions2 type,
       auto ptr = reinterpret_cast<const tflite::StableHLOCompositeOptions *>(obj);
       return ptr->UnPack(resolver);
     }
-    case BuiltinOptions2_StablehloShiftLeftOptions: {
-      auto ptr = reinterpret_cast<const tflite::StablehloShiftLeftOptions *>(obj);
-      return ptr->UnPack(resolver);
-    }
     default: return nullptr;
   }
 }
@@ -24703,10 +24596,6 @@ inline ::flatbuffers::Offset<void> BuiltinOptions2Union::Pack(::flatbuffers::Fla
       auto ptr = reinterpret_cast<const tflite::StableHLOCompositeOptionsT *>(value);
       return CreateStableHLOCompositeOptions(_fbb, ptr, _rehasher).Union();
     }
-    case BuiltinOptions2_StablehloShiftLeftOptions: {
-      auto ptr = reinterpret_cast<const tflite::StablehloShiftLeftOptionsT *>(value);
-      return CreateStablehloShiftLeftOptions(_fbb, ptr, _rehasher).Union();
-    }
     default: return 0;
   }
 }
@@ -24795,10 +24684,6 @@ inline BuiltinOptions2Union::BuiltinOptions2Union(const BuiltinOptions2Union &u)
     }
     case BuiltinOptions2_StableHLOCompositeOptions: {
       value = new tflite::StableHLOCompositeOptionsT(*reinterpret_cast<tflite::StableHLOCompositeOptionsT *>(u.value));
-      break;
-    }
-    case BuiltinOptions2_StablehloShiftLeftOptions: {
-      value = new tflite::StablehloShiftLeftOptionsT(*reinterpret_cast<tflite::StablehloShiftLeftOptionsT *>(u.value));
       break;
     }
     default:
@@ -24910,11 +24795,6 @@ inline void BuiltinOptions2Union::Reset() {
     }
     case BuiltinOptions2_StableHLOCompositeOptions: {
       auto ptr = reinterpret_cast<tflite::StableHLOCompositeOptionsT *>(value);
-      delete ptr;
-      break;
-    }
-    case BuiltinOptions2_StablehloShiftLeftOptions: {
-      auto ptr = reinterpret_cast<tflite::StablehloShiftLeftOptionsT *>(value);
       delete ptr;
       break;
     }
