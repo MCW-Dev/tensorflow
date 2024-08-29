@@ -30,6 +30,102 @@ limitations under the License.
 namespace tflite {
 namespace {
 
+template <typename T>
+tflite::TensorType GetTTEnum();
+
+template <>
+tflite::TensorType GetTTEnum<Eigen::half>() {
+  return tflite::TensorType_FLOAT16;
+}
+
+template <>
+tflite::TensorType GetTTEnum<Eigen::bfloat16>() {
+  return tflite::TensorType_BFLOAT16;
+}
+
+template <>
+tflite::TensorType GetTTEnum<float>() {
+  return tflite::TensorType_FLOAT32;
+}
+
+template <>
+tflite::TensorType GetTTEnum<double>() {
+  return tflite::TensorType_FLOAT64;
+}
+
+template <>
+tflite::TensorType GetTTEnum<int8_t>() {
+  return tflite::TensorType_INT8;
+}
+
+template <>
+tflite::TensorType GetTTEnum<int16_t>() {
+  return tflite::TensorType_INT16;
+}
+
+template <>
+tflite::TensorType GetTTEnum<int32_t>() {
+  return tflite::TensorType_INT32;
+}
+
+template <>
+tflite::TensorType GetTTEnum<int64_t>() {
+  return tflite::TensorType_INT64;
+}
+
+template <>
+tflite::TensorType GetTTEnum<bool>() {
+  return tflite::TensorType_BOOL;
+}
+
+template <typename T>
+TfLiteType GetTfLiteEnum();
+
+template <>
+TfLiteType GetTfLiteEnum<Eigen::half>() {
+  return kTfLiteFloat16;
+}
+
+template <>
+TfLiteType GetTfLiteEnum<Eigen::bfloat16>() {
+  return kTfLiteBFloat16;
+}
+
+template <>
+TfLiteType GetTfLiteEnum<float>() {
+  return kTfLiteFloat32;
+}
+
+template <>
+TfLiteType GetTfLiteEnum<double>() {
+  return kTfLiteFloat64;
+}
+
+template <>
+TfLiteType GetTfLiteEnum<int8_t>() {
+  return kTfLiteInt8;
+}
+
+template <>
+TfLiteType GetTfLiteEnum<int16_t>() {
+  return kTfLiteInt16;
+}
+
+template <>
+TfLiteType GetTfLiteEnum<int32_t>() {
+  return kTfLiteInt32;
+}
+
+template <>
+TfLiteType GetTfLiteEnum<int64_t>() {
+  return kTfLiteInt64;
+}
+
+template <>
+TfLiteType GetTfLiteEnum<bool>() {
+  return kTfLiteBool;
+}
+
 using subgraph_test_util::ReduceFunction;
 using testing::ElementsAre;
 using testing::ElementsAreArray;
@@ -112,6 +208,148 @@ class ReduceOpModel : public SingleOpModel {
   ReduceFunction reduce_function;
   subgraph_test_util::SubgraphBuilder subgraph_builder_;
 };
+
+template <typename Float>
+class StablehloReduceTestFloat : public ::testing::Test {
+ public:
+  using FloatType = Float;
+};
+
+using FloatTestTypes = ::testing::Types<float>;
+
+TYPED_TEST_SUITE(StablehloReduceTestFloat, FloatTestTypes);
+
+TYPED_TEST(StablehloReduceTestFloat, ReduceFloatAdd) {
+  using Float = typename TestFixture::FloatType;
+  ReduceFunction reduce_function = ReduceFunction::kADD;
+  TfLiteStablehloReduceParams params = {{2},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Float>(), {1, 2, 6}},
+                      {GetTTEnum<Float>(), {1}}, {GetTTEnum<Float>(), {}},
+                      params, reduce_function, GetTfLiteEnum<Float>());
+
+  model.SetInput<Float>({Float(1), Float(2), Float(3), Float(4), Float(5),
+                         Float(6), Float(1), Float(2), Float(3), Float(4),
+                         Float(5), Float(6)});
+  model.SetInitValue<Float>({Float(10)});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Float> expected_values = {Float(31), Float(31)};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 2}));
+  EXPECT_THAT(model.GetOutput<Float>(), ElementsAreArray(expected_values));
+}
+
+TYPED_TEST(StablehloReduceTestFloat, ReduceFloatMul) {
+  using Float = typename TestFixture::FloatType;
+  ReduceFunction reduce_function = ReduceFunction::kMUL;
+  TfLiteStablehloReduceParams params = {{1, 0},  // dimensions
+                                        2,       // num_dimensions
+                                        1};      // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Float>(), {1, 2, 6}},
+                      {GetTTEnum<Float>(), {1}}, {GetTTEnum<Float>(), {}},
+                      params, reduce_function, GetTfLiteEnum<Float>());
+
+  model.SetInput<Float>({Float(1), Float(2), Float(3), Float(4), Float(5),
+                         Float(6), Float(1), Float(2), Float(3), Float(4),
+                         Float(5), Float(6)});
+  model.SetInitValue<Float>({Float(1)});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Float> expected_values = {Float(1),  Float(4),  Float(9),
+                                        Float(16), Float(25), Float(36)};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({6}));
+  EXPECT_THAT(model.GetOutput<Float>(), ElementsAreArray(expected_values));
+}
+
+TYPED_TEST(StablehloReduceTestFloat, ReduceFloatMin) {
+  using Float = typename TestFixture::FloatType;
+  ReduceFunction reduce_function = ReduceFunction::kMIN;
+  TfLiteStablehloReduceParams params = {{1, 0},  // dimensions
+                                        2,       // num_dimensions
+                                        1};      // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Float>(), {1, 2, 6}},
+                      {GetTTEnum<Float>(), {1}}, {GetTTEnum<Float>(), {}},
+                      params, reduce_function, GetTfLiteEnum<Float>());
+
+  model.SetInput<Float>({Float(1), Float(2), Float(3), Float(4), Float(5),
+                         Float(6), Float(10), Float(11), Float(12), Float(13),
+                         Float(14), Float(15)});
+  model.SetInitValue<Float>({float(1000)});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Float> expected_values = {Float(1), Float(2), Float(3),
+                                        Float(4), Float(5), Float(6)};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({6}));
+  EXPECT_THAT(model.GetOutput<Float>(), ElementsAreArray(expected_values));
+}
+
+TYPED_TEST(StablehloReduceTestFloat, ReduceFloatMax) {
+  using Float = typename TestFixture::FloatType;
+  ReduceFunction reduce_function = ReduceFunction::kMAX;
+  TfLiteStablehloReduceParams params = {{1, 0},  // dimensions
+                                        2,       // num_dimensions
+                                        1};      // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Float>(), {1, 2, 6}},
+                      {GetTTEnum<Float>(), {1}}, {GetTTEnum<Float>(), {}},
+                      params, reduce_function, GetTfLiteEnum<Float>());
+
+  model.SetInput<Float>({Float(1), Float(2), Float(3), Float(4), Float(5),
+                         Float(6), Float(10), Float(11), Float(12), Float(13),
+                         Float(14), Float(15)});
+  model.SetInitValue<Float>({Float(0)});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Float> expected_values = {Float(10), Float(11), Float(12),
+                                        Float(13), Float(14), Float(15)};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({6}));
+  EXPECT_THAT(model.GetOutput<Float>(), ElementsAreArray(expected_values));
+}
+
+template <typename Bool>
+class StablehloReduceTestBool : public ::testing::Test {
+ public:
+  using BoolType = Bool;
+};
+
+using BoolTestTypes = ::testing::Types<bool>;
+
+TYPED_TEST_SUITE(StablehloReduceTestBool, BoolTestTypes);
+
+TYPED_TEST(StablehloReduceTestBool, ReduceBoolAny) {
+  using Bool = typename TestFixture::BoolType;
+  ReduceFunction reduce_function = ReduceFunction::kANY;
+  TfLiteStablehloReduceParams params = {{1, 0},  // dimensions
+                                        2,       // num_dimensions
+                                        1};      // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Bool>(), {1, 2, 6}}, {GetTTEnum<Bool>(), {1}},
+                      {GetTTEnum<Bool>(), {}}, params, reduce_function,
+                      GetTfLiteEnum<Bool>());
+
+  model.SetInput<Bool>({true, true, true, true, true, true, false, false, false,
+                        false, false, false});
+  model.SetInitValue<Bool>({false});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Bool> expected_values = {true, true, true, true, true, true};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({6}));
+  EXPECT_THAT(model.GetOutput<Bool>(), ElementsAreArray(expected_values));
+}
+
+TYPED_TEST(StablehloReduceTestBool, ReduceBoolAll) {
+  using Bool = typename TestFixture::BoolType;
+  ReduceFunction reduce_function = ReduceFunction::kALL;
+  TfLiteStablehloReduceParams params = {{1, 0},  // dimensions
+                                        2,       // num_dimensions
+                                        1};      // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Bool>(), {1, 2, 6}}, {GetTTEnum<Bool>(), {1}},
+                      {GetTTEnum<Bool>(), {}}, params, reduce_function,
+                      GetTfLiteEnum<Bool>());
+
+  model.SetInput<Bool>({true, true, true, true, true, true, false, false, false,
+                        false, false, false});
+  model.SetInitValue<Bool>({false});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Bool> expected_values = {false, false, false,
+                                       false, false, false};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({6}));
+  EXPECT_THAT(model.GetOutput<Bool>(), ElementsAreArray(expected_values));
+}
 
 }  // namespace
 }  // namespace tflite
