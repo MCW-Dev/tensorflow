@@ -13,11 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <gtest/gtest.h>
-
 #include <initializer_list>
 #include <vector>
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include "Eigen/Core"
 #include "subgraph_test_util.h"
 #include "tensorflow/lite/c/c_api_types.h"
@@ -349,6 +349,299 @@ TYPED_TEST(StablehloReduceTestBool, ReduceBoolAll) {
                                        false, false, false};
   ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({6}));
   EXPECT_THAT(model.GetOutput<Bool>(), ElementsAreArray(expected_values));
+}
+
+// for quantized, the error shouldn't exceed step
+template <typename T>
+float GetTolerance(float min, float max) {
+  float kQuantizedStep =
+      2.0 * (max - min) /
+      (std::numeric_limits<T>::max() - std::numeric_limits<T>::min());
+  return kQuantizedStep;
+}
+
+template <typename Int>
+class StablehloReduceTestInt : public ::testing::Test {
+ public:
+  using IntType = Int;
+};
+
+using TestTypes = ::testing::Types<int16_t, int32_t, int64_t>;
+
+TYPED_TEST_SUITE(StablehloReduceTestInt, TestTypes);
+
+TYPED_TEST(StablehloReduceTestInt, ReduceIntAdd) {
+  using Int = typename TestFixture::IntType;
+  ReduceFunction reduce_function = ReduceFunction::kADD;
+  TfLiteStablehloReduceParams params = {{2},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Int>(), {1, 2, 6}}, {GetTTEnum<Int>(), {1}},
+                      {GetTTEnum<Int>(), {}}, params, reduce_function,
+                      GetTfLiteEnum<Int>());
+
+  model.SetInput<Int>({1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6});
+  model.SetInitValue<Int>({10});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Int> expected_values = {31, 31};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 2}));
+  EXPECT_THAT(model.GetOutput<Int>(), ElementsAreArray(expected_values));
+}
+
+TYPED_TEST(StablehloReduceTestInt, ReduceIntMul) {
+  using Int = typename TestFixture::IntType;
+  ReduceFunction reduce_function = ReduceFunction::kMUL;
+  TfLiteStablehloReduceParams params = {{1, 0},  // dimensions
+                                        2,       // num_dimensions
+                                        1};      // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Int>(), {1, 2, 6}}, {GetTTEnum<Int>(), {1}},
+                      {GetTTEnum<Int>(), {}}, params, reduce_function,
+                      GetTfLiteEnum<Int>());
+
+  model.SetInput<Int>({1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6});
+  model.SetInitValue<Int>({1});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Int> expected_values = {1, 4, 9, 16, 25, 36};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({6}));
+  EXPECT_THAT(model.GetOutput<Int>(), ElementsAreArray(expected_values));
+}
+
+TYPED_TEST(StablehloReduceTestInt, ReduceIntMin) {
+  using Int = typename TestFixture::IntType;
+  ReduceFunction reduce_function = ReduceFunction::kMIN;
+  TfLiteStablehloReduceParams params = {{1, 0},  // dimensions
+                                        2,       // num_dimensions
+                                        1};      // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Int>(), {1, 2, 6}}, {GetTTEnum<Int>(), {1}},
+                      {GetTTEnum<Int>(), {}}, params, reduce_function,
+                      GetTfLiteEnum<Int>());
+
+  model.SetInput<Int>({1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15});
+  model.SetInitValue<Int>({1000});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Int> expected_values = {1, 2, 3, 4, 5, 6};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({6}));
+  EXPECT_THAT(model.GetOutput<Int>(), ElementsAreArray(expected_values));
+}
+
+TYPED_TEST(StablehloReduceTestInt, ReduceIntMax) {
+  using Int = typename TestFixture::IntType;
+  ReduceFunction reduce_function = ReduceFunction::kMAX;
+  TfLiteStablehloReduceParams params = {{1, 0},  // dimensions
+                                        2,       // num_dimensions
+                                        1};      // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<Int>(), {1, 2, 6}}, {GetTTEnum<Int>(), {1}},
+                      {GetTTEnum<Int>(), {}}, params, reduce_function,
+                      GetTfLiteEnum<Int>());
+
+  model.SetInput<Int>({1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15});
+  model.SetInitValue<Int>({0});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  std::vector<Int> expected_values = {10, 11, 12, 13, 14, 15};
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({6}));
+  EXPECT_THAT(model.GetOutput<Int>(), ElementsAreArray(expected_values));
+}
+
+template <typename QuantizedInt>
+class StablehloReduceQuantizedTestInt : public ::testing::Test {
+ public:
+  using QuantizedIntType = QuantizedInt;
+};
+
+using QuantizedTestTypes = ::testing::Types<int8_t>;
+
+TYPED_TEST_SUITE(StablehloReduceQuantizedTestInt, QuantizedTestTypes);
+
+TYPED_TEST(StablehloReduceQuantizedTestInt, ReduceQuantizedIntProd) {
+  using QuantizedInt = typename TestFixture::QuantizedIntType;
+  float kQuantizedTolerance = GetTolerance<QuantizedInt>(0.0f, 128.0f);
+  ReduceFunction reduce_function = ReduceFunction::kMUL;
+  TfLiteStablehloReduceParams params = {{1},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<QuantizedInt>(), {1, 2, 6}, 0.0f, 128.0f},
+                      {GetTTEnum<QuantizedInt>(), {1}, 0.0f, 128.0f},
+                      {GetTTEnum<QuantizedInt>(), {}, 0.0f, 128.0f}, params,
+                      reduce_function, GetTfLiteEnum<QuantizedInt>());
+  model.QuantizeAndPopulate<QuantizedInt>(
+      model.input(), {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 10.0f, 11.0f, 12.0f,
+                      13.0f, 14.0f, 15.0f});
+  model.QuantizeAndPopulate<QuantizedInt>(model.init_value(), {1.0f});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 6}));
+  EXPECT_THAT(
+      model.GetDequantizedOutput<QuantizedInt>(),
+      ElementsAreArray(ArrayFloatNear(
+          {10.0f, 22.0f, 36.0f, 52.0f, 70.0f, 90.0f}, kQuantizedTolerance)));
+}
+
+TYPED_TEST(StablehloReduceQuantizedTestInt, ReduceQuantizedIntAdd) {
+  using QuantizedInt = typename TestFixture::QuantizedIntType;
+  float kQuantizedTolerance = GetTolerance<QuantizedInt>(0.0f, 128.0f);
+  ReduceFunction reduce_function = ReduceFunction::kADD;
+  TfLiteStablehloReduceParams params = {{1},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<QuantizedInt>(), {1, 2, 6}, 0.0f, 128.0f},
+                      {GetTTEnum<QuantizedInt>(), {1}, 0.0f, 128.0f},
+                      {GetTTEnum<QuantizedInt>(), {}, 0.0f, 128.0f}, params,
+                      reduce_function, GetTfLiteEnum<QuantizedInt>());
+  model.QuantizeAndPopulate<QuantizedInt>(
+      model.input(), {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 10.0f, 11.0f, 12.0f,
+                      13.0f, 14.0f, 15.0f});
+  model.QuantizeAndPopulate<QuantizedInt>(model.init_value(), {0.0f});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 6}));
+  EXPECT_THAT(
+      model.GetDequantizedOutput<QuantizedInt>(),
+      ElementsAreArray(ArrayFloatNear(
+          {11.0f, 13.0f, 15.0f, 17.0f, 19.0f, 21.0f}, kQuantizedTolerance)));
+}
+
+TYPED_TEST(StablehloReduceQuantizedTestInt, ReduceQuantizedIntMin) {
+  using QuantizedInt = typename TestFixture::QuantizedIntType;
+  float kQuantizedTolerance = GetTolerance<QuantizedInt>(-127.0f, 128.0f);
+  ReduceFunction reduce_function = ReduceFunction::kMIN;
+  TfLiteStablehloReduceParams params = {{1},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<QuantizedInt>(), {1, 2, 6}, -127.0f, 128.0f},
+                      {GetTTEnum<QuantizedInt>(), {1}, -127.0f, 128.0f},
+                      {GetTTEnum<QuantizedInt>(), {}, -127.0f, 128.0f}, params,
+                      reduce_function, GetTfLiteEnum<QuantizedInt>());
+  model.QuantizeAndPopulate<QuantizedInt>(
+      model.input(), {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 10.0f, 11.0f, 12.0f,
+                      13.0f, 14.0f, 15.0f});
+  model.QuantizeAndPopulate<QuantizedInt>(model.init_value(), {24.0f});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 6}));
+  EXPECT_THAT(model.GetDequantizedOutput<QuantizedInt>(),
+              ElementsAreArray(ArrayFloatNear(
+                  {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}, kQuantizedTolerance)));
+}
+
+TYPED_TEST(StablehloReduceQuantizedTestInt, ReduceQuantizedIntMax) {
+  using QuantizedInt = typename TestFixture::QuantizedIntType;
+  float kQuantizedTolerance = GetTolerance<QuantizedInt>(0.0f, 128.0f);
+  ReduceFunction reduce_function = ReduceFunction::kMAX;
+  TfLiteStablehloReduceParams params = {{1},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<QuantizedInt>(), {1, 2, 6}, 0.0f, 128.0f},
+                      {GetTTEnum<QuantizedInt>(), {1}, 0.0f, 128.0f},
+                      {GetTTEnum<QuantizedInt>(), {}, 0.0f, 128.0f}, params,
+                      reduce_function, GetTfLiteEnum<QuantizedInt>());
+  model.QuantizeAndPopulate<QuantizedInt>(
+      model.input(), {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 10.0f, 11.0f, 12.0f,
+                      13.0f, 14.0f, 15.0f});
+  model.QuantizeAndPopulate<QuantizedInt>(model.init_value(), {0.0f});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 6}));
+  EXPECT_THAT(
+      model.GetDequantizedOutput<QuantizedInt>(),
+      ElementsAreArray(ArrayFloatNear(
+          {10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f}, kQuantizedTolerance)));
+}
+
+template <typename QuantizedInt16>
+class StablehloReduceQuantizedTestInt16 : public ::testing::Test {
+ public:
+  using QuantizedInt16Type = QuantizedInt16;
+};
+
+using QuantizedInt16TestTypes = ::testing::Types<int16_t>;
+
+TYPED_TEST_SUITE(StablehloReduceQuantizedTestInt16, QuantizedInt16TestTypes);
+
+TYPED_TEST(StablehloReduceQuantizedTestInt16, ReduceQuantizedInt16Add) {
+  using QuantizedInt16 = typename TestFixture::QuantizedInt16Type;
+  float kQuantizedTolerance = GetTolerance<QuantizedInt16>(-127.0f, 127.0f);
+  ReduceFunction reduce_function = ReduceFunction::kADD;
+  TfLiteStablehloReduceParams params = {{1},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<QuantizedInt16>(), {1, 2, 6}, -127.0f, 127.0f},
+                      {GetTTEnum<QuantizedInt16>(), {1}, -127.0f, 127.0f},
+                      {GetTTEnum<QuantizedInt16>(), {}, -127.0f, 127.0f},
+                      params, reduce_function, GetTfLiteEnum<QuantizedInt16>());
+  model.QuantizeAndPopulate<QuantizedInt16>(
+      model.input(), {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 10.0f, 11.0f, 12.0f,
+                      13.0f, 14.0f, 15.0f});
+  model.QuantizeAndPopulate<QuantizedInt16>(model.init_value(), {0.0f});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 6}));
+  EXPECT_THAT(
+      model.GetDequantizedOutput<QuantizedInt16>(),
+      ElementsAreArray(ArrayFloatNear(
+          {11.0f, 13.0f, 15.0f, 17.0f, 19.0f, 21.0f}, kQuantizedTolerance)));
+}
+
+TYPED_TEST(StablehloReduceQuantizedTestInt16, ReduceQuantizedInt16Prod) {
+  using QuantizedInt16 = typename TestFixture::QuantizedInt16Type;
+  float kQuantizedTolerance = GetTolerance<QuantizedInt16>(-127.0f, 127.0f);
+  ReduceFunction reduce_function = ReduceFunction::kMUL;
+  TfLiteStablehloReduceParams params = {{1},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<QuantizedInt16>(), {1, 2, 6}, -127.0f, 127.0f},
+                      {GetTTEnum<QuantizedInt16>(), {1}, -127.0f, 127.0f},
+                      {GetTTEnum<QuantizedInt16>(), {}, -127.0f, 127.0f},
+                      params, reduce_function, GetTfLiteEnum<QuantizedInt16>());
+  model.QuantizeAndPopulate<QuantizedInt16>(
+      model.input(), {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 10.0f, 11.0f, 12.0f,
+                      13.0f, 14.0f, 15.0f});
+  model.QuantizeAndPopulate<QuantizedInt16>(model.init_value(), {1.0f});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 6}));
+  EXPECT_THAT(
+      model.GetDequantizedOutput<QuantizedInt16>(),
+      ElementsAreArray(ArrayFloatNear(
+          {10.0f, 22.0f, 36.0f, 52.0f, 70.0f, 90.0f}, kQuantizedTolerance)));
+}
+
+TYPED_TEST(StablehloReduceQuantizedTestInt16, ReduceQuantizedInt16Min) {
+  using QuantizedInt16 = typename TestFixture::QuantizedInt16Type;
+  float kQuantizedTolerance = GetTolerance<QuantizedInt16>(-127.0f, 127.0f);
+  ReduceFunction reduce_function = ReduceFunction::kMIN;
+  TfLiteStablehloReduceParams params = {{1},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<QuantizedInt16>(), {1, 2, 6}, -127.0f, 127.0f},
+                      {GetTTEnum<QuantizedInt16>(), {1}, -127.0f, 127.0f},
+                      {GetTTEnum<QuantizedInt16>(), {}, -127.0f, 127.0f},
+                      params, reduce_function, GetTfLiteEnum<QuantizedInt16>());
+  model.QuantizeAndPopulate<QuantizedInt16>(
+      model.input(), {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 10.0f, 11.0f, 12.0f,
+                      13.0f, 14.0f, 15.0f});
+  model.QuantizeAndPopulate<QuantizedInt16>(model.init_value(), {24.0f});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 6}));
+  EXPECT_THAT(model.GetDequantizedOutput<QuantizedInt16>(),
+              ElementsAreArray(ArrayFloatNear(
+                  {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}, kQuantizedTolerance)));
+}
+
+TYPED_TEST(StablehloReduceQuantizedTestInt16, ReduceQuantizedInt16Max) {
+  using QuantizedInt16 = typename TestFixture::QuantizedInt16Type;
+  float kQuantizedTolerance = GetTolerance<QuantizedInt16>(-127.0f, 127.0f);
+  ReduceFunction reduce_function = ReduceFunction::kMAX;
+  TfLiteStablehloReduceParams params = {{1},  // dimensions
+                                        1,    // num_dimensions
+                                        1};   // body_subgraph_index
+  ReduceOpModel model({GetTTEnum<QuantizedInt16>(), {1, 2, 6}, -127.0f, 127.0f},
+                      {GetTTEnum<QuantizedInt16>(), {1}, -127.0f, 127.0f},
+                      {GetTTEnum<QuantizedInt16>(), {}, -127.0f, 127.0f},
+                      params, reduce_function, GetTfLiteEnum<QuantizedInt16>());
+  model.QuantizeAndPopulate<QuantizedInt16>(
+      model.input(), {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 10.0f, 11.0f, 12.0f,
+                      13.0f, 14.0f, 15.0f});
+  model.QuantizeAndPopulate<QuantizedInt16>(model.init_value(), {0.0f});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  ASSERT_THAT(model.GetOutputShape(), ElementsAreArray({1, 6}));
+  EXPECT_THAT(
+      model.GetDequantizedOutput<QuantizedInt16>(),
+      ElementsAreArray(ArrayFloatNear(
+          {10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f}, kQuantizedTolerance)));
 }
 
 }  // namespace

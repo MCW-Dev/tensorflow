@@ -15,7 +15,6 @@ limitations under the License.
 
 #include <algorithm>
 #include <cmath>
-
 #include <cstdint>
 #include <limits>
 #include <numeric>
@@ -234,6 +233,18 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   } else if (data_type == kTfLiteBFloat16) {
     return EvalImpl<Eigen::bfloat16>(context, node, input, init_value,
                                      dimension, num_dimension, output);
+  } else if (data_type == kTfLiteInt8) {
+    return EvalImpl<int8_t>(context, node, input, init_value, dimension,
+                            num_dimension, output);
+  } else if (data_type == kTfLiteInt16) {
+    return EvalImpl<int16_t>(context, node, input, init_value, dimension,
+                             num_dimension, output);
+  } else if (data_type == kTfLiteInt32) {
+    return EvalImpl<int32_t>(context, node, input, init_value, dimension,
+                             num_dimension, output);
+  } else if (data_type == kTfLiteInt64) {
+    return EvalImpl<int64_t>(context, node, input, init_value, dimension,
+                             num_dimension, output);
   } else if (data_type == kTfLiteBool) {
     return EvalImpl<bool>(context, node, input, init_value, dimension,
                           num_dimension, output);
@@ -306,7 +317,7 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
 
   TfLiteTensor* output;
   TF_LITE_ENSURE_OK(context,
-                    GetOutputSafe(context, node, kOutputTensor, &output));  
+                    GetOutputSafe(context, node, kOutputTensor, &output));
   TF_LITE_ENSURE_TYPES_EQ(context, input->type, output->type);
 
   int input_rank = input->dims->size;
@@ -341,10 +352,38 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
 
     TfLiteTensor* body_subgraph_input = body_subgraph->tensor(input_idx);
     body_subgraph_input->params = input->params;
+
+    if (input->type == kTfLiteInt16 &&
+        input->quantization.type != kTfLiteNoQuantization) {
+      TfLiteQuantizationFree(&body_subgraph_input->quantization);
+      body_subgraph_input->quantization.type = kTfLiteAffineQuantization;
+      auto* affine_quantization = reinterpret_cast<TfLiteAffineQuantization*>(
+          malloc(sizeof(TfLiteAffineQuantization)));
+      affine_quantization->quantized_dimension = 0;
+      affine_quantization->scale = TfLiteFloatArrayCreate(1);
+      affine_quantization->zero_point = TfLiteIntArrayCreate(1);
+      affine_quantization->scale->data[0] = input->params.scale;
+      affine_quantization->zero_point->data[0] = input->params.zero_point;
+      body_subgraph_input->quantization.params = affine_quantization;
+    }
   }
   TfLiteTensor* body_subgraph_output =
       body_subgraph->tensor(body_subgraph->outputs()[0]);
   body_subgraph_output->params = output->params;
+
+  if (input->type == kTfLiteInt16 &&
+      input->quantization.type != kTfLiteNoQuantization) {
+    TfLiteQuantizationFree(&body_subgraph_output->quantization);
+    body_subgraph_output->quantization.type = kTfLiteAffineQuantization;
+    auto* affine_quantization = reinterpret_cast<TfLiteAffineQuantization*>(
+        malloc(sizeof(TfLiteAffineQuantization)));
+    affine_quantization->quantized_dimension = 0;
+    affine_quantization->scale = TfLiteFloatArrayCreate(1);
+    affine_quantization->zero_point = TfLiteIntArrayCreate(1);
+    affine_quantization->scale->data[0] = input->params.scale;
+    affine_quantization->zero_point->data[0] = input->params.zero_point;
+    body_subgraph_output->quantization.params = affine_quantization;
+  }
 
   TF_LITE_ENSURE_OK(context, body_subgraph->AllocateTensors());
 
