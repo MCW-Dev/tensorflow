@@ -146,8 +146,9 @@ absl::StatusOr<Literal> Compare(const Shape& shape, Comparison comparison,
 std::optional<bool> GetInstructionStaticValueAsBool(
     const HloInstruction* instruction) {
   HloEvaluator evaluator;
-  absl::StatusOr<Literal> static_value = evaluator.Evaluate(
-      instruction, /*recursively_evaluate_nonconstant_operands=*/true);
+  absl::StatusOr<Literal> static_value =
+      evaluator.Evaluate(instruction, /*precomputed_analyses=*/{},
+                         /*recursively_evaluate_nonconstant_operands=*/true);
   if (static_value.ok()) {
     return static_value->GetFirstElement<bool>();
   }
@@ -205,25 +206,6 @@ absl::Status Apply(Literal& literal, F&& literal_generator) {
       literal.shape().element_type());
 }
 
-constexpr absl::string_view kEvalErrorDetailUrl = "EvalErrorDetailUrl";
-
-// Use this class to represent the precise details of the error to enable
-// special treatment.
-enum class EvalErrorDetail : uint32_t {
-  // The evaluation result depends on dynamic values such as parameters and
-  // infeed. Therefore, the HLO's value cannot be statically evaluated.
-  kDynamicValueDependence = 0,
-};
-
-std::optional<EvalErrorDetail> ParseEvalErrorDetail(const absl::Status& error) {
-  auto error_detail = error.GetPayload(kEvalErrorDetailUrl);
-  if (!error_detail.has_value() && error_detail->empty()) {
-    return std::nullopt;
-  }
-  return static_cast<EvalErrorDetail>(
-      absl::little_endian::Load32(error_detail->Flatten().data()));
-}
-
 absl::Status MakeEvalErrorDueToParamOrInfeed(
     const HloInstruction& eval_instruction) {
   absl::Status error = absl::FailedPreconditionError(absl::StrCat(
@@ -231,11 +213,12 @@ absl::Status MakeEvalErrorDueToParamOrInfeed(
       ") since it depends on infeed or parameters to its parent computation (",
       eval_instruction.parent()->name(), ")."));
   std::string error_payload;
-  error_payload.resize(sizeof(EvalErrorDetail));
+  error_payload.resize(sizeof(internal::EvalErrorDetail));
   absl::little_endian::Store32(
       const_cast<char*>(error_payload.data()),
-      static_cast<uint32_t>(EvalErrorDetail::kDynamicValueDependence));
-  error.SetPayload(kEvalErrorDetailUrl, absl::Cord(error_payload));
+      static_cast<uint32_t>(
+          internal::EvalErrorDetail::kDynamicValueDependence));
+  error.SetPayload(internal::kEvalErrorDetailUrl, absl::Cord(error_payload));
   return error;
 }
 
@@ -252,8 +235,9 @@ struct DynamicOrStaticInteger {
 std::optional<DynamicOrStaticInteger> GetInstructionValueAsInteger(
     const HloInstruction* instruction) {
   HloEvaluator evaluator;
-  absl::StatusOr<Literal> static_value = evaluator.Evaluate(
-      instruction, /*recursively_evaluate_nonconstant_operands=*/true);
+  absl::StatusOr<Literal> static_value =
+      evaluator.Evaluate(instruction, /*precomputed_analyses=*/{},
+                         /*recursively_evaluate_nonconstant_operands=*/true);
   if (static_value.ok()) {
     if (instruction->shape().element_type() == PrimitiveType::PRED) {
       return DynamicOrStaticInteger{
@@ -263,10 +247,11 @@ std::optional<DynamicOrStaticInteger> GetInstructionValueAsInteger(
     }
   }
 
-  std::optional<EvalErrorDetail> eval_error_detail =
-      ParseEvalErrorDetail(static_value.status());
+  std::optional<internal::EvalErrorDetail> eval_error_detail =
+      internal::ParseEvalErrorDetail(static_value.status());
   if (eval_error_detail.has_value() &&
-      *eval_error_detail == EvalErrorDetail::kDynamicValueDependence) {
+      *eval_error_detail ==
+          internal::EvalErrorDetail::kDynamicValueDependence) {
     return DynamicOrStaticInteger{std::nullopt};
   }
   return std::nullopt;
@@ -549,6 +534,21 @@ std::optional<DynamicOrStaticInteger> EvaluateWhileLoopParamInitValue(
 }
 
 }  // namespace
+
+namespace internal {
+
+constexpr absl::string_view kEvalErrorDetailUrl = "EvalErrorDetailUrl";
+
+std::optional<EvalErrorDetail> ParseEvalErrorDetail(const absl::Status& error) {
+  auto error_detail = error.GetPayload(kEvalErrorDetailUrl);
+  if (!error_detail.has_value() || error_detail->empty()) {
+    return std::nullopt;
+  }
+  return static_cast<EvalErrorDetail>(
+      absl::little_endian::Load32(error_detail->Flatten().data()));
+}
+
+}  // namespace internal
 
 std::optional<ParsedWhileLoop> HandleNoopLoopCondition(
     const ParamIndexAndValue& parameter_index_and_value,
@@ -922,7 +922,7 @@ absl::StatusOr<Literal> HloEvaluator::Evaluate(
 }
 
 absl::StatusOr<Literal> HloEvaluator::Evaluate(
-    const HloInstruction* instruction,
+    const HloInstruction* instruction, PrecomputedAnalyses precomputed_analyses,
     bool recursively_evaluate_nonconstant_operands) {
   arg_literals_.clear();
   evaluated_.clear();
@@ -932,7 +932,7 @@ absl::StatusOr<Literal> HloEvaluator::Evaluate(
       absl::MakeCleanup([this] { enable_partial_evaluation_ = false; });
   enable_partial_evaluation_ = recursively_evaluate_nonconstant_operands;
   TF_RETURN_IF_ERROR(
-      EvaluateInternal(instruction, /*shape_index=*/{},
+      EvaluateInternal(instruction, precomputed_analyses, /*shape_index=*/{},
                        recursively_evaluate_nonconstant_operands));
   const Literal& result = GetEvaluatedLiteralFor(instruction);
   if (!result.IsKnown()) {
@@ -945,8 +945,8 @@ bool HloEvaluator::TryEvaluate(const HloInstruction* instruction,
                                Literal* result,
                                bool recursively_evaluate_nonconstant_operands) {
   CHECK(result != nullptr);
-  auto result_or =
-      Evaluate(instruction, recursively_evaluate_nonconstant_operands);
+  auto result_or = Evaluate(instruction, /*precomputed_analyses=*/{},
+                            recursively_evaluate_nonconstant_operands);
   if (!result_or.ok()) {
     VLOG(1) << "TryEvaluate failed:" << result_or.status();
     return false;
@@ -1068,11 +1068,12 @@ absl::StatusOr<Literal> HloEvaluator::EvaluateDotOp(
 }
 
 absl::Status HloEvaluator::EvaluateParameterFromCallerArgument(
-    const HloInstruction* parameter, const ShapeIndex& shape_index) {
+    const HloInstruction* parameter, const ShapeIndex& shape_index,
+    PrecomputedAnalyses analyses) {
   CHECK(!evaluated_.contains(parameter));
   const HloComputation* parent_computation = parameter->parent();
   std::vector<HloInstruction*> computation_callers =
-      call_graph_cache_->GetComputationCallers(parent_computation);
+      analyses.call_graph->GetComputationCallers(parent_computation);
   // If the parent computation has multiple callers, we cannot determine from
   // which caller the arguments are passed.
   if (computation_callers.size() != 1) {
@@ -1095,11 +1096,11 @@ absl::Status HloEvaluator::EvaluateParameterFromCallerArgument(
     HloComputation* while_body = computation_caller->while_body();
     TF_ASSIGN_OR_RETURN(
         const LogicalBuffer* logical_buffer,
-        tuple_points_to_analysis_cache_->GetBufferDefinedAt(
+        analyses.tuple_points_to->GetBufferDefinedAt(
             while_body->parameter_instruction(parameter->parameter_number()),
             shape_index));
     const TuplePointsToAnalysis::BufferAliasVector& buffer_aliases =
-        tuple_points_to_analysis_cache_->GetBufferAliases(*logical_buffer);
+        analyses.tuple_points_to->GetBufferAliases(*logical_buffer);
     bool unchanged_in_return = false;
     for (const BufferAlias& buffer_alias : buffer_aliases) {
       if (buffer_alias.instruction() == while_body->root_instruction() &&
@@ -1111,7 +1112,8 @@ absl::Status HloEvaluator::EvaluateParameterFromCallerArgument(
       return MakeEvalErrorDueToParamOrInfeed(*parameter);
     }
   }
-  TF_RETURN_IF_ERROR(EvaluateInternal(caller_operand, shape_index, true));
+  TF_RETURN_IF_ERROR(
+      EvaluateInternal(caller_operand, analyses, shape_index, true));
   const Literal& caller_operand_literal =
       GetEvaluatedLiteralFor(caller_operand);
   evaluated_[parameter] =
@@ -1156,7 +1158,8 @@ DimensionVector HloEvaluator::MakeDimMultipliers(const Shape& shape) {
 }
 
 absl::Status HloEvaluator::EvaluateInternal(
-    const HloInstruction* instruction, const ShapeIndex& shape_index,
+    const HloInstruction* instruction, PrecomputedAnalyses precomputed_analyses,
+    const ShapeIndex& shape_index,
     bool recursively_evaluate_nonconstant_operands) {
   // Don't need to evaluate this instruction again if it has already been
   // evaluated.
@@ -1172,34 +1175,44 @@ absl::Status HloEvaluator::EvaluateInternal(
     if (instruction->opcode() == HloOpcode::kGetTupleElement) {
       ShapeIndex new_shape_index = shape_index;
       new_shape_index.push_front(instruction->tuple_index());
-      TF_RETURN_IF_ERROR(
-          EvaluateInternal(instruction->operand(0), new_shape_index,
-                           /*recursively_evaluate_nonconstant_operands=*/true));
+      TF_RETURN_IF_ERROR(EvaluateInternal(
+          instruction->operand(0), precomputed_analyses, new_shape_index,
+          /*recursively_evaluate_nonconstant_operands=*/true));
     } else if (instruction->opcode() == HloOpcode::kTuple &&
                !shape_index.empty()) {
       ShapeIndex new_shape_index = shape_index;
       int64_t tuple_index = new_shape_index.front();
       new_shape_index.pop_front();
       TF_RETURN_IF_ERROR(
-          EvaluateInternal(instruction->operand(tuple_index), new_shape_index,
+          EvaluateInternal(instruction->operand(tuple_index),
+                           precomputed_analyses, new_shape_index,
                            /*recursively_evaluate_nonconstant_operands=*/true));
     } else if (instruction->opcode() == HloOpcode::kParameter) {
-      if (!call_graph_cache_) {
-        HloModule* module = instruction->GetModule();
-        call_graph_cache_ = CallGraph::Build(module);
-      }
-      if (!tuple_points_to_analysis_cache_) {
-        HloModule* module = instruction->GetModule();
-        absl::StatusOr<std::unique_ptr<TuplePointsToAnalysis>>
-            tuple_points_to_analysis = TuplePointsToAnalysis::Run(module);
-        if (tuple_points_to_analysis.ok()) {
-          tuple_points_to_analysis_cache_ =
-              *std::move(tuple_points_to_analysis);
-        }
-      }
-      if (call_graph_cache_ && tuple_points_to_analysis_cache_) {
-        absl::Status argument_eval_status =
-            EvaluateParameterFromCallerArgument(instruction, shape_index);
+      CallGraph* call_graph =
+          (precomputed_analyses.call_graph != nullptr)
+              ? precomputed_analyses.call_graph
+              : std::invoke([this, instruction]() -> CallGraph* {
+                  call_graph_cache_ =
+                      CallGraph::Build(instruction->GetModule());
+                  return call_graph_cache_.get();
+                });
+      TuplePointsToAnalysis* tuple_points_to_analysis =
+          (precomputed_analyses.tuple_points_to != nullptr)
+              ? precomputed_analyses.tuple_points_to
+              : std::invoke([this, instruction]() -> TuplePointsToAnalysis* {
+                  absl::StatusOr<std::unique_ptr<TuplePointsToAnalysis>>
+                      tuple_points_to_analysis =
+                          TuplePointsToAnalysis::Run(instruction->GetModule());
+                  if (!tuple_points_to_analysis.ok()) {
+                    return nullptr;
+                  }
+                  tuple_points_to_analysis_cache_ =
+                      *std::move(tuple_points_to_analysis);
+                  return tuple_points_to_analysis_cache_.get();
+                });
+      if (call_graph && tuple_points_to_analysis) {
+        absl::Status argument_eval_status = EvaluateParameterFromCallerArgument(
+            instruction, shape_index, {tuple_points_to_analysis, call_graph});
         if (!argument_eval_status.ok()) {
           VLOG(4) << "Failed to evaluate parameter " << instruction->name()
                   << " from caller. Reason: " << argument_eval_status.message();
@@ -1211,7 +1224,7 @@ absl::Status HloEvaluator::EvaluateInternal(
     } else {
       for (HloInstruction* operand : instruction->operands()) {
         TF_RETURN_IF_ERROR(EvaluateInternal(
-            operand, /*shape_index=*/{},
+            operand, precomputed_analyses, /*shape_index=*/{},
             /*recursively_evaluate_nonconstant_operands=*/true));
         // Except for the above and following cases, we do not support handling
         // unknown operands for other HLOs. So mark the result as unknown.
@@ -1823,6 +1836,7 @@ class FftTransform {
       auto generate_twiddles = [](int64_t length, bool inverse) {
         std::vector<ComplexType> twiddles;
         // Need only half the twiddles.
+        twiddles.reserve(length / 2);
         for (int64_t k = 0; k < length / 2; k++) {
           twiddles.push_back(Twiddle(k, length, inverse));
         }

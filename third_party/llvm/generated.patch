@@ -1,21 +1,30 @@
 Auto generated patch. Do not edit or delete it, even if empty.
-diff -ruN --strip-trailing-cr a/utils/bazel/llvm-project-overlay/libc/BUILD.bazel b/utils/bazel/llvm-project-overlay/libc/BUILD.bazel
---- a/utils/bazel/llvm-project-overlay/libc/BUILD.bazel
-+++ b/utils/bazel/llvm-project-overlay/libc/BUILD.bazel
-@@ -675,6 +675,7 @@
+diff -ruN --strip-trailing-cr a/utils/bazel/llvm-project-overlay/mlir/BUILD.bazel b/utils/bazel/llvm-project-overlay/mlir/BUILD.bazel
+--- a/utils/bazel/llvm-project-overlay/mlir/BUILD.bazel
++++ b/utils/bazel/llvm-project-overlay/mlir/BUILD.bazel
+@@ -342,6 +342,7 @@
+         "include/mlir/IR/PDLPatternMatch.h.inc",
+         "include/mlir/Interfaces/CallInterfaces.h",
+         "include/mlir/Interfaces/DataLayoutInterfaces.h",
++        "include/mlir/Interfaces/InferIntRangeInterface.h",
+         "include/mlir/Interfaces/SideEffectInterfaces.h",
+     ],
+     hdrs = glob([
+@@ -362,6 +363,7 @@
+         ":BytecodeOpInterfaceIncGen",
+         ":CallOpInterfacesIncGen",
+         ":DataLayoutInterfacesIncGen",
++        ":InferIntRangeInterfaceIncGen",
+         ":OpAsmInterfaceIncGen",
+         ":RegionKindInterfaceIncGen",
+         ":SideEffectInterfacesIncGen",
+@@ -5422,7 +5424,9 @@
+     hdrs = glob(["include/mlir/Dialect/LLVMIR/Transforms/*.h"]),
+     includes = ["include"],
      deps = [
-         ":__support_common",
-         ":__support_cpp_type_traits",
-+        ":__support_fputil_dyadic_float",
-         ":__support_fputil_fenv_impl",
-         ":__support_fputil_fp_bits",
-         ":__support_macros_optimization",
-@@ -1089,7 +1090,7 @@
-         ":__support_macros_optimization",
-         ":__support_osutil_syscall",
-         ":types_pid_t",
--    ]
-+    ],
- )
- 
- libc_support_library(
++	":DataLayoutInterfaces",
+         ":FuncDialect",
++	":InliningUtils",
+         ":IR",
+         ":LLVMDialect",
+         ":LLVMPassIncGen",

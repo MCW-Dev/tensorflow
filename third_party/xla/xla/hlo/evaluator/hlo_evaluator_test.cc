@@ -27,8 +27,10 @@ limitations under the License.
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/internal/endian.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
@@ -48,10 +50,12 @@ limitations under the License.
 #include "xla/literal_util.h"
 #include "xla/permutation_util.h"
 #include "xla/primitive_util.h"
+#include "xla/service/call_graph.h"
 #include "xla/service/dynamic_dimension_inference.h"
 #include "xla/service/hlo_element_type_converter.h"
 #include "xla/service/hlo_module_config.h"
 #include "xla/service/shape_inference.h"
+#include "xla/service/tuple_points_to_analysis.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/test.h"
@@ -165,14 +169,15 @@ class HloEvaluatorTest : public HloTestBase {
     TF_ASSERT_OK_AND_ASSIGN(
         Literal result,
         evaluator_.Evaluate(
-            instruction,
+            instruction, /*precomputed_analyses=*/{},
             /*recursively_evaluate_nonconstant_operands=*/true));
     EXPECT_TRUE(LiteralTestUtil::Equal(expected, result));
   }
 
   void TestRecursiveEvaluationFailure(HloInstruction* instruction) {
-    absl::StatusOr<Literal> result = evaluator_.Evaluate(
-        instruction, /*recursively_evaluate_nonconstant_operands=*/true);
+    absl::StatusOr<Literal> result =
+        evaluator_.Evaluate(instruction, /*precomputed_analyses=*/{},
+                            /*recursively_evaluate_nonconstant_operands=*/true);
     EXPECT_TRUE(!result.ok());
   }
 
@@ -5033,6 +5038,79 @@ TEST_F(HloEvaluatorTest, GetTupleElementInterleavedWithTupleSucceeds) {
   TestRecursivelyEvaluateInstruction(gte2, expected);
 }
 
+// Tests that we can evaluate a parameter instruction through the call graph.
+TEST_F(HloEvaluatorTest, ParameterThroughCallSucceeds) {
+  constexpr absl::string_view kHloModule = R"(
+    HloModule parameter_through_call
+
+    %identity {
+      ROOT %param = s32[] parameter(0)
+    }
+
+    ENTRY parameter_through_call {
+      %constant = s32[] constant(42)
+      ROOT %call = s32[] call(s32[] %constant), to_apply=%identity
+    }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> hlo_module,
+                          ParseAndReturnVerifiedModule(kHloModule));
+  const HloInstruction* parameter_instruction = nullptr;
+  for (const auto* computation : hlo_module->computations()) {
+    for (const auto* instruction : computation->instructions()) {
+      if (instruction->opcode() == HloOpcode::kParameter) {
+        parameter_instruction = instruction;
+      }
+    }
+  }
+  ASSERT_NE(parameter_instruction, nullptr);
+
+  Literal expected = LiteralUtil::CreateR0<int32_t>(42);
+  TF_ASSERT_OK_AND_ASSIGN(
+      Literal result,
+      evaluator_.Evaluate(parameter_instruction, /*precomputed_analyses=*/{},
+                          /*recursively_evaluate_nonconstant_operands=*/true));
+  EXPECT_TRUE(LiteralTestUtil::Equal(expected, result));
+}
+
+// As above, but with analyses precomputed.
+TEST_F(HloEvaluatorTest, ParameterThroughCallSucceedsWithPrecomputation) {
+  constexpr absl::string_view kHloModule = R"(
+    HloModule parameter_through_call
+
+    %identity {
+      ROOT %param = s32[] parameter(0)
+    }
+
+    ENTRY parameter_through_call {
+      %constant = s32[] constant(42)
+      ROOT %call = s32[] call(s32[] %constant), to_apply=%identity
+    }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(std::unique_ptr<HloModule> hlo_module,
+                          ParseAndReturnVerifiedModule(kHloModule));
+  const HloInstruction* parameter_instruction = nullptr;
+  for (const auto* computation : hlo_module->computations()) {
+    for (const auto* instruction : computation->instructions()) {
+      if (instruction->opcode() == HloOpcode::kParameter) {
+        parameter_instruction = instruction;
+      }
+    }
+  }
+  ASSERT_NE(parameter_instruction, nullptr);
+
+  Literal expected = LiteralUtil::CreateR0<int32_t>(42);
+  TF_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TuplePointsToAnalysis> tuple_points_to,
+      TuplePointsToAnalysis::Run(hlo_module.get()));
+  std::unique_ptr<CallGraph> call_graph = CallGraph::Build(hlo_module.get());
+  TF_ASSERT_OK_AND_ASSIGN(
+      Literal result,
+      evaluator_.Evaluate(parameter_instruction,
+                          {tuple_points_to.get(), call_graph.get()},
+                          /*recursively_evaluate_nonconstant_operands=*/true));
+  EXPECT_TRUE(LiteralTestUtil::Equal(expected, result));
+}
+
 class PatternMatchParseWhileLoopTest : public HloTestBase {};
 
 TEST_F(PatternMatchParseWhileLoopTest, LoopBoundDefinedInsideOfCond) {
@@ -5800,6 +5878,29 @@ TEST_F(HloEvaluatorTest, SimpleConvTraced) {
   };
 
   EXPECT_EQ(macs_traced, macs_expected);
+}
+
+TEST(EvalErrorTest, OK) {
+  EXPECT_EQ(std::nullopt, internal::ParseEvalErrorDetail(absl::OkStatus()));
+}
+
+TEST(EvalErrorTest, NoPayload) {
+  EXPECT_EQ(std::nullopt,
+            internal::ParseEvalErrorDetail(absl::InternalError("hmm")));
+}
+
+TEST(EvalErrorTest, Payload) {
+  absl::Status s = absl::InternalError("hmm");
+  std::string payload;
+  payload.resize(sizeof(internal::EvalErrorDetail));
+  absl::little_endian::Store32(
+      const_cast<char*>(payload.data()),
+      static_cast<uint32_t>(
+          internal::EvalErrorDetail::kDynamicValueDependence));
+  s.SetPayload(internal::kEvalErrorDetailUrl, absl::Cord(payload));
+
+  EXPECT_EQ(internal::ParseEvalErrorDetail(s),
+            internal::EvalErrorDetail::kDynamicValueDependence);
 }
 
 }  // namespace
