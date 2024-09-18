@@ -772,6 +772,7 @@ BUILTIN_KERNEL_SRCS = [
     "stablehlo_reduce_window.cc",
     "stablehlo_min_max.cc",
     "stablehlo_scatter.cc",
+    "stablehlo_sort.cc",
     "sign.cc",
     "skip_gram.cc",
     "slice.cc",
@@ -3396,6 +3397,22 @@ cc_test(
         ":test_util",
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest",
+    ],
+)
+
+
+cc_test(
+    name = "stablehlo_sort_test",
+    size = "small",
+    srcs = ["stablehlo_sort_test.cc"],
+    deps = [
+        ":test_main",
+        ":test_util",
+        "//tensorflow/lite/core/c:common",
+        "//tensorflow/lite/schema:schema_fbs",
+        ":subgraph_test_util",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

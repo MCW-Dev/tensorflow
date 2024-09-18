@@ -22,11 +22,11 @@ limitations under the License.
 
 #include <stdint.h>
 
+#include <gtest/gtest.h>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include <gtest/gtest.h>
 #include "absl/algorithm/container.h"
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/c/c_api_types.h"
@@ -36,7 +36,7 @@ limitations under the License.
 
 namespace tflite {
 namespace subgraph_test_util {
-
+enum class ComparisonDirection { kGT, kLT, kGE, kLE, kEQ, kNQ, kOther };
 class SubgraphBuilder {
  public:
   ~SubgraphBuilder();
@@ -184,6 +184,11 @@ class SubgraphBuilder {
   // 1 output with `kTfLiteBool` type.
   //   Equivalent to (input < rhs).
   void BuildLessEqualCondSubgraph(Subgraph* subgraph, int rhs);
+
+  void BuildComparatorSubgraph(Subgraph* subgraph,
+                               ComparisonDirection comparison_direction,
+                               int num_inputs, int lhs, int rhs,
+                               TfLiteType type);
 
   // Build an if subgraph which does not consume an output of ifs body
   // subgraph.
