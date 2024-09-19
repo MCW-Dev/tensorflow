@@ -767,6 +767,7 @@ BUILTIN_KERNEL_SRCS = [
     "stablehlo_gather.cc",
     "stablehlo_add.cc",
     "stablehlo_composite.cc",
+    "stablehlo_batch_norm_training.cc",
     "stablehlo_multiply.cc",
     "stablehlo_pad.cc",
     "stablehlo_reduce_window.cc",
@@ -822,6 +823,7 @@ BUILTIN_KERNEL_DEPS = [
     ":control_flow_common",
     "@eigen_archive//:eigen3",
     "@flatbuffers",
+    "stablehlo_batch_norm_training",
     "//tensorflow/lite:framework_stable",
     "//tensorflow/lite:minimal_logging",
     "//tensorflow/lite:string_util",
@@ -3233,6 +3235,30 @@ cc_test(
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "stablehlo_batch_norm_training",
+    hdrs = ["stablehlo_batch_norm_training.h"],
+    deps = [
+        ":kernel_util",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/core/c:common",
+    ],
+)
+
+cc_test(
+    name = "stablehlo_batch_norm_training_test",
+    size = "small",
+    srcs = ["stablehlo_batch_norm_training_test.cc"],
+    deps = [
+        ":test_main",
+        ":test_util",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/core/c:common",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_googletest//:gtest",
     ],
 )
 
