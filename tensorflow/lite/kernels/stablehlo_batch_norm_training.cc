@@ -87,6 +87,84 @@ TfLiteStatus GetOutputShape(TfLiteContext* context, TfLiteIntArray* input_dims,
   }
 }
 
+template <typename T>
+T quantize_value(const float value, const double scale, int zero_point) {
+  int min_val = std::numeric_limits<T>::min();
+  int max_val = std::numeric_limits<T>::max();
+
+  int unclamped =
+      static_cast<int>(TfLiteRound(value / static_cast<float>(scale))) +
+      zero_point;
+  int clamped = std::min(std::max(unclamped, min_val), max_val);
+
+  return static_cast<T>(clamped);
+}
+
+template <typename DataType>
+TfLiteStatus BatchNormInferenceQuantized(
+    TfLiteContext* context, TfLiteNode* node, const TfLiteTensor* operand,
+    const TfLiteTensor* scale, const TfLiteTensor* offset,
+    const TfLiteTensor* mean, const TfLiteTensor* variance, const float epsilon,
+    const int64_t feature_index, TfLiteTensor* output) {
+  const int operand_rank = operand->dims->size;
+
+  const DataType* scale_data = GetTensorData<DataType>(scale);
+  const DataType* offset_data = GetTensorData<DataType>(offset);
+  const DataType* mean_data = GetTensorData<DataType>(mean);
+  const DataType* variance_data = GetTensorData<DataType>(variance);
+  const DataType* operand_data = GetTensorData<DataType>(operand);
+  DataType* output_data = GetTensorData<DataType>(output);
+
+  const int kMin = std::numeric_limits<DataType>::min();
+  const int kMax = std::numeric_limits<DataType>::max();
+
+  const int left_shift = (operand->type == kTfLiteInt16) ? 15 : 20;
+  for (int64_t i = 0; i < NumElements(operand); ++i) {
+    const int raw_centered_output =
+        tflite::stablehlo_batch_norm_training::reference::compute_quantized_sub(
+            operand_data[i], mean_data[i % NumElements(mean)], left_shift,
+            operand->params.scale, operand->params.zero_point);
+
+    const int epsilon_quantized =
+        (epsilon * operand->params.scale) - operand->params.zero_point;
+
+    int raw_addition_output =
+        tflite::stablehlo_batch_norm_training::reference::compute_quantized_add(
+            variance_data[i % NumElements(variance)], epsilon_quantized,
+            left_shift, operand->params.scale, operand->params.zero_point);
+
+    int rsqrt = tflite::stablehlo_batch_norm_training::reference::
+        compute_quantized_rsqrt<DataType>(raw_addition_output, left_shift,
+                                          operand->params.scale,
+                                          operand->params.zero_point);
+
+    const int stddev =
+        tflite::stablehlo_batch_norm_training::reference::compute_quantized_mul<
+            DataType>(rsqrt, raw_addition_output, operand->params.scale,
+                      operand->params.zero_point);
+
+    TFLITE_DCHECK_NE(stddev - operand->params.zero_point, 0);
+    const int32_t clamped_div_output =
+        tflite::stablehlo_batch_norm_training::reference::compute_quantized_div<
+            DataType>(raw_centered_output - operand->params.zero_point,
+                      stddev - operand->params.zero_point,
+                      operand->params.scale, operand->params.zero_point);
+
+    const int clamped_mul_output =
+        tflite::stablehlo_batch_norm_training::reference::compute_quantized_mul<
+            DataType>(scale_data[i % NumElements(scale)], clamped_div_output,
+                      operand->params.scale, operand->params.zero_point);
+
+    const int raw_final_addition_output =
+        tflite::stablehlo_batch_norm_training::reference::compute_quantized_add(
+            offset_data[i % NumElements(offset)],
+            clamped_mul_output + operand->params.zero_point, left_shift,
+            operand->params.scale, operand->params.zero_point);
+    output_data[i] = static_cast<DataType>(raw_final_addition_output);
+  }
+  return kTfLiteOk;
+}
+
 template <typename DataType>
 TfLiteStatus BatchNormInference(
     TfLiteContext* context, TfLiteNode* node, const TfLiteTensor* operand,
@@ -129,6 +207,26 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
       context, BatchNormInference<DataType>(context, node, operand, scale,
                                             offset, batch_mean, batch_var,
                                             epsilon, feature_index, output));
+
+  return kTfLiteOk;
+}
+
+template <typename DataType>
+TfLiteStatus EvalQuantized(TfLiteContext* context, TfLiteNode* node,
+                           const TfLiteTensor* operand,
+                           const TfLiteTensor* scale,
+                           const TfLiteTensor* offset, TfLiteTensor* output,
+                           TfLiteTensor* batch_mean, TfLiteTensor* batch_var,
+                           const int64_t feature_index, const float epsilon) {
+  TF_LITE_ENSURE_OK(context, tflite::stablehlo_batch_norm_training::reference::
+                                 ComputeQuantizedVariance<DataType>(
+                                     context, node, operand, feature_index,
+                                     batch_mean, batch_var, output));
+
+  TF_LITE_ENSURE_OK(
+      context, BatchNormInferenceQuantized<DataType>(
+                   context, node, operand, scale, offset, batch_mean, batch_var,
+                   epsilon, feature_index, output));
 
   return kTfLiteOk;
 }
@@ -236,6 +334,13 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
     return EvalImpl<Eigen::bfloat16>(context, node, operand, scale, offset,
                                      output, batch_mean, batch_var,
                                      feature_index, epsilon);
+  } else if (operand->type == kTfLiteInt8) {
+    return EvalQuantized<int8_t>(context, node, operand, scale, offset, output,
+                                 batch_mean, batch_var, feature_index, epsilon);
+  } else if (operand->type == kTfLiteInt16) {
+    return EvalQuantized<int16_t>(context, node, operand, scale, offset, output,
+                                  batch_mean, batch_var, feature_index,
+                                  epsilon);
   } else {
     TF_LITE_KERNEL_LOG(context, "Type %s not currently supported.",
                        TfLiteTypeGetName(operand->type));
