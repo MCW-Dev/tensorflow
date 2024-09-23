@@ -224,6 +224,7 @@ cc_library(
         "//tensorflow/lite/tools/optimize:quantization_utils",
         "//tensorflow/lite/tools/versioning",
         "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/base",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
         "@flatbuffers",
@@ -621,6 +622,7 @@ cc_test(
     size = "small",
     srcs = ["test_util_test.cc"],
     deps = [
+        ":test_delegate_providers_lib",
         ":test_util",
         "//tensorflow/lite:array",
         "//tensorflow/lite:util",
@@ -766,6 +768,7 @@ BUILTIN_KERNEL_SRCS = [
     "shape.cc",
     "stablehlo_gather.cc",
     "stablehlo_add.cc",
+    "stablehlo_batch_norm_grad.cc",
     "stablehlo_composite.cc",
     "stablehlo_multiply.cc",
     "stablehlo_pad.cc",
@@ -822,6 +825,7 @@ BUILTIN_KERNEL_DEPS = [
     ":control_flow_common",
     "@eigen_archive//:eigen3",
     "@flatbuffers",
+    ":stablehlo_batch_norm_training",
     "//tensorflow/lite:framework_stable",
     "//tensorflow/lite:minimal_logging",
     "//tensorflow/lite:string_util",
@@ -1417,6 +1421,35 @@ cc_test(
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/random:bit_gen_ref",
         "@com_google_absl//absl/random:distributions",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "stablehlo_batch_norm_training",
+    hdrs = ["stablehlo_batch_norm_training.h"],
+    deps = [
+        ":kernel_util",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/core/c:common",
+    ],
+)
+
+cc_test(
+    name = "stablehlo_batch_norm_grad_test",
+    srcs = ["stablehlo_batch_norm_grad_test.cc"],
+    tags = ["tflite_nnapi"],
+    deps = [
+        ":kernel_util",
+        ":subgraph_test_util",
+        ":test_main",
+        ":test_util",
+        ":stablehlo_batch_norm_training",
+        "//tensorflow/lite:cc_api_stable",
+        "//tensorflow/lite/c:common",
+        "//tensorflow/lite/delegates/xnnpack:xnnpack_delegate_hdrs_only",
+        "//tensorflow/lite/kernels/internal:tensor_ctypes",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
     ],
