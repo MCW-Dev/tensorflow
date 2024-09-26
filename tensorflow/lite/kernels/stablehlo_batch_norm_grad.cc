@@ -298,13 +298,192 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   return kTfLiteOk;
 }
 
+template <typename DataType>
+TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
+                      const TfLiteTensor* operand, const TfLiteTensor* scale,
+                      const TfLiteTensor* mean, const TfLiteTensor* variance,
+                      const TfLiteTensor* grad_output,
+                      TfLiteTensor* grad_operand, TfLiteTensor* grad_scale,
+                      TfLiteTensor* grad_offset) {
+  OpData* data = reinterpret_cast<OpData*>(node->user_data);
+
+  TfLiteTensor* epsilon_tensor = GetTemporary(context, node, 0);
+  TfLiteTensor* centered_operand = GetTemporary(context, node, 1);
+  TfLiteTensor* stddev = GetTemporary(context, node, 2);
+  TfLiteTensor* normalized_operand = GetTemporary(context, node, 3);
+  TfLiteTensor* elements_per_feature_tensor = GetTemporary(context, node, 4);
+  TfLiteTensor* i6 = GetTemporary(context, node, 5);
+  TfLiteTensor* grad_output_centered_operand_mul =
+      GetTemporary(context, node, 6);
+  TfLiteTensor* grad_output_reduced = GetTemporary(context, node, 7);
+  TfLiteTensor* grad_scale_intermediate = GetTemporary(context, node, 8);
+  TfLiteTensor* i3 = GetTemporary(context, node, 9);
+
+  const TfLiteBatchNormGradParams* params =
+      reinterpret_cast<TfLiteBatchNormGradParams*>(node->builtin_data);
+
+  const int64_t feature_index = params->feature_index;
+  const float epsilon = params->epsilon;
+
+  TfLiteIntArray* feature_dims = TfLiteIntArrayCreate(1);
+  feature_dims->data[0] = feature_index;
+
+  const DataType* scale_data = GetTensorData<DataType>(scale);
+  int scale_size = NumElements(scale);
+
+  epsilon_tensor->data.f[0] = epsilon;
+
+  ArithmeticParams op_params;
+  op_params.broadcast_category = BroadcastableOpCategory::kGenericBroadcast;
+
+  DataType* centered_operand_buffer = GetTensorData<DataType>(centered_operand);
+  const float* operand_buffer = GetTensorData<float>(operand);
+  const DataType* mean_data = GetTensorData<DataType>(mean);
+  for (int i = 0; i < NumElements(centered_operand); ++i) {
+    centered_operand_buffer[i] = static_cast<DataType>(
+        operand_buffer[i] - mean_data[i % NumElements(mean)]);
+  }
+
+  int num_elements = NumElements(stddev);
+  const DataType* variance_data = GetTensorData<DataType>(variance);
+  int variance_size = NumElements(variance);
+  DataType* stddev_buffer = GetTensorData<DataType>(stddev);
+  for (int i = 0; i < NumElements(stddev); ++i) {
+    stddev_buffer[i] = static_cast<DataType>(
+        std::sqrt(variance_data[i % (NumElements(variance))] +
+                  static_cast<DataType>(epsilon)));
+  }
+
+  DataType* normalized_buffer = GetTensorData<DataType>(normalized_operand);
+  for (int i = 0; i < NumElements(normalized_operand); ++i) {
+    normalized_buffer[i] = centered_operand_buffer[i] / stddev_buffer[i];
+  }
+
+  int operand_size = NumElements(operand);
+  int feature_size = GetTensorShape(operand).Dims(feature_index);
+  float elements_per_feature = static_cast<float>(operand_size) / feature_size;
+  elements_per_feature_tensor->data.f[0] = elements_per_feature;
+
+  TfLiteIntArray* a = TfLiteIntArrayCreate(0);
+
+  DataType* element_per_feature_tensor_buffer =
+      GetTensorData<DataType>(elements_per_feature_tensor);
+  const DataType* grad_output_buffer = GetTensorData<DataType>(grad_output);
+  tflite::stablehlo_batch_norm_training::reference::ComputeSum<DataType>(
+      context, node, grad_output, feature_index, grad_output_reduced);
+
+  DataType* grad_output_centered_operand_mul_buffer =
+      GetTensorData<DataType>(grad_output_centered_operand_mul);
+  for (int i = 0; i < NumElements(grad_output_centered_operand_mul); ++i) {
+    grad_output_centered_operand_mul_buffer[i] =
+        grad_output_buffer[i] * centered_operand_buffer[i];
+  }
+
+  tflite::stablehlo_batch_norm_training::reference::ComputeSum<DataType>(
+      context, node, grad_output_centered_operand_mul, feature_index, i3);
+  DataType* i3_buffer = GetTensorData<DataType>(i3);
+  DataType* i6_buffer = GetTensorData<DataType>(i6);
+  DataType* grad_output_reduced_buffer =
+      GetTensorData<DataType>(grad_output_reduced);
+  for (int i = 0; i < NumElements(i6); ++i) {
+    i6_buffer[i] =
+        ((grad_output_buffer[i] *
+              element_per_feature_tensor_buffer
+                  [i % (NumElements(elements_per_feature_tensor))] -
+          grad_output_reduced_buffer[i % NumElements(grad_output_reduced)]) -
+         (i3_buffer[i % (NumElements(i3))] * centered_operand_buffer[i]) /
+             (variance_data[i % (NumElements(variance))] +
+              static_cast<DataType>(epsilon)));
+  }
+
+  DataType* grad_operand_buffer = GetTensorData<DataType>(grad_operand);
+
+  for (int i = 0; i < NumElements(grad_operand); ++i) {
+    grad_operand_buffer[i] =
+        ((scale_data[i % scale_size] / stddev_buffer[i]) /
+         element_per_feature_tensor_buffer
+             [i % (NumElements(elements_per_feature_tensor))]) *
+        i6_buffer[i];
+  }
+
+  DataType* grad_scale_intermediate_buffer =
+      GetTensorData<DataType>(grad_scale_intermediate);
+  for (int i = 0; i < NumElements(grad_scale_intermediate); ++i) {
+    grad_scale_intermediate_buffer[i] =
+        static_cast<DataType>(grad_output_buffer[i] * normalized_buffer[i]);
+  }
+
+  tflite::stablehlo_batch_norm_training::reference::ComputeSum<DataType>(
+      context, node, grad_scale_intermediate, feature_index, grad_scale);
+
+  tflite::stablehlo_batch_norm_training::reference::ComputeSum<DataType>(
+      context, node, grad_output, feature_index, grad_offset);
+      
+  TfLiteIntArrayFree(feature_dims);
+  TfLiteIntArrayFree(a);
+  return kTfLiteOk;
+}
+TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
+  const TfLiteTensor* operand;
+  TF_LITE_ENSURE_OK(
+      context, GetInputSafe(context, node, OpData::kOperandTensor, &operand));
+  const TfLiteTensor* scale;
+  TF_LITE_ENSURE_OK(context,
+                    GetInputSafe(context, node, OpData::kScaleTensor, &scale));
+  const TfLiteTensor* mean;
+  TF_LITE_ENSURE_OK(context,
+                    GetInputSafe(context, node, OpData::kMeanTensor, &mean));
+  const TfLiteTensor* variance;
+  TF_LITE_ENSURE_OK(
+      context, GetInputSafe(context, node, OpData::kVarianceTensor, &variance));
+  const TfLiteTensor* grad_output;
+  TF_LITE_ENSURE_OK(
+      context,
+      GetInputSafe(context, node, OpData::kGradOutputTensor, &grad_output));
+  TfLiteTensor* grad_operand;
+  TF_LITE_ENSURE_OK(
+      context, GetOutputSafe(context, node, OpData::kOutputGradOperandTensor,
+                             &grad_operand));
+  TfLiteTensor* grad_scale;
+  TF_LITE_ENSURE_OK(context,
+                    GetOutputSafe(context, node, OpData::kOutputGradScaleTensor,
+                                  &grad_scale));
+  TfLiteTensor* grad_offset;
+  TF_LITE_ENSURE_OK(
+      context, GetOutputSafe(context, node, OpData::kOutputGradOffsetTensor,
+                             &grad_offset));
+  switch (operand->type) {
+    case kTfLiteFloat32: {
+      return EvalImpl<float>(context, node, operand, scale, mean, variance,
+                             grad_output, grad_operand, grad_scale,
+                             grad_offset);
+    }
+    case kTfLiteFloat16: {
+      return EvalImpl<Eigen::half>(context, node, operand, scale, mean,
+                                   variance, grad_output, grad_operand,
+                                   grad_scale, grad_offset);
+    }
+    case kTfLiteBFloat16: {
+      return EvalImpl<Eigen::bfloat16>(context, node, operand, scale, mean,
+                                       variance, grad_output, grad_operand,
+                                       grad_scale, grad_offset);
+    }
+    default: {
+      TF_LITE_KERNEL_LOG(
+          context, "Type '%s' is not supported by stablehlo.batch_norm_grad.",
+          TfLiteTypeGetName(operand->type));
+      return kTfLiteError;
+    }
+  }
+}
+
 }  // namespace
 }  // namespace stablehlo_batch_norm_grad
 
 TfLiteRegistration* Register_STABLEHLO_BATCH_NORM_GRAD() {
   static TfLiteRegistration r = {
       stablehlo_batch_norm_grad::Init, stablehlo_batch_norm_grad::Free,
-      stablehlo_batch_norm_grad::Prepare, nullptr};
+      stablehlo_batch_norm_grad::Prepare, stablehlo_batch_norm_grad::Eval};
   return &r;
 }
 
