@@ -223,5 +223,115 @@ TEST(StableHLOBatchNormGradOpTest3, DifferentOperandEpsilonFeatureIndex) {
   }
 }
 
+template <typename T>
+class QuantizedBatchNormGradOpModel : public BatchNormGradOpModel<T> {
+ public:
+  QuantizedBatchNormGradOpModel(const TensorData& operand,
+                                const TensorData& scale, const TensorData& mean,
+                                const TensorData& variance,
+                                const TensorData& grad_output,
+                                const TensorData& grad_operand,
+                                const TensorData& grad_scale,
+                                const TensorData& grad_offset,
+                                TfLiteBatchNormGradParams params)
+      : BatchNormGradOpModel<T>(operand, scale, mean, variance, grad_output,
+                                grad_operand, grad_scale, grad_offset, params) {
+  }
+  std::vector<float> GetDequantizedGradOperand() {
+    return Dequantize<T>(this->template ExtractVector<T>(this->grad_operand_),
+                         this->GetScale(this->grad_operand_),
+                         this->GetZeroPoint(this->grad_operand_));
+  }
+  std::vector<float> GetDequantizedGradScale() {
+    return Dequantize<T>(this->template ExtractVector<T>(this->grad_scale_),
+                         this->GetScale(this->grad_scale_),
+                         this->GetZeroPoint(this->grad_scale_));
+  }
+  std::vector<float> GetDequantizedGradOffset() {
+    return Dequantize<T>(this->template ExtractVector<T>(this->grad_offset_),
+                         this->GetScale(this->grad_offset_),
+                         this->GetZeroPoint(this->grad_offset_));
+  }
+};
+
+template <typename T>
+float GetTolerance(float min, float max) {
+  float kQuantizedStep = (max - min) / (std::numeric_limits<T>::max() -
+                                        std::numeric_limits<T>::min());
+  return 2.0 * kQuantizedStep;
+}
+
+TEST(StableHLOBatchNormGradOpTest4, BatchNormGradOpQuantizedInt8) {
+  {
+    TfLiteBatchNormGradParams params = {0.0f, 2};
+    float kQuantizedTolerance = GetTolerance<int8_t>(-127, 127);
+    QuantizedBatchNormGradOpModel<int8_t> model(
+        {TensorType_INT8, {2, 2, 2}, -127, 127},
+        {TensorType_INT8, {2}, -127, 127}, {TensorType_INT8, {2}, -127, 127},
+        {TensorType_INT8, {2}, -127, 127},
+        {TensorType_INT8, {2, 2, 2}, -127, 127},
+        {TensorType_INT8, {}, -127, 127}, {TensorType_INT8, {}, -127, 127},
+        {TensorType_INT8, {}, -127, 127}, params);
+
+    std::vector<float> operand = {1, 2, 3, 4, 3, 4, 1, 2};
+    std::vector<float> scale = {1, 1};
+    std::vector<float> mean = {2, 3};
+    std::vector<float> variance = {1, 1};
+    std::vector<float> gradoutput = {0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1};
+    model.QuantizeAndPopulate<int8_t>(model.operand(), operand);
+    model.QuantizeAndPopulate<int8_t>(model.scale(), scale);
+    model.QuantizeAndPopulate<int8_t>(model.mean(), mean);
+    model.QuantizeAndPopulate<int8_t>(model.variance(), variance);
+    model.QuantizeAndPopulate<int8_t>(model.grad_output(), gradoutput);
+
+    model.Invoke();
+
+    EXPECT_THAT(model.GetDequantizedGradOperand(),
+                ElementsAreArray(ArrayFloatNear({0, 0, 0, 0, 0, 0, 0., 0.},
+                                                kQuantizedTolerance)));
+    EXPECT_THAT(
+        model.GetDequantizedGradScale(),
+        ElementsAreArray(ArrayFloatNear({0.0, 0.0}, kQuantizedTolerance)));
+    EXPECT_THAT(
+        model.GetDequantizedGradOffset(),
+        ElementsAreArray(ArrayFloatNear({0.4, 0.4}, kQuantizedTolerance)));
+  }
+}
+
+TEST(StableHLOBatchNormGradOpTest4, BatchNormGradOpQuantizedInt16) {
+  {
+    TfLiteBatchNormGradParams params = {0.0f, 2};
+    float kQuantizedTolerance = GetTolerance<int16_t>(-127, 127);
+    QuantizedBatchNormGradOpModel<int16_t> model(
+        {TensorType_INT16, {2, 2, 2}, -127, 127},
+        {TensorType_INT16, {2}, -127, 127}, {TensorType_INT16, {2}, -127, 127},
+        {TensorType_INT16, {2}, -127, 127},
+        {TensorType_INT16, {2, 2, 2}, -127, 127},
+        {TensorType_INT16, {}, -127, 127}, {TensorType_INT16, {}, -127, 127},
+        {TensorType_INT16, {}, -127, 127}, params);
+
+    std::vector<float> operand = {1, 2, 3, 4, 3, 4, 1, 2};
+    std::vector<float> scale = {1, 1};
+    std::vector<float> mean = {1, 1};
+    std::vector<float> variance = {1, 1};
+    std::vector<float> gradoutput = {1, 1, 1, 1, 1, 1, 1, 1};
+    model.QuantizeAndPopulate<int16_t>(model.operand(), operand);
+    model.QuantizeAndPopulate<int16_t>(model.scale(), scale);
+    model.QuantizeAndPopulate<int16_t>(model.mean(), mean);
+    model.QuantizeAndPopulate<int16_t>(model.variance(), variance);
+    model.QuantizeAndPopulate<int16_t>(model.grad_output(), gradoutput);
+
+    model.Invoke();
+
+    EXPECT_THAT(
+        model.GetDequantizedGradOperand(),
+        ElementsAreArray(ArrayFloatNear({0, -2, -2, -6, -2, -6, 0, -2}, 0.1)));
+    EXPECT_THAT(model.GetDequantizedGradScale(),
+                ElementsAreArray(ArrayFloatNear({4.0, 8.0}, 0.1)));
+    EXPECT_THAT(model.GetDequantizedGradOffset(),
+                ElementsAreArray(ArrayFloatNear({4, 4}, 0.1)));
+  }
+}
+
 }  // namespace
 }  // namespace tflite
