@@ -925,6 +925,9 @@ TfLiteStatus ParseOpDataTfLite(const Operator* op, BuiltinOperator op_type,
       return ParseStablehloComposite(op, error_reporter, allocator,
                                      builtin_data);
     }
+    case BuiltinOperator_STABLEHLO_BATCH_NORM_GRAD: {
+      return ParseStablehloBatchNormGrad(op, error_reporter, allocator, builtin_data);
+    }
     // TODO: skip param parsing for now since ops below don't have kernels
     case BuiltinOperator_STABLEHLO_SLICE:
     case BuiltinOperator_STABLEHLO_BROADCAST_IN_DIM:
@@ -2408,6 +2411,31 @@ TfLiteStatus ParseStablehloComposite(const Operator* op,
       error_reporter,
       "Could not get 'stablehlo.composite' operation parameters.");
   return kTfLiteError;
+}
+
+TfLiteStatus ParseStablehloBatchNormGrad(const Operator* op,
+                                         ErrorReporter* error_reporter,
+                                         BuiltinDataAllocator* allocator,
+                                         void** builtin_data) {
+  CheckParsePointerParams(op, error_reporter, allocator, builtin_data);
+
+  SafeBuiltinDataAllocator safe_allocator(allocator);
+  auto params = safe_allocator.Allocate<TfLiteBatchNormGradParams>();
+  const StableHLOBatchNormGradOptions* schema_params =
+      op->builtin_options_2_as_StableHLOBatchNormGradOptions();
+
+  if (schema_params) {
+    params->epsilon = schema_params->epsilon();
+    params->feature_index = schema_params->feature_index();
+
+    *builtin_data = params.release();
+    return kTfLiteOk; 
+  }
+
+  TF_LITE_REPORT_ERROR(
+      error_reporter,
+      "Could not get 'batch_norm_grad' operation parameters.");
+  return kTfLiteError;  
 }
 
 // We have this parse function instead of directly returning kTfLiteOk from the
