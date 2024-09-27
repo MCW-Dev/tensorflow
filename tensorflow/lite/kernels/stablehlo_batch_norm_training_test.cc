@@ -49,6 +49,16 @@ tflite::TensorType GetTTEnum<float>() {
   return tflite::TensorType_FLOAT32;
 }
 
+template <>
+tflite::TensorType GetTTEnum<int8_t>() {
+  return tflite::TensorType_INT8;
+}
+
+template <>
+tflite::TensorType GetTTEnum<int16_t>() {
+  return tflite::TensorType_INT16;
+}
+
 using ::testing::ElementsAreArray;
 
 class StablehloBatchNormTrainingOpModel : public SingleOpModel {
@@ -58,12 +68,12 @@ class StablehloBatchNormTrainingOpModel : public SingleOpModel {
       const TensorData& offset, const TensorData& output,
       const TensorData& batch_mean, const TensorData& batch_var,
       const TfLiteStablehloBatchNormTrainingParams& params) {
-    input_ = AddInput(input);
-    scale_ = AddInput(scale);
-    offset_ = AddInput(offset);
-    output_ = AddOutput(output);
-    batch_mean_ = AddOutput(batch_mean);
-    batch_var_ = AddOutput(batch_var);
+    input_ = AddInput(SymmetricInt16Scaling(input));
+    scale_ = AddInput(SymmetricInt16Scaling(scale));
+    offset_ = AddInput(SymmetricInt16Scaling(offset));
+    output_ = AddOutput(SymmetricInt16Scaling(output));
+    batch_mean_ = AddOutput(SymmetricInt16Scaling(batch_mean));
+    batch_var_ = AddOutput(SymmetricInt16Scaling(batch_var));
     SetBuiltinOp(BuiltinOperator_STABLEHLO_BATCH_NORM_TRAINING,
                  BuiltinOptions2_StablehloBatchNormTrainingOptions,
                  CreateStablehloBatchNormTrainingOptions(
@@ -122,9 +132,46 @@ class StablehloBatchNormTrainingOpModel : public SingleOpModel {
     return ExtractVector<T>(batch_var_);
   }
 
+  template <typename QuantizedType>
+  std::vector<float> GetDequantizedOutput() {
+    return Dequantize<QuantizedType>(
+        this->template ExtractVector<QuantizedType>(this->output_),
+        GetScale(this->output_), GetZeroPoint(this->output_));
+  }
+
+  template <typename QuantizedType>
+  std::vector<float> GetDequantizedBatchMean() {
+    return Dequantize<QuantizedType>(
+        this->template ExtractVector<QuantizedType>(this->batch_mean_),
+        GetScale(this->batch_mean_), GetZeroPoint(this->batch_mean_));
+  }
+
+  template <typename QuantizedType>
+  std::vector<float> GetDequantizedBatchVar() {
+    return Dequantize<QuantizedType>(
+        this->template ExtractVector<QuantizedType>(this->batch_var_),
+        GetScale(this->batch_var_), GetZeroPoint(this->batch_var_));
+  }
+
   int input() { return input_; }
   int scale() { return scale_; }
   int offset() { return offset_; }
+
+  TensorData SymmetricInt16Scaling(TensorData tensor) {
+    // Symmetric range and null zero-point is required for INT16 tensors. As
+    // SingleOpModel::QuantizationParams calculates the scale on an asymmetric
+    // base [int_type::min, int_type::max], manually calculate the scale on a
+    // symmetric range [int_type::min+1, int_type::max] to ensure a null
+    // zero-point.
+    if (tensor.type == TensorType_INT16) {
+      CHECK_EQ(std::abs(tensor.min), tensor.max);
+      tensor.scale = tensor.max / std::numeric_limits<int16_t>::max();
+      tensor.zero_point = 0;
+      tensor.min = 0;
+      tensor.max = 0;
+    }
+    return tensor;
+  }
 
  protected:
   int input_;
@@ -256,6 +303,104 @@ TYPED_TEST(StablehloBatchNormTrainingTestFloat,
       model.GetBatchVar<Float>(),
       ElementsAreArray(ArrayFloatNear(
           {static_cast<Float>(13.560), static_cast<Float>(57.780)}, 0.1)));
+}
+
+// for quantized, the error shouldn't exceed step
+template <typename T>
+float GetTolerance(float min, float max) {
+  float kQuantizedStep = 2.0 * (max - min) / (255.0f);
+  return kQuantizedStep;
+}
+
+template <typename Int>
+class StablehloBatchNormTrainingTestInt : public ::testing::Test {
+ public:
+  using IntType = Int;
+};
+
+using IntTestTypes = ::testing::Types<int8_t, int16_t>;
+
+TYPED_TEST_SUITE(StablehloBatchNormTrainingTestInt, IntTestTypes);
+
+TYPED_TEST(StablehloBatchNormTrainingTestInt,
+           StablehloBatchNormTrainingQuantizedTest) {
+  using Int = typename TestFixture::IntType;
+  TfLiteStablehloBatchNormTrainingParams params = {0.0 /*epsilon*/,
+                                                   2 /*feature_index*/};
+  float kQuantizedTolerance = GetTolerance<Int>(-20.0f, 20.0f);
+  StablehloBatchNormTrainingOpModel model(
+      {GetTTEnum<Int>(), {2, 2, 2}, -20.0f, 20.0f},
+      {GetTTEnum<Int>(), {2}, -20.0f, 20.0f},
+      {GetTTEnum<Int>(), {2}, -20.0f, 20.0f},
+      {GetTTEnum<Int>(), {}, -20.0f, 20.0f},
+      {GetTTEnum<Int>(), {}, -20.0f, 20.0f},
+      {GetTTEnum<Int>(), {}, -20.0f, 20.0f}, params);
+  model.QuantizeAndPopulate<Int>(
+      model.input(), {static_cast<float>(1.0), static_cast<float>(-2.0),
+                      static_cast<float>(3.0), static_cast<float>(-4.0),
+                      static_cast<float>(3.0), static_cast<float>(-4.0),
+                      static_cast<float>(-1.0), static_cast<float>(2.0)});
+  model.QuantizeAndPopulate<Int>(
+      model.scale(), {static_cast<float>(1.0), static_cast<float>(1.0)});
+  model.QuantizeAndPopulate<Int>(
+      model.offset(), {static_cast<float>(1.0), static_cast<float>(1.0)});
+
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetDequantizedOutput<Int>(),
+              ElementsAreArray(ArrayFloatNear(
+                  {static_cast<float>(0.69), static_cast<float>(1.0),
+                   static_cast<float>(1.90), static_cast<float>(0.18),
+                   static_cast<float>(1.90), static_cast<float>(0.18),
+                   static_cast<float>(-0.5), static_cast<float>(2.63)},
+                  kQuantizedTolerance)));
+  EXPECT_THAT(model.GetDequantizedBatchMean<Int>(),
+              ElementsAreArray(ArrayFloatNear(
+                  {static_cast<float>(1.5), static_cast<float>(-2.0)},
+                  kQuantizedTolerance)));
+  EXPECT_THAT(model.GetDequantizedBatchVar<Int>(),
+              ElementsAreArray(ArrayFloatNear(
+                  {static_cast<float>(2.75), static_cast<float>(6.0)},
+                  kQuantizedTolerance)));
+}
+
+TYPED_TEST(StablehloBatchNormTrainingTestInt,
+           StablehloBatchNormTrainingQuantizedTest_2) {
+  using Int = typename TestFixture::IntType;
+  TfLiteStablehloBatchNormTrainingParams params = {0.0 /*epsilon*/,
+                                                   1 /*feature_index*/};
+  float kQuantizedTolerance = GetTolerance<Int>(-87.0f, 87.0f);
+  StablehloBatchNormTrainingOpModel model(
+      {GetTTEnum<Int>(), {2, 2, 2}, -87.0f, 87.0f},
+      {GetTTEnum<Int>(), {2}, -87.0f, 87.0f},
+      {GetTTEnum<Int>(), {2}, -87.0f, 87.0f},
+      {GetTTEnum<Int>(), {}, -87.0f, 87.0f},
+      {GetTTEnum<Int>(), {}, -87.0f, 87.0f},
+      {GetTTEnum<Int>(), {}, -87.0f, 87.0f}, params);
+  model.QuantizeAndPopulate<Int>(
+      model.input(), {static_cast<float>(12.3), static_cast<float>(10.0),
+                      static_cast<float>(9.0), static_cast<float>(6.0),
+                      static_cast<float>(8.2), static_cast<float>(9.2),
+                      static_cast<float>(2.3), static_cast<float>(15.8)});
+  model.QuantizeAndPopulate<Int>(
+      model.scale(), {static_cast<float>(3.0), static_cast<float>(2.0)});
+  model.QuantizeAndPopulate<Int>(
+      model.offset(), {static_cast<float>(1.0), static_cast<float>(5.0)});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetDequantizedOutput<Int>(),
+              ElementsAreArray(ArrayFloatNear(
+                  {static_cast<float>(5.03), static_cast<float>(5.62),
+                   static_cast<float>(-0.57), static_cast<float>(4.17),
+                   static_cast<float>(-1.93), static_cast<float>(5.33),
+                   static_cast<float>(-11.96), static_cast<float>(7.73)},
+                  kQuantizedTolerance)));
+  EXPECT_THAT(model.GetDequantizedBatchMean<Int>(),
+              ElementsAreArray(ArrayFloatNear(
+                  {static_cast<float>(9.92), static_cast<float>(8.27)},
+                  kQuantizedTolerance)));
+  EXPECT_THAT(model.GetDequantizedBatchVar<Int>(),
+              ElementsAreArray(ArrayFloatNear(
+                  {static_cast<float>(3.11), static_cast<float>(30.19)},
+                  kQuantizedTolerance)));
 }
 
 }  // namespace

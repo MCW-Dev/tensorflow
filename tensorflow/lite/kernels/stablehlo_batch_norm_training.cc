@@ -181,6 +181,39 @@ TfLiteStatus BatchNormInference(
   return kTfLiteOk;
 }
 
+template <typename T>
+inline void Dequantize(const TfLiteTensor* input, float* output_data) {
+  const int32 zero_point = input->params.zero_point;
+  const double scale = input->params.scale;
+  const int flat_size = NumElements(input);
+  const T* input_data = GetTensorData<T>(input);
+
+  for (int i = 0; i < flat_size; ++i) {
+    const int32 val = static_cast<int32>(input_data[i]);
+    const float result = static_cast<float>(scale * (val - zero_point));
+    output_data[i] = result;
+  }
+}
+
+template <typename OutputT>
+inline void AffineQuantize(const TfLiteQuantizationParams params,
+                           const TfLiteTensor* input, OutputT* output_data) {
+  const int32_t zero_point = params.zero_point;
+  const double scale = params.scale;
+  const int flat_size = NumElements(input);
+  static constexpr int32_t min_val = std::numeric_limits<OutputT>::min();
+  static constexpr int32_t max_val = std::numeric_limits<OutputT>::max();
+  const float* input_data = GetTensorData<float>(input);
+  for (int i = 0; i < flat_size; ++i) {
+    const float val = input_data[i];
+    int32_t unclamped =
+        static_cast<int32_t>(TfLiteRound(val / static_cast<float>(scale))) +
+        zero_point;
+    int32_t clamped = std::min(std::max(unclamped, min_val), max_val);
+    output_data[i] = clamped;
+  }
+}
+
 template <typename DataType>
 TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
                       const TfLiteTensor* operand, const TfLiteTensor* scale,
@@ -195,6 +228,142 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
       context, BatchNormInference<DataType>(context, node, operand, scale,
                                             offset, batch_mean, batch_var,
                                             epsilon, feature_index, output));
+
+  return kTfLiteOk;
+}
+
+template <typename DataType>
+TfLiteStatus EvalQuantizedImpl(TfLiteContext* context, TfLiteNode* node,
+                               const TfLiteTensor* operand,
+                               const TfLiteTensor* scale,
+                               const TfLiteTensor* offset, TfLiteTensor* output,
+                               TfLiteTensor* batch_mean,
+                               TfLiteTensor* batch_var,
+                               const int64_t feature_index, float epsilon) {
+  TfLiteTensor* operand_temp;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/0, &operand_temp));
+  TfLiteTensor* scale_temp;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/1, &scale_temp));
+  TfLiteTensor* offset_temp;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/2, &offset_temp));
+  TfLiteTensor* batch_var_temp;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/3, &batch_var_temp));
+  TfLiteTensor* batch_mean_temp;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/4, &batch_mean_temp));
+  TfLiteTensor* output_temp;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/5, &output_temp));
+  Dequantize<DataType>(operand, GetTensorData<float>(operand_temp));
+  Dequantize<DataType>(scale, GetTensorData<float>(scale_temp));
+  Dequantize<DataType>(offset, GetTensorData<float>(offset_temp));
+  TfLiteStatus status = EvalImpl<float>(
+      context, node, operand_temp, scale_temp, offset_temp, output_temp,
+      batch_mean_temp, batch_var_temp, feature_index, epsilon);
+  AffineQuantize<DataType>(operand->params, output_temp,
+                           GetTensorData<DataType>(output));
+  AffineQuantize<DataType>(operand->params, batch_mean_temp,
+                           GetTensorData<DataType>(batch_mean));
+  AffineQuantize<DataType>(operand->params, batch_var_temp,
+                           GetTensorData<DataType>(batch_var));
+
+  return status;
+}
+
+TfLiteStatus PrepareTemporaries(TfLiteContext* context, TfLiteNode* node,
+                                int input_rank, std::vector<int64_t> axis,
+                                const TfLiteTensor* input,
+                                const TfLiteTensor* scale,
+                                const TfLiteTensor* offset) {
+  OpData& opdata = *reinterpret_cast<OpData*>(node->user_data);
+  context->AddTensors(context, kMaxTemporaryTensors,
+                      &opdata.scratch_tensor_index);
+  TfLiteIntArrayFree(node->temporaries);
+  node->temporaries = TfLiteIntArrayCreate(kMaxTemporaryTensors);
+
+  // input temp
+  node->temporaries->data[0] = opdata.scratch_tensor_index;
+  TfLiteTensor* input_temp;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/0, &input_temp));
+  TfLiteIntArray* input_temp_shape = TfLiteIntArrayCreate(input->dims->size);
+  for (int i = 0; i < input->dims->size; ++i) {
+    input_temp_shape->data[i] = input->dims->data[i];
+  }
+  input_temp->type = kTfLiteFloat32;
+  input_temp->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(
+      context, context->ResizeTensor(context, input_temp, input_temp_shape));
+
+  // scale temp
+  node->temporaries->data[1] = opdata.scratch_tensor_index + 1;
+  TfLiteTensor* scale_temp;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/1, &scale_temp));
+  TfLiteIntArray* scale_temp_shape = TfLiteIntArrayCreate(scale->dims->size);
+  for (int i = 0; i < scale->dims->size; ++i) {
+    scale_temp_shape->data[i] = scale->dims->data[i];
+  }
+  scale_temp->type = kTfLiteFloat32;
+  scale_temp->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(
+      context, context->ResizeTensor(context, scale_temp, scale_temp_shape));
+
+  // offset temp
+  node->temporaries->data[2] = opdata.scratch_tensor_index + 2;
+  TfLiteTensor* offset_temp;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/2, &offset_temp));
+  TfLiteIntArray* offset_temp_shape = TfLiteIntArrayCreate(offset->dims->size);
+  for (int i = 0; i < offset->dims->size; ++i) {
+    offset_temp_shape->data[i] = offset->dims->data[i];
+  }
+  offset_temp->type = kTfLiteFloat32;
+  offset_temp->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(
+      context, context->ResizeTensor(context, offset_temp, offset_temp_shape));
+
+  // batch var temp
+  node->temporaries->data[3] = opdata.scratch_tensor_index + 3;
+  TfLiteTensor* batch_var_temp;
+  TfLiteIntArray* batch_mean_var_shape;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/3, &batch_var_temp));
+  batch_var_temp->type = kTfLiteFloat32;
+  batch_var_temp->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(
+      context, GetOutputShape(context, input->dims, input->dims->size, axis,
+                              input_rank - 1, &batch_mean_var_shape));
+  TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, batch_var_temp,
+                                                   batch_mean_var_shape));
+
+  // batch mean temp
+  node->temporaries->data[4] = opdata.scratch_tensor_index + 4;
+  TfLiteTensor* batch_mean_temp;
+  TF_LITE_ENSURE_OK(
+      context, GetTemporarySafe(context, node, /*index=*/4, &batch_mean_temp));
+  batch_mean_temp->type = kTfLiteFloat32;
+  batch_mean_temp->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(
+      context, GetOutputShape(context, input->dims, input->dims->size, axis,
+                              input_rank - 1, &batch_mean_var_shape));
+  TF_LITE_ENSURE_OK(context, context->ResizeTensor(context, batch_mean_temp,
+                                                   batch_mean_var_shape));
+
+  // // output float temp
+  node->temporaries->data[5] = opdata.scratch_tensor_index + 5;
+  TfLiteTensor* output_temp;
+  TF_LITE_ENSURE_OK(context,
+                    GetTemporarySafe(context, node, /*index=*/5, &output_temp));
+  output_temp->type = kTfLiteFloat32;
+  output_temp->allocation_type = kTfLiteArenaRw;
+  TF_LITE_ENSURE_OK(context,
+                    context->ResizeTensor(context, output_temp,
+                                          TfLiteIntArrayCopy(input->dims)));
 
   return kTfLiteOk;
 }
@@ -224,7 +393,7 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   const TfLiteStablehloBatchNormTrainingParams* data =
       reinterpret_cast<TfLiteStablehloBatchNormTrainingParams*>(
           node->builtin_data);
-  const const int64_t feature_index = data->feature_index;
+  const int64_t feature_index = data->feature_index;
 
   int input_rank = input->dims->size;
   std::vector<int64_t> axis;
@@ -244,6 +413,10 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
       context, GetOutputShape(context, input->dims, input->dims->size, axis,
                               input_rank - 1, &batch_mean_var_shape));
   context->ResizeTensor(context, batch_var, batch_mean_var_shape);
+
+  if (input->quantization.type != kTfLiteNoQuantization) {
+    PrepareTemporaries(context, node, input_rank, axis, input, scale, offset);
+  }
 
   TF_LITE_ENSURE(context,
                  feature_index >= 0 && feature_index < input->dims->size);
@@ -303,6 +476,21 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
     return EvalImpl<Eigen::bfloat16>(context, node, operand, scale, offset,
                                      output, batch_mean, batch_var,
                                      feature_index, epsilon);
+  } else if (operand->quantization.type != kTfLiteNoQuantization) {
+    if (operand->type == kTfLiteInt8) {
+      return EvalQuantizedImpl<int8_t>(context, node, operand, scale, offset,
+                                       output, batch_mean, batch_var,
+                                       feature_index, epsilon);
+    } else if (operand->type == kTfLiteInt16) {
+      return EvalQuantizedImpl<int16_t>(context, node, operand, scale, offset,
+                                        output, batch_mean, batch_var,
+                                        feature_index, epsilon);
+    } else {
+      TF_LITE_KERNEL_LOG(context,
+                         "Type %s Quantization not currently supported.",
+                         TfLiteTypeGetName(operand->type));
+      return kTfLiteError;
+    }
   } else {
     TF_LITE_KERNEL_LOG(context, "Type %s not currently supported.",
                        TfLiteTypeGetName(operand->type));
