@@ -1365,6 +1365,7 @@ cc_test(
     name = "stablehlo_case_test",
     srcs = ["stablehlo_case_test.cc"],
     deps = [
+        ":kernel_util",
         ":subgraph_test_util",
         ":test_main",
         "//tensorflow/lite/schema:schema_fbs",

@@ -193,8 +193,10 @@ TYPED_TEST(StablehloCaseTestFloat, CaseFloatMul) {
       {TensorType_INT32, {}}, {GetTTEnum<Float>(), {1, 2}},
       {GetTTEnum<Float>(), {1, 2}}, {GetTTEnum<Float>(), {1, 2}}, params);
   model.SetInput<int>(model.input(), {1});
-  model.SetInput<Float>(model.subgraph_input1(), {Float(5.5), Float(2.5)});
-  model.SetInput<Float>(model.subgraph_input2(), {Float(5.5), Float(2.5)});
+  model.SetInput<Float>(model.subgraph_input1(),
+                        {static_cast<Float>(5.5), static_cast<Float>(2.5)});
+  model.SetInput<Float>(model.subgraph_input2(),
+                        {static_cast<Float>(5.5), static_cast<Float>(2.5)});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
 
   EXPECT_THAT(model.GetOutput<Float>(),
@@ -212,12 +214,15 @@ TYPED_TEST(StablehloCaseTestFloat, CaseFloatAdd) {
       {TensorType_INT32, {}}, {GetTTEnum<Float>(), {1, 2}},
       {GetTTEnum<Float>(), {1, 2}}, {GetTTEnum<Float>(), {1, 2}}, params);
   model.SetInput<int>(model.input(), {0});
-  model.SetInput<Float>(model.subgraph_input1(), {Float(5.5), Float(2.4)});
-  model.SetInput<Float>(model.subgraph_input2(), {Float(5), Float(2)});
+  model.SetInput<Float>(model.subgraph_input1(),
+                        {static_cast<Float>(5.5), static_cast<Float>(2.4)});
+  model.SetInput<Float>(model.subgraph_input2(),
+                        {static_cast<Float>(5), static_cast<Float>(2)});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
 
-  EXPECT_THAT(model.GetOutput<Float>(),
-              ElementsAreArray({Float(10.5), Float(4.4)}));
+  EXPECT_THAT(
+      model.GetOutput<Float>(),
+      ElementsAreArray({static_cast<Float>(10.5), static_cast<Float>(4.4)}));
 }
 
 template <typename Int>
@@ -261,11 +266,14 @@ TYPED_TEST(StablehloCaseTestInt, CaseIntMinimum) {
   model.SetInput<int>(
       model.input(),
       {-1});  // when index is out of bounds, case op executes the last branch
-  model.SetInput<Int>(model.subgraph_input1(), {Int(5), Int(20)});
-  model.SetInput<Int>(model.subgraph_input2(), {Int(15), Int(2)});
+  model.SetInput<Int>(model.subgraph_input1(),
+                      {static_cast<Int>(5), static_cast<Int>(20)});
+  model.SetInput<Int>(model.subgraph_input2(),
+                      {static_cast<Int>(15), static_cast<Int>(2)});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
 
-  EXPECT_THAT(model.GetOutput<Int>(), ElementsAreArray({Int(5), Int(2)}));
+  EXPECT_THAT(model.GetOutput<Int>(),
+              ElementsAreArray({static_cast<Int>(5), static_cast<Int>(2)}));
 }
 
 TEST(StablehloCaseTest, CaseQuantizedMul) {

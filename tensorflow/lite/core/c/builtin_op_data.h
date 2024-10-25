@@ -23,6 +23,7 @@ limitations under the License.
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <cstdint>
 
 #include "tensorflow/lite/core/c/common.h"
 
@@ -659,7 +660,7 @@ typedef struct {
   // See the stablehlo spec for the explanation of the attributes:
   // https://github.com/openxla/stablehlo/blob/main/docs/spec.md#case
   int32_t branch_subgraph_indices[TFLITE_STABLEHLO_CASE_PARAMS_MAX_BRANCHES_COUNT];
-  int num_branches;
+  uint32_t num_branches;
 } TfLiteStablehloCaseParams;
 
 #ifdef __cplusplus
