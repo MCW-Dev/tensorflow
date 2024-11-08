@@ -150,10 +150,11 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_EQ(context, params->activation, kTfLiteActNone);
   TF_LITE_ENSURE(context,
                  input_type == kTfLiteFloat32 || input_type == kTfLiteFloat16 ||
-                 input_type == kTfLiteBFloat16 || input_type == kTfLiteUInt8 || 
-                     input_type == kTfLiteInt8 || input_type == kTfLiteInt16 ||
-                     input_type == kTfLiteInt32 || input_type == kTfLiteInt64 ||
-                     input_type == kTfLiteBool || input_type == kTfLiteUInt32);
+                     input_type == kTfLiteBFloat16 ||
+                     input_type == kTfLiteUInt8 || input_type == kTfLiteInt8 ||
+                     input_type == kTfLiteInt16 || input_type == kTfLiteInt32 ||
+                     input_type == kTfLiteInt64 || input_type == kTfLiteBool ||
+                     input_type == kTfLiteUInt32);
 
   // Check to see if we can calculate the output now.
   bool all_inputs_at_prepare = true;
