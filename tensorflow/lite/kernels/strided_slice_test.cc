@@ -20,6 +20,7 @@ limitations under the License.
 #include <type_traits>
 #include <vector>
 
+#include <Eigen/Core>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "tensorflow/lite/kernels/test_util.h"
@@ -149,6 +150,20 @@ class StridedSliceOpModel : public SingleOpModel {
   int output_;
 };
 
+TEST(StridedSliceOpTest1, In1DEmpty) {
+  for (bool constant_tensors : {true, false}) {
+    if (SingleOpModel::GetForceUseNnapi() && constant_tensors) {
+      // NNAPI does not support graphs with all constant inputs.
+      continue;
+    }
+    StridedSliceOpModel<Eigen::half> m({0}, {1}, {1}, {1},
+                                     std::vector<Eigen::half>{}, {1}, {3}, {1}, 0,
+                                     0, 0, 0, 0, constant_tensors);
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
+    EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({0}));
+  }
+}
+
 template <typename T>
 class StridedSliceOpTest : public ::testing::Test {};
 
@@ -173,6 +188,21 @@ TYPED_TEST(StridedSliceOpTest, UnsupportedInputSize) {
                "StridedSlice op only supports 1D-5D input arrays.");
 }
 #endif
+
+
+// TEST(StridedSliceOpTest,In1DEmptyf16){
+//   for (bool constant_tensors : {true, false}) {
+//     if (SingleOpModel::GetForceUseNnapi() && constant_tensors) {
+//       // NNAPI does not support graphs with all constant inputs.
+//       continue;
+//     }
+//     StridedSliceOpModel<Eigen::half> m({0}, {1}, {1}, {1},
+//                                      std::vector<TypeParam>{}, {1}, {3}, {1}, 0,
+//                                      0, 0, 0, 0, constant_tensors);
+//     ASSERT_EQ(m.Invoke(), kTfLiteOk);
+//     EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({0}));
+//   }
+// }
 
 TYPED_TEST(StridedSliceOpTest, In1DEmpty) {
   for (bool constant_tensors : {true, false}) {
