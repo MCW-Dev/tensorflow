@@ -333,6 +333,9 @@ Register_STABLEHLO_CBRT();  // WARNING: not implemented, using this
 
 TfLiteRegistration* Register_STABLEHLO_CASE();
 
+
+TfLiteRegistration* Register_STABLEHLO_COMPLEX();
+
 }  // namespace builtin
 }  // namespace ops
 }  // namespace tflite

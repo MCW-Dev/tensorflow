@@ -488,6 +488,7 @@ enum BuiltinOperator : int32 {
   STABLEHLO_SHIFT_LEFT = 207,
   STABLEHLO_CBRT = 208, // WARNING: No runtime support
   STABLEHLO_CASE = 209,
+  STABLEHLO_COMPLEX = 213,
 }
 // LINT.ThenChange(nnapi_linter/linter.proto)
 
@@ -648,6 +649,7 @@ union BuiltinOptions2{
   StableHLOCompositeOptions,
   StablehloShiftLeftOptions,
   StablehloCaseOptions,
+  StablehloComplexOptions,
 }
 
 table StablehloGatherOptions{
@@ -1520,6 +1522,9 @@ table StableHLOCompositeOptions {
 }
 
 table StablehloShiftLeftOptions {
+}
+
+table StablehloComplexOptions{
 }
 
 // An operator takes tensors as inputs and outputs. The type of operation being

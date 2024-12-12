@@ -389,6 +389,7 @@ BuiltinOpResolver::BuiltinOpResolver() {
   AddBuiltin(BuiltinOperator_STABLEHLO_COMPOSITE,
              Register_STABLEHLO_COMPOSITE());
   AddBuiltin(BuiltinOperator_STABLEHLO_CASE, Register_STABLEHLO_CASE());
+  AddBuiltin(BuiltinOperator_STABLEHLO_COMPLEX, Register_STABLEHLO_COMPLEX());
   AddCustom("NumericVerify", tflite::ops::custom::Register_NUMERIC_VERIFY());
   // TODO(andrewharp, ahentz): Move these somewhere more appropriate so that
   // custom ops aren't always included by default.
