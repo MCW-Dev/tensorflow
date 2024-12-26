@@ -436,6 +436,8 @@ TfLiteStatus LogEval(TfLiteContext* context, TfLiteNode* node) {
 }
 
 TfLiteStatus SqrtEval(TfLiteContext* context, TfLiteNode* node) {
+  const TfLiteTensor* input;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, 0, &input));
   switch (input->type) {
     case kTfLiteFloat16:
       return EvalNumeric<Eigen::half>(
@@ -537,7 +539,29 @@ TfLiteStatus RsqrtEval(TfLiteContext* context, TfLiteNode* node) {
 }
 
 TfLiteStatus SquareEval(TfLiteContext* context, TfLiteNode* node) {
-  return EvalNumeric(context, node, [](float f) { return f * f; });
+  const TfLiteTensor* input;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, 0, &input));
+  switch (input->type) {
+    case kTfLiteFloat16:
+      return EvalNumeric<Eigen::half>(
+          context, node,
+          [](Eigen::half f) { return Eigen::half(f * f); },
+          kTfLiteFloat16);
+  case kTfLiteBFloat16:
+      return EvalNumeric<Eigen::bfloat16>(
+          context, node,
+          [](Eigen::bfloat16 f) { return Eigen::bfloat16(f * f); },
+          kTfLiteBFloat16);
+  case kTfLiteFloat32:
+      return EvalNumeric<float>(
+          context, node,
+          [](float f) { return f * f; },
+          kTfLiteFloat32);
+  default:
+      TF_LITE_KERNEL_LOG(context, "Current data type %s is not supported.",
+                         TfLiteTypeGetName(input->type));
+      return kTfLiteError;
+  }
 }
 
 TfLiteStatus LogicalNotEval(TfLiteContext* context, TfLiteNode* node) {
