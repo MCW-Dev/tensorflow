@@ -167,7 +167,8 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
 
   data->pot_scale_int16 = !general_scale_int16;
 
-  if (output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||
+  if (output->type == kTfLiteUInt8 || (output->type == kTfLiteInt8 && 
+      output->quantization.type != kTfLiteNoQuantization) ||
       general_scale_int16) {
     // 8bit -> 8bit general quantized path, with general rescalings
     // as well as, 16bit -> 16bit with general rescalings
@@ -332,6 +333,16 @@ void EvalAdd(TfLiteContext* context, TfLiteNode* node, TfLiteAddParams* params,
         op_params, GetTensorShape(input1), GetTensorData<int16_t>(input1),
         GetTensorShape(input2), GetTensorData<int16_t>(input2),
         GetTensorShape(output), GetTensorData<int16_t>(output));
+  } else if (output->type == kTfLiteInt8) {
+    int8_t output_activation_min, output_activation_max;
+    CalculateActivationRange(params->activation, &output_activation_min,
+                             &output_activation_max);
+    SetActivationParams(output_activation_min, output_activation_max,
+                        &op_params);
+    reference_ops::BroadcastAdd6DSlow<int8_t, true>(
+        op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
+        GetTensorShape(input2), GetTensorData<int8_t>(input2),
+        GetTensorShape(output), GetTensorData<int8_t>(output));
   }
 #undef TF_LITE_ADD
 }
@@ -450,7 +461,7 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
       output->type == kTfLiteBFloat16 || output->type == kTfLiteInt32 ||
       output->type == kTfLiteInt64 ||
       (output->quantization.type == kTfLiteNoQuantization &&
-       output->type == kTfLiteInt16)) {
+       (output->type == kTfLiteInt16 || output->type == kTfLiteInt8))) {
     EvalAdd<kernel_type>(context, node, params, data, input1, input2, output);
   } else if (output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||
              output->type == kTfLiteInt16) {
