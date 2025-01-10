@@ -43,7 +43,7 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
           input->type == kTfLiteInt16 || input->type == kTfLiteInt8);
 
   bool is_quantized = input->quantization.type != kTfLiteNoQuantization;
-  if (input->type == kTfLiteInt8 ||
+  if ((input->type == kTfLiteInt8 && is_quantized) ||
       (input->type == kTfLiteInt16 && is_quantized)) {
     const auto* input_params =
         reinterpret_cast<TfLiteAffineQuantization*>(input->quantization.params);
@@ -129,9 +129,12 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
     case kTfLiteInt32:
       TF_LITE_ENSURE_OK(context, EvalCeil<int32_t>(input, output));
       break;
-    case kTfLiteInt8:
-      TF_LITE_ENSURE_OK(context, EvalCeilQuantized<int8_t>(input, output));
-      break;
+    case kTfLiteInt8: {
+      if (output->quantization.type == kTfLiteNoQuantization)
+        TF_LITE_ENSURE_OK(context, EvalCeil<int8_t>(input, output));
+      else  
+        TF_LITE_ENSURE_OK(context, EvalCeilQuantized<int8_t>(input, output));
+      } break;
     case kTfLiteInt16: {
       if (output->quantization.type == kTfLiteNoQuantization)
         TF_LITE_ENSURE_OK(context, EvalCeil<int16_t>(input, output));
