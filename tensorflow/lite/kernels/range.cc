@@ -130,8 +130,15 @@ TfLiteStatus ResizeOutput(TfLiteContext* context, const TfLiteTensor* start,
       break;
     }
     case kTfLiteInt8: {
-      TF_LITE_ENSURE_OK(context, GetSizeQuantized<int8_t>(context, start, limit,
-                                                          delta, &size));
+      if (start->quantization.type == kTfLiteAffineQuantization) {
+        TF_LITE_ENSURE_OK(context, GetSizeQuantized<int8_t>(
+                                        context, start, limit, delta, &size));
+      } else {
+        TF_LITE_ENSURE_OK(context,
+                          GetSize(context, *GetTensorData<int8_t>(start),
+                                  *GetTensorData<int8_t>(limit),
+                                  *GetTensorData<int8_t>(delta), &size));
+      }
       break;
     }
     case kTfLiteInt16: {
@@ -219,7 +226,9 @@ TfLiteStatus EvalImpl(TfLiteContext* context, const TfLiteTensor* start,
       break;
     }
     case kTfLiteInt8: {
-      CalculateRangeQuantized<int8_t>(start, delta, output);
+      start->quantization.type == kTfLiteAffineQuantization 
+          ? CalculateRangeQuantized<int8_t>(start, delta, output)
+          : CalculateRange<int8_t>(start, delta, output);
       break;
     }
     case kTfLiteInt16: {

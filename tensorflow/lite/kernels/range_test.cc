@@ -289,6 +289,16 @@ TEST(RangeOpModel, Int64EmptyOutputConst) {
   EXPECT_THAT(model.GetOutput(), ElementsAre());
 }
 
+TEST(RangeOpModel, SimpleInt8) {
+  RangeOpModel<int8_t> model(TensorType_INT8);
+  model.PopulateTensor<int8_t>(model.start(), {0});
+  model.PopulateTensor<int8_t>(model.limit(), {4});
+  model.PopulateTensor<int8_t>(model.delta(), {1});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetOutputShape(), ElementsAre(4));
+  EXPECT_THAT(model.GetOutput(), ElementsAre(0, 1, 2, 3));
+}
+
 TEST(RangeOpModel, SimpleInt8Quantized) {
   float kQuantizedTolerance = GetTolerance<int8_t>(-0.0f, 128.0f);
   RangeOpModel<int8_t> model({TensorType_INT8, {}, 0.0f, 128.0f},
@@ -337,7 +347,7 @@ TEST(RangeOpModel, SimpleBFloat16) {
                           Eigen::bfloat16(2), Eigen::bfloat16(3)));
 }
 
-TEST(RangeOpModel, Int8DeltaGreaterThanOneConst) {
+TEST(RangeOpModel, Int8QuantizedDeltaGreaterThanOneConst) {
   RangeOpModel<int8_t> model({TensorType_INT8, {}, 0, 128},
                              {TensorType_INT8, {}, 0, 128},
                              {TensorType_INT8, {}, 0, 128});
@@ -348,6 +358,13 @@ TEST(RangeOpModel, Int8DeltaGreaterThanOneConst) {
   EXPECT_THAT(model.GetOutputShape(), ElementsAre(4));
   EXPECT_THAT(model.ExtractDequantVector<int8_t>(model.output()),
               ElementsAre(2, 4, 6, 8));
+}
+
+TEST(RangeOpModel, Int8DeltaGreaterThanOneConst) {
+  RangeOpModel<int8_t> model(TensorType_INT8, {2}, {9}, {2});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetOutputShape(), ElementsAre(4));
+  EXPECT_THAT(model.GetOutput(), ElementsAre(2, 4, 6, 8));
 }
 
 TEST(RangeOpModel, Int16QuantizedDeltaGreaterThanOneConst) {
@@ -390,7 +407,7 @@ TEST(RangeOpModel, BFloat16DeltaGreaterThanOneConst) {
                           Eigen::bfloat16(6), Eigen::bfloat16(8)));
 }
 
-TEST(RangeOpModel, Int8EmptyOutputConst) {
+TEST(RangeOpModel, Int8EmptyOutputConstExample1) {
   RangeOpModel<int8_t> model({TensorType_INT8, {}, 0, 128},
                              {TensorType_INT8, {}, 0, 128},
                              {TensorType_INT8, {}, 0, 128});
@@ -401,6 +418,13 @@ TEST(RangeOpModel, Int8EmptyOutputConst) {
   EXPECT_THAT(model.GetOutputShape(), ElementsAre(0));
   EXPECT_THAT(model.ExtractDequantVector<int8_t>(model.output()),
               ElementsAre());
+}
+
+TEST(RangeOpModel, Int8EmptyOutputConstExample2) {
+  RangeOpModel<int8_t> model(TensorType_INT8, {0}, {0}, {1});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetOutputShape(), ElementsAre(0));
+  EXPECT_THAT(model.GetOutput(), ElementsAre());
 }
 
 TEST(RangeOpModel, Int16EmptyOutputConstExample1) {
