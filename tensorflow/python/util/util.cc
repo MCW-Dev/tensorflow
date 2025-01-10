@@ -22,11 +22,13 @@ limitations under the License.
 #include <vector>
 
 #include "absl/memory/memory.h"
-#include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/mutex.h"
+#include "tensorflow/core/platform/stringpiece.h"
 #include "tensorflow/python/lib/core/safe_pyobject_ptr.h"
+#include "tsl/platform/macros.h"
+#include "tsl/platform/thread_annotations.h"
 
 namespace tensorflow {
 namespace swig {
@@ -814,7 +816,7 @@ void SetDifferentKeysError(PyObject* dict1, PyObject* dict2, string* error_msg,
 // Returns true iff there were no "internal" errors. In other words,
 // errors that has nothing to do with structure checking.
 // If an "internal" error occurred, the appropriate Python error will be
-// set and the caller can propage it directly to the user.
+// set and the caller can propagate it directly to the user.
 //
 // Both `error_msg` and `is_type_error` must be non-null. `error_msg` must
 // be empty.

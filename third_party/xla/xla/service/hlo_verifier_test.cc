@@ -19,6 +19,7 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -35,16 +36,19 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/parser/hlo_parser.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
+#include "xla/layout.h"
 #include "xla/literal_util.h"
 #include "xla/service/hlo_module_config.h"
-#include "xla/service/hlo_parser.h"
 #include "xla/service/layout_assignment.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/tests/hlo_test_base.h"
+#include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/lib/core/status_test_util.h"
+#include "tsl/platform/platform.h"
 #include "tsl/platform/statusor.h"
 #include "tsl/platform/test.h"
 
@@ -73,11 +77,21 @@ class HloVerifierTestAllowMixedPrecision : public HloTestBase {
                     /*allow_mixed_precision_in_hlo_verifier=*/true) {}
 };
 
-class HloVerifierTestLayoutSensitive : public HloTestBase {
+class HloVerifierTestLayoutSensitive : public HloHardwareIndependentTestBase {
  public:
   HloVerifierTestLayoutSensitive()
+      : HloHardwareIndependentTestBase(
+            /*verifier_layout_sensitive=*/true,
+            /*allow_mixed_precision_in_hlo_verifier=*/false,
+            LayoutAssignment::InstructionCanChangeLayout) {}
+};
+
+class HloVerifierTestLayoutSensitiveAndAllowMixedPrecision
+    : public HloTestBase {
+ public:
+  HloVerifierTestLayoutSensitiveAndAllowMixedPrecision()
       : HloTestBase(/*verifier_layout_sensitive=*/true,
-                    /*allow_mixed_precision_in_hlo_verifier=*/false,
+                    /*allow_mixed_precision_in_hlo_verifier=*/true,
                     LayoutAssignment::InstructionCanChangeLayout) {}
 };
 
@@ -214,8 +228,164 @@ TEST_F(HloVerifierTest, CheckCallThreadMismatch) {
   auto status = verifier().Run(module.get()).status();
   ASSERT_FALSE(status.ok());
   EXPECT_THAT(status.message(),
-              HasSubstr("expects parent computation thread name same as called "
-                        "computation's thread name"));
+              HasSubstr("mycall top_apply computation execution thread does "
+                        "not match (parallel_thread vs main)"));
+}
+
+TEST_F(HloVerifierTest, CompositeCall) {
+  constexpr absl::string_view hlo = R"(
+  HloModule Module
+
+  add_n {
+    x = f32[] parameter(0)
+    constant = f32[] constant(2)
+    ROOT z = f32[] add(f32[] x, f32[] constant)
+  }
+
+  ENTRY entry {
+    constant = f32[] constant(42)
+    ROOT mycall = f32[] call(constant), is_composite=true, to_apply=add_n, frontend_attributes={composite.name="foo.bar",composite.attributes={n = 1 : i32, tensor = dense<1> : tensor<i32>},composite.version="1"}
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+
+  auto status = verifier().Run(module.get()).status();
+  EXPECT_TRUE(status.ok());
+}
+
+TEST_F(HloVerifierTest, CompositeCallMissingFrontendAttributes) {
+  constexpr absl::string_view hlo = R"(
+  HloModule Module
+
+  add_n {
+    x = f32[] parameter(0)
+    constant = f32[] constant(2)
+    ROOT z = f32[] add(f32[] x, f32[] constant)
+  }
+
+  ENTRY entry {
+    constant = f32[] constant(42)
+    ROOT mycall = f32[] call(constant), is_composite=true, to_apply=add_n
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("A composite call op must have frontend attributes"));
+}
+
+TEST_F(HloVerifierTest, CompositeCallOptionalAttributesAndVersion) {
+  constexpr absl::string_view hlo = R"(
+  HloModule Module
+
+  add_n {
+    x = f32[] parameter(0)
+    constant = f32[] constant(2)
+    ROOT z = f32[] add(f32[] x, f32[] constant)
+  }
+
+  ENTRY entry {
+    constant = f32[] constant(42)
+    ROOT mycall = f32[] call(constant), is_composite=true, to_apply=add_n, frontend_attributes={composite.name="foo.bar"}
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+
+  auto status = verifier().Run(module.get()).status();
+  EXPECT_TRUE(status.ok());
+}
+
+TEST_F(HloVerifierTest, CompositeCallOptionalAttributes) {
+  constexpr absl::string_view hlo = R"(
+  HloModule Module
+
+  add_n {
+    x = f32[] parameter(0)
+    constant = f32[] constant(2)
+    ROOT z = f32[] add(f32[] x, f32[] constant)
+  }
+
+  ENTRY entry {
+    constant = f32[] constant(42)
+    ROOT mycall = f32[] call(constant), is_composite=true, to_apply=add_n, frontend_attributes={composite.name="foo.bar",composite.version="1"}
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+
+  auto status = verifier().Run(module.get()).status();
+  EXPECT_TRUE(status.ok());
+}
+
+TEST_F(HloVerifierTest, CompositeCallMissingName) {
+  constexpr absl::string_view hlo = R"(
+  HloModule Module
+
+  add_n {
+    x = f32[] parameter(0)
+    constant = f32[] constant(2)
+    ROOT z = f32[] add(f32[] x, f32[] constant)
+  }
+
+  ENTRY entry {
+    constant = f32[] constant(42)
+    ROOT mycall = f32[] call(constant), is_composite=true, to_apply=add_n, frontend_attributes={composite.attributes={n = 1 : i32, tensor = dense<1> : tensor<i32>},composite.version="1"}
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("A composite call op must have frontend attributes "
+                        "with key composite.name whose value is non-empty"));
+}
+
+TEST_F(HloVerifierTest, CompositeCallOptionalVersion) {
+  constexpr absl::string_view hlo = R"(
+  HloModule Module
+
+  add_n {
+    x = f32[] parameter(0)
+    constant = f32[] constant(2)
+    ROOT z = f32[] add(f32[] x, f32[] constant)
+  }
+
+  ENTRY entry {
+    constant = f32[] constant(42)
+    ROOT mycall = f32[] call(constant), is_composite=true, to_apply=add_n, frontend_attributes={composite.attributes={n = 1 : i32, tensor = dense<1> : tensor<i32>},composite.name="foo.bar"}
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+
+  auto status = verifier().Run(module.get()).status();
+  EXPECT_TRUE(status.ok());
+}
+
+TEST_F(HloVerifierTest, CompositeCallNonNegativeVersion) {
+  constexpr absl::string_view hlo = R"(
+  HloModule Module
+
+  add_n {
+    x = f32[] parameter(0)
+    constant = f32[] constant(2)
+    ROOT z = f32[] add(f32[] x, f32[] constant)
+  }
+
+  ENTRY entry {
+    constant = f32[] constant(42)
+    ROOT mycall = f32[] call(constant), is_composite=true, to_apply=add_n, frontend_attributes={composite.attributes={n = 1 : i32, tensor = dense<1> : tensor<i32>},composite.name="foo.bar",composite.version="-1"}
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(
+      status.message(),
+      HasSubstr("A composite call op must have frontend attributes with a "
+                "composite.version whose value is a non-negative integer"));
 }
 
 TEST_F(HloVerifierTest, CheckConditionalOperandParameterShapesMismatch) {
@@ -830,7 +1000,7 @@ TEST_F(HloVerifierTest, CopyStartMultipleCopyDone) {
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnUnverifiedModule(hlo_string));
 
-  auto status = verifier().Run(module.get()).status();
+  absl::Status status = verifier().Run(module.get()).status();
   ASSERT_FALSE(status.ok());
   EXPECT_THAT(
       status.message(),
@@ -1246,6 +1416,60 @@ TEST_F(HloVerifierTest, AsyncOpComputationNotTrivial) {
       status.message(),
       HasSubstr(
           "expected to contain only the root and parameter instructions"));
+}
+
+TEST_F(HloVerifierTest, AsyncMultiOpComputationSendRecvOnly) {
+  const char* const hlo_string = R"(
+  wrapped_send_recv_1 {
+    param0 = f32[] parameter(0)
+    param1 = token[] parameter(1)
+    send = (f32[], u32[], token[]) send(param0, param1), channel_id=1
+    param2 = f32[] parameter(2)
+    param3 = token[] parameter(3)
+    send.1 = (f32[], u32[], token[]) send(param2, param3), channel_id=2
+    param4 = token[] parameter(4)
+    recv = (f32[], u32[], token[]) recv(param4), channel_id=1
+    param5 = token[] parameter(5)
+    recv.1 = (f32[], u32[], token[]) recv(param5), channel_id=2
+    ROOT tuple = ((f32[], u32[], token[]), (f32[], u32[], token[]),
+      (f32[], u32[], token[]), (f32[], u32[], token[]))
+      tuple(send, send.1, recv, recv.1)
+  }
+
+  ENTRY main {
+    data-1 = f32[] constant(1)
+    after-all-1 = token[] after-all()
+    data-2 = f32[] constant(2)
+    after-all-2 = token[] after-all()
+    tuple-start = ((f32[], token[], f32[], token[], token[], token[]),
+      ((f32[], u32[], token[]), (f32[], u32[], token[]),
+      (f32[], u32[], token[]), (f32[], u32[], token[])), s32[])
+      async-start(data-1, after-all-1, data-2, after-all-2, after-all-1, after-all-2),
+        calls=wrapped_send_recv_1
+    tuple-done = ((f32[], u32[], token[]), (f32[], u32[], token[]),
+      (f32[], u32[], token[]), (f32[], u32[], token[])) async-done(tuple-start)
+    gte.4 = (f32[], u32[], token[]) get-tuple-element(tuple-done), index=2
+    gte.5 = f32[] get-tuple-element(gte.4), index=0
+    gte.6 = token[] get-tuple-element(gte.4), index=2
+    tuple.1 = (f32[], token[]) tuple(gte.5, gte.6)
+    data-out-1 = f32[] get-tuple-element(tuple.1), index=0
+    gte.7 = (f32[], u32[], token[]) get-tuple-element(tuple-done), index=3
+    gte.8 = f32[] get-tuple-element(gte.7), index=0
+    gte.9 = token[] get-tuple-element(gte.7), index=2
+    tuple.2 = (f32[], token[]) tuple(gte.8, gte.9)
+    data-out-2 = f32[] get-tuple-element(tuple.2), index=0
+    ROOT out = (f32[], f32[]) tuple(data-out-1, data-out-2)
+    get-tuple-element = (f32[], u32[], token[]) get-tuple-element(tuple-done), index=0
+    gte.1 = token[] get-tuple-element(get-tuple-element), index=2
+    gte.2 = (f32[], u32[], token[]) get-tuple-element(tuple-done), index=1
+    gte.3 = token[] get-tuple-element(gte.2), index=2
+  }
+)";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_TRUE(status.ok());
 }
 
 TEST_F(HloVerifierTest, IotaNonArrayResult) {
@@ -1934,6 +2158,47 @@ TEST_F(HloVerifierTest, CollectivePermuteCrossPartitionTargetOOR) {
   EXPECT_THAT(error_message, HasSubstr("must be < 3"));
 }
 
+TEST_F(HloVerifierTest, FusionMoreOperandsThanParameters) {
+  const char* const kModuleStr = R"(
+  HloModule test
+
+  fused_computation {
+    ROOT p0 = f32[10] parameter(0)
+  }
+
+  ENTRY entry {
+    p0 = f32[10] parameter(0)
+    p1 = f32[10] parameter(1)
+    ROOT out = f32[10] fusion(p0, p1), kind=kInput, calls=fused_computation
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(kModuleStr));
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_TRUE(status.ok());
+}
+
+TEST_F(HloVerifierTest, FusionLessOperandsThanParameters) {
+  const char* const kModuleStr = R"(
+  HloModule test
+
+  fused_computation {
+    p0 = f32[10] parameter(0)
+    p1 = f32[10] parameter(1)
+    ROOT out = f32[10] add(p0, p1)
+  }
+
+  ENTRY entry {
+    p0 = f32[10] parameter(0)
+    ROOT out = f32[10] fusion(p0), kind=kInput, calls=fused_computation
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(kModuleStr));
+  EXPECT_THAT(verifier().Run(module.get()).status().message(),
+              HasSubstr("greater than the number of operands"));
+}
+
 TEST_F(HloVerifierTest, FusionShapeVerifier) {
   const char* const kModuleStr = R"(
   HloModule test
@@ -1998,10 +2263,10 @@ TEST_F(HloVerifierTest, FusionNestedComputationThreadVerifier) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnUnverifiedModule(kModuleStr));
-  EXPECT_THAT(verifier().Run(module.get()).status().message(),
-              HasSubstr("Nested computations expects same computation's thread "
-                        "name: parallel_thread vs main, in called computation "
-                        "`add` vs caller computation `fused_computation`"));
+  EXPECT_THAT(
+      verifier().Run(module.get()).status().message(),
+      HasSubstr("crs0 top_apply computation execution thread does not match "
+                "(parallel_thread vs main)"));
 }
 
 TEST_F(HloVerifierTest, AllReduceVerifier) {
@@ -2055,93 +2320,181 @@ TEST_F(HloVerifierTest, ChannelVerifier) {
               HasSubstr("used for different types of channel instructions"));
 }
 
-TEST_F(HloVerifierTest, ChannelVerifierPipelinedMissingDones) {
+TEST_F(HloVerifierTest, ChannelVerifierPartiallyPipelinedAsyncRecv) {
   const char* const kModuleStr = R"(
-  HloModule test
-  cond {
-    param = (u32[], (u32[2], u32[], token[]), (u32[2], u32[], token[])) parameter(0)
-    count = get-tuple-element(%param), index=0
-    ub = u32[] constant(1)
-    ROOT result = pred[] compare(count, ub), direction=LT
-  }
+    HloModule test
 
-  body {
-    param = (u32[], (u32[2], u32[], token[]), (u32[2], u32[], token[])) parameter(0)
-    count = get-tuple-element(%param), index=0
+    while_body {
+      param = ((f32[16], u32[], token[])) parameter(0)
+      prev_recv = (f32[16], u32[], token[]) get-tuple-element(param), index=0
+      recv_done = (f32[16], token[]) recv-done(prev_recv), channel_id=1
+      after_all = token[] after-all()
+      recv = (f32[16], u32[], token[]) recv(after_all), channel_id=1,
+          frontend_attributes={
+            _xla_send_recv_source_target_pairs={{0,1},{1,2},{2,3}}}
+      ROOT tuple = ((f32[16], u32[], token[])) tuple(recv)
+    }
 
-    recv.0 = (u32[2], u32[], token[]) get-tuple-element(param), index=1
-    recv-done.0 = (u32[2], token[]) recv-done(recv.0), channel_id=1,
-      frontend_attributes={
-        _xla_send_recv_pipeline="0"
-      }
-    recv-data.0 = u32[2] get-tuple-element(recv-done.0), index=0
+    // Infinite loop to keep IR small.
+    while_condition {
+      param = ((f32[16], u32[], token[])) parameter(0)
+      ROOT infinite_loop = pred[] constant(true)
+    }
 
-    c1 = u32[] constant(1)
-    new_count = u32[] add(count, c1)
-
-    send.0 = (u32[2], u32[], token[]) get-tuple-element(param), index=2
-    send-done.0 = (u32[2], token[]) recv-done(send.0), channel_id=1,
-      frontend_attributes={
-        _xla_send_recv_pipeline="0"
-      }
-
-    after-all.0.n = token[] after-all()
-    recv.0.n = (u32[2], u32[], token[]) recv(after-all.0.n), channel_id=1,
-      frontend_attributes={
-        _xla_send_recv_source_target_pairs="{{1,0}}",
-        _xla_send_recv_pipeline="0"
-      }
-
-
-    after-all.1.n = token[] after-all()
-    send.0.n = (u32[2], u32[], token[]) send(recv-data.0, after-all.1.n),
-      channel_id=1,
-      frontend_attributes={
-        _xla_send_recv_source_target_pairs="{{1,0}}",
-        _xla_send_recv_pipeline="0"
-      }
-
-    ROOT result = (u32[], (u32[2], u32[], token[]), (u32[2], u32[], token[]))
-      tuple(new_count, recv.0.n, send.0.n)
-  }
-
-  ENTRY test_computation {
-    c0 = u32[] constant(0)
-    init = u32[2] broadcast(c0), dimensions={}
-    after-all.0.p = token[] after-all()
-    recv.0.p = (u32[2], u32[], token[]) recv(after-all.0.p), channel_id=1,
-      frontend_attributes={
-        _xla_send_recv_source_target_pairs="{{1,0}}",
-        _xla_send_recv_pipeline="0"
-      }
-
-    after-all.1.p = token[] after-all()
-    send.0.p = (u32[2], u32[], token[]) send(init, after-all.1.p),
-      channel_id=1,
-      frontend_attributes={
-        _xla_send_recv_source_target_pairs="{{1,0}}",
-        _xla_send_recv_pipeline="0"
-      }
-
-    while_init = (u32[], (u32[2], u32[], token[]), (u32[2], u32[], token[]))
-      tuple(c0, recv.0.p, send.0.p)
-    while_result = (u32[], (u32[2], u32[], token[]), (u32[2], u32[], token[]))
-      while(while_init), body=body, condition=cond
-
-    recv.0.q = (u32[2], u32[], token[]) get-tuple-element(while_result), index=1
-    recv-done.0.q = (u32[2], token[]) recv-done(recv.0.q), channel_id=1,
-      frontend_attributes={
-        _xla_send_recv_pipeline="0"
-      }
-
-    ROOT recv-data.0.q = u32[2] get-tuple-element(recv-done.0.q), index=0
-      })";
+    ENTRY main_spmd {
+      after_all = token[] after-all()
+      recv = (f32[16], u32[], token[]) recv(after_all), channel_id=1,
+          frontend_attributes={
+            _xla_send_recv_source_target_pairs={{0,1},{1,2},{2,3}}}
+      init = ((f32[16], u32[], token[])) tuple(recv)
+      while = ((f32[16], u32[], token[])) while(init),
+          condition=while_condition, body=while_body
+      recv_ctx = (f32[16], u32[], token[]) get-tuple-element(while), index=0
+      recv_done = (f32[16], token[]) recv-done(recv_ctx), channel_id=1
+      ROOT result = f32[16] get-tuple-element(recv_done), index=0
+    })";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnUnverifiedModule(kModuleStr));
-  EXPECT_THAT(
-      verifier().Run(module.get()).status().message(),
-      HasSubstr("is pipelined. Not all Send/Recv related instructions are used"
-                " the same number of times"));
+  TF_ASSERT_OK(verifier().Run(module.get()));
+}
+
+TEST_F(HloVerifierTest, ChannelVerifierPartiallyPipelinedAsyncSend) {
+  const char* const kModuleStr = R"(
+    HloModule test
+
+    while_body {
+      param = ((f32[16], u32[], token[]), f32[16]) parameter(0)
+      prev_send = (f32[16], u32[], token[]) get-tuple-element(param), index=0
+      data = f32[16] get-tuple-element(param), index=1
+      send_done = (f32[16], token[]) send-done(prev_send), channel_id=1
+      after_all = token[] after-all()
+      send = (f32[16], u32[], token[]) send(data, after_all), channel_id=1,
+          frontend_attributes={
+            _xla_send_send_source_target_pairs={{0,1},{1,2},{2,3}}}
+      ROOT tuple = ((f32[16], u32[], token[]), f32[16]) tuple(send, data)
+    }
+
+    // Infinite loop to keep IR small.
+    while_condition {
+      param = ((f32[16], u32[], token[]), f32[16]) parameter(0)
+      ROOT infinite_loop = pred[] constant(true)
+    }
+
+    ENTRY main_spmd {
+      data = f32[16] parameter(0)
+      after_all = token[] after-all()
+      send = (f32[16], u32[], token[]) send(data, after_all), channel_id=1,
+          frontend_attributes={
+            _xla_send_send_source_target_pairs={{0,1},{1,2},{2,3}}}
+      init = ((f32[16], u32[], token[]), f32[16]) tuple(send, data)
+      while = ((f32[16], u32[], token[]), f32[16]) while(init),
+          condition=while_condition, body=while_body
+      send_ctx = (f32[16], u32[], token[]) get-tuple-element(while), index=0
+      ROOT send_done = (f32[16], token[]) send-done(send_ctx), channel_id=1
+    })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(kModuleStr));
+  TF_ASSERT_OK(verifier().Run(module.get()));
+}
+
+TEST_F(HloVerifierTest, ChannelVerifierAsyncSend) {
+  const char* const kModuleStr = R"(
+    HloModule test
+
+    ENTRY main_spmd {
+      data = f32[16] parameter(0)
+      after_all = token[] after-all()
+      send = (f32[16], u32[], token[]) send(after_all, data), channel_id=1,
+          frontend_attributes={
+            _xla_send_send_source_target_pairs={{0,1},{1,2},{2,3}}}
+      ROOT send_done = (f32[16], token[]) send-done(send), channel_id=1
+    })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(kModuleStr));
+  TF_ASSERT_OK(verifier().Run(module.get()));
+}
+
+TEST_F(HloVerifierTest, SingleUserExceptionForWrappedSendRecv) {
+  const char* const kModuleStr = R"(
+  wrapped_send {
+    data = f32[] parameter(0)
+    after-all = token[] parameter(1)
+    ROOT send = (f32[], u32[], token[]) send(data, after-all), channel_id=1,
+      frontend_attributes={_xla_send_recv_source_target_pairs={{0,1}}}
+  }
+  wrapped_recv {
+    after-all = token[] parameter(0)
+    ROOT recv = (f32[], u32[], token[]) recv(after-all), channel_id=1,
+      frontend_attributes={_xla_send_recv_source_target_pairs={{1,0}}}
+  }
+  ENTRY main () -> f32[] {
+    data = f32[] constant(5)
+    after-all = token[] after-all()
+    async-recv-start = ((token[]), (f32[], u32[], token[]), s32[]) async-start(after-all), calls=wrapped_recv
+    async-send-start = ((f32[], token[]), (f32[], u32[], token[]), s32[]) async-start(data, after-all), calls=wrapped_send
+    async-recv-done = (f32[], u32[], token[]) async-done(async-recv-start), calls=wrapped_recv
+    async-send-done = (f32[], u32[], token[]) async-done(async-send-start), calls=wrapped_send
+    ROOT out = f32[] get-tuple-element((f32[], u32[], token[]) async-recv-done), index=0
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(kModuleStr));
+  TF_ASSERT_OK(verifier().Run(module.get()));
+}
+
+TEST_F(HloVerifierTest, ChannelVerifierAsyncRecv) {
+  const char* const kModuleStr = R"(
+    HloModule test
+
+    ENTRY main_spmd {
+      after_all = token[] after-all()
+      recv = (f32[16], u32[], token[]) recv(after_all), channel_id=1,
+          frontend_attributes={
+            _xla_send_send_source_target_pairs={{0,1},{1,2},{2,3}}}
+      recv_done = (f32[16], token[]) recv-done(recv), channel_id=1
+      ROOT result = f32[16] get-tuple-element(recv_done), index=0
+    })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(kModuleStr));
+  TF_ASSERT_OK(verifier().Run(module.get()));
+}
+
+TEST_F(HloVerifierTest, ChannelVerifierMultipleSendUsers) {
+  const char* const kModuleStr = R"(
+    HloModule test
+
+    ENTRY main_spmd {
+      data = f32[16] parameter(0)
+      after_all = token[] after-all()
+      send = (f32[16], u32[], token[]) send(data, after_all), channel_id=1,
+          frontend_attributes={
+            _xla_send_send_source_target_pairs={{0,1},{1,2},{2,3}}}
+      send_done = (f32[16], token[]) send-done(send), channel_id=1
+      ROOT result = ((f32[16], u32[], token[]), f32[16]) tuple(send, send_done)
+    })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(kModuleStr));
+  EXPECT_THAT(verifier().Run(module.get()).status().message(),
+              HasSubstr("send instruction requires one consumer, found 2"));
+}
+
+TEST_F(HloVerifierTest, ChannelVerifierMultipleRecvUsers) {
+  const char* const kModuleStr = R"(
+    HloModule test
+
+    ENTRY main_spmd {
+      after_all = token[] after-all()
+      recv = (f32[16], u32[], token[]) recv(after_all), channel_id=1,
+          frontend_attributes={
+            _xla_send_send_source_target_pairs={{0,1},{1,2},{2,3}}}
+      recv_done = (f32[16], token[]) recv-done(recv), channel_id=1
+      ROOT result = (((f32[16], u32[], token[])), f32[16])
+          tuple(recv, recv_done)
+    })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(kModuleStr));
+  EXPECT_THAT(verifier().Run(module.get()).status().message(),
+              HasSubstr("recv instruction requires one consumer, found 2"));
 }
 
 TEST_F(HloVerifierTest, CollectiveChannelVerifier) {
@@ -2501,6 +2854,81 @@ ENTRY computation {
                    .status());
 }
 
+TEST_F(HloVerifierTest, VerifyInstructionNameChanged) {
+  const char* const hlo = R"(
+HloModule module
+
+ENTRY computation {
+  p0 = f32[32] parameter(0), metadata={scheduling_name="p0"}
+  p1 = f32[32] parameter(1), metadata={scheduling_name="p1"}
+  ROOT add0 = f32[32] add(p0,p1), metadata={scheduling_name="add_changed"}
+}
+)";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+  auto status = HloVerifier{HloVerifierOpts{}.VerifyInstructionNameUnchanged()}
+                    .Run(module.get())
+                    .status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("Expected instruction name to remain the same."));
+}
+
+TEST_F(HloVerifierTest, VerifyInstructionNameUnchanged) {
+  const char* const hlo = R"(
+HloModule module
+
+ENTRY computation {
+  p0 = f32[32] parameter(0), metadata={scheduling_name="p0"}
+  p1 = f32[32] parameter(1), metadata={scheduling_name="p1"}
+  ROOT add0 = f32[32] add(p0,p1), metadata={scheduling_name="add0"}
+}
+)";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+  TF_ASSERT_OK(HloVerifier{HloVerifierOpts{}.VerifyInstructionNameUnchanged()}
+                   .Run(module.get())
+                   .status());
+}
+
+TEST_F(HloVerifierTest, VerifyInstructionNameSchedulingNameNotPresent) {
+  const char* const hlo = R"(
+HloModule module
+
+ENTRY computation {
+  p0 = f32[32] parameter(0)
+  p1 = f32[32] parameter(1)
+  ROOT add0 = f32[32] add(p0,p1)
+}
+)";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+  TF_ASSERT_OK(HloVerifier{HloVerifierOpts{}.VerifyInstructionNameUnchanged()}
+                   .Run(module.get())
+                   .status());
+}
+
+TEST_F(HloVerifierTest, VerifyInstructionNameChangedOkWithRematAndClones) {
+  const char* const hlo = R"(
+HloModule module
+
+ENTRY computation {
+  p0 = f32[32] parameter(0), metadata={scheduling_name="p0"}
+  p1 = f32[32] parameter(1), metadata={scheduling_name="p1"}
+  add0.remat = f32[32] add(p0,p1), metadata={scheduling_name="add0"}
+  ROOT add1.clone = f32[32] add(add0.remat, p0), metadata={scheduling_name="add1"}
+}
+)";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module, ParseAndReturnUnverifiedModule(hlo));
+  auto status = HloVerifier{HloVerifierOpts{}.VerifyInstructionNameUnchanged()}
+                    .Run(module.get())
+                    .status();
+  TF_ASSERT_OK(HloVerifier{HloVerifierOpts{}.VerifyInstructionNameUnchanged()}
+                   .Run(module.get())
+                   .status());
+}
+
 TEST_F(HloVerifierTest, ReshapeIsNotBitcast) {
   const char* const hlo = R"(
 HloModule Module
@@ -2562,8 +2990,8 @@ TEST_F(HloVerifierTest, VerifyCustomCallThread) {
           .status();
   ASSERT_FALSE(status.ok());
   EXPECT_THAT(status.message(),
-              HasSubstr("expects parent computation thread name same as called "
-                        "computation's thread name"));
+              HasSubstr("custom top_apply computation execution thread does "
+                        "not match (parallel_thread vs main)"));
 }
 
 TEST_F(HloVerifierTest, CheckWhileThread) {
@@ -2775,7 +3203,7 @@ TEST_F(HloVerifierTest, DisableS4Veridication) {
 }
 
 TEST(MetadataTrackerTest, MetadataTrackerLogsInfo) {
-  if (tsl::testing::kIsOpenSource) {
+  if (tsl::kIsOpenSource) {
     return;
   }
   constexpr absl::string_view hlo = R"(
@@ -3055,5 +3483,157 @@ TEST_F(HloVerifierTestLayoutSensitive,
               HasSubstr("DynamicSlice instruction shouldn't change layout "
                         "memory space from device to host"));
 }
+
+TEST_F(HloVerifierTestLayoutSensitiveAndAllowMixedPrecision,
+       HostOffloadingCopyCannotChangeType) {
+  const char* const hlo_string = R"(
+HloModule m
+
+ENTRY main {
+  param = f32[1024,1024]{1,0:T(8,128)S(5)} parameter(0)
+  copy = bf16[1024,1024]{1,0:T(8,128)} copy(param)
+  ROOT dot = f32[1024,1024]{1,0:T(8,128)} dot(copy, copy), lhs_contracting_dims={1}, rhs_contracting_dims={0}
+}
+)";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(hlo_string));
+
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("Expected instruction to have shape equal to "
+                        "f32[1024,1024]{1,0:T(8,128)S(5)}, actual shape is "
+                        "bf16[1024,1024]{1,0:T(8,128)}"));
+}
+
+TEST_F(HloVerifierTestLayoutSensitiveAndAllowMixedPrecision,
+       HostOffloadingCopyCannotChangeLayout) {
+  const char* const hlo_string = R"(
+HloModule m
+
+ENTRY main {
+  param = f32[1024,1024]{1,0:T(8,128)S(5)} parameter(0)
+  ROOT copy = f32[1024,1024]{0,1:T(8,128)} copy(param)
+}
+)";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(hlo_string));
+
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("Expected instruction to have shape equal to "
+                        "f32[1024,1024]{1,0:T(8,128)S(5)}, actual shape is "
+                        "f32[1024,1024]{0,1:T(8,128)}"));
+}
+
+TEST_F(HloVerifierTestLayoutSensitive,
+       MismatchedMinorToMajorSizeAndDimensionSize) {
+  const char* const hlo_string = R"(
+  HloModule m
+
+  ENTRY main {
+    data_param = f32[2048,2048]{1,0} parameter(0)
+    add = f32[2048,2048]{1,0} add(data_param, data_param)
+    ROOT const = f32[] constant(0)
+  })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(hlo_string));
+  // Programmatically mess up the minor-to-major rather than in the raw string,
+  // because the hlo parser fails if the minor-to-major is not the same size as
+  // the dimensions.
+  HloInstruction* instruction =
+      module->entry_computation()->parameter_instruction(0)->users().at(0);
+  Layout* layout = instruction->mutable_shape()->mutable_layout();
+  layout->add_minor_to_major(2);
+
+  auto status = verifier().Run(module.get()).status();
+  ASSERT_FALSE(status.ok());
+  EXPECT_THAT(status.message(),
+              HasSubstr("Instruction has mismatched minor-to-major size and "
+                        "dimension size: "));
+}
+
+TEST_F(HloVerifierTest, NoErrorOnDuplicateChannelId) {
+  const char* const hlo_string = R"(
+  HloModule m
+
+  ENTRY main {
+    data_param = f32[2048,2048]{1,0} parameter(0)
+    cp1 = f32[2048,2048]{1,0} collective-permute(data_param), source_target_pairs={{0,1},{1,2},{2,3}}, channel_id=1
+    cp2 = f32[2048,2048]{1,0} collective-permute(data_param), source_target_pairs={{0,1}}, channel_id=1
+
+    ROOT tuple = (f32[2048,2048]{1,0}, f32[2048,2048]{1,0}) tuple(cp1, cp2)
+  })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(hlo_string));
+  HloVerifierOpts opts{};
+  opts.verify_unique_channel_ids = false;
+  HloVerifier verifier(std::move(opts));
+  ASSERT_IS_OK(verifier.Run(module.get()).status());
+}
+
+TEST_F(HloVerifierTestLayoutSensitive, Int4CompareSelect) {
+  const char* const kModuleStr = R"(
+    HloModule test
+
+    ENTRY main {
+      a = s4[10]{0:E(4)} parameter(0)
+      b = s4[10]{0:E(4)} parameter(1)
+      less = pred[10] compare(a, b), direction=LT
+      ROOT result = select(less, a, b)
+    })";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnUnverifiedModule(kModuleStr));
+  TF_ASSERT_OK(verifier().Run(module.get()));
+}
+
+TEST_F(HloVerifierTest, RaggedDotNonContracting) {
+  static const char* const kRaggedDotHloString = R"(
+HloModule module
+ENTRY entry_computation {
+  a = f32[11,5] parameter(0)
+  b = f32[3,5,7] parameter(1)
+  c = u32[3] parameter(2)
+  ROOT dot = f32[11,7] ragged-dot(a, b, c), lhs_contracting_dims={1}, rhs_contracting_dims={1}, lhs_ragged_dims={0}, rhs_group_dims={0}
+})";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(kRaggedDotHloString));
+
+  auto status = verifier().Run(module.get()).status();
+  EXPECT_TRUE(status.ok()) << status;
+}
+
+TEST_F(HloVerifierTest, RaggedDotContracting) {
+  static const char* const kRaggedDotHloString = R"(
+HloModule module
+ENTRY entry_computation {
+  a = f32[11,5] parameter(0)
+  b = f32[5,7] parameter(1)
+  c = u32[3] parameter(2)
+  ROOT dot = f32[3,11,7] ragged-dot(a, b, c), lhs_contracting_dims={1}, rhs_contracting_dims={0}, lhs_ragged_dims={1}
+})";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(kRaggedDotHloString));
+
+  auto status = verifier().Run(module.get()).status();
+  EXPECT_TRUE(status.ok()) << status;
+}
+
+TEST_F(HloVerifierTest, UnaryOpWithResultAccuracy) {
+  constexpr absl::string_view hlo_string = R"(
+  HloModule exponential_hw
+
+  ENTRY exponential_hw {
+    %exponent = f32[] parameter(0)
+    ROOT %exponential = f32[] exponential(f32[] %exponent), result_accuracy={mode=highest}
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+  auto status = verifier().Run(module.get()).status();
+  EXPECT_TRUE(status.ok()) << status;
+}
+
 }  // namespace
 }  // namespace xla

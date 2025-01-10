@@ -29,6 +29,7 @@ limitations under the License.
 
 #include "google/protobuf/any.pb.h"
 #include "absl/time/time.h"
+#include "xla/tsl/protobuf/coordination_config.pb.h"
 #include "tensorflow/core/common_runtime/copy_tensor.h"
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/common_runtime/device_mgr.h"
@@ -54,7 +55,6 @@ limitations under the License.
 #include "tsl/platform/errors.h"
 #include "tsl/platform/macros.h"
 #include "tsl/platform/statusor.h"
-#include "tsl/protobuf/coordination_config.pb.h"
 
 #if !defined(IS_MOBILE_PLATFORM)
 #include "absl/base/thread_annotations.h"
@@ -135,49 +135,6 @@ class XlaKeyValueStore : public xla::KeyValueStoreInterface {
   tsl::CoordinationServiceAgent* coordination_service_agent_;
   std::string key_prefix_;
 };
-
-// Remove LocalDeviceState objects from
-// info->local_device_states that have unique hardware IDs
-// (i.e. ignore duplicate virtual devices) and return them in a map.
-static std::map<int, std::unique_ptr<xla::LocalDeviceState>>
-GetUniqueDeviceStates(PjRtGpuClientCreationInfo* info) {
-  // Only consider each hardware device once. In test environments, one
-  // physical GPU (e.g. hardware_id 0) might be shared as virtual GPUs (e.g.
-  // local_id 0 and 1) by multiple workers (multiple processes on the same
-  // computer). If there is a need to not ignore these for an actual case, a
-  // possible solution is to add a flag to only enable the use of
-  // hardware_id_to_local_id for tests.
-
-  auto input_states = std::move(info->local_device_states);
-
-  absl::flat_hash_map<int, int> hardware_id_to_local_id;
-  for (const auto& id_state : input_states) {
-    int local_id = id_state.second->local_device_id().value();
-    int hardware_id = id_state.second->local_hardware_id().value();
-    if (hardware_id_to_local_id.contains(hardware_id)) {
-      if (hardware_id_to_local_id[hardware_id] > local_id) {
-        // Use the device with the smallest local_id, ignore others.
-        hardware_id_to_local_id[hardware_id] = local_id;
-      }
-    } else {
-      hardware_id_to_local_id[hardware_id] = local_id;
-    }
-  }
-  std::map<int, std::unique_ptr<xla::LocalDeviceState>> local_device_states;
-  for (auto& id_state : input_states) {
-    int local_id = id_state.second->local_device_id().value();
-    int hardware_id = id_state.second->local_hardware_id().value();
-    if (hardware_id_to_local_id[hardware_id] != local_id) {
-      VLOG(1) << "For hardware_id=" << hardware_id
-              << ", ignoring redundant local_id=" << local_id
-              << ". local_id=" << hardware_id_to_local_id[hardware_id]
-              << " will be used instead.";
-      continue;
-    }
-    local_device_states.emplace(id_state.first, std::move(id_state.second));
-  }
-  return local_device_states;
-}
 
 // Coordinate creation of a PjRt GPU client with distributed devices when there
 // are multiple threads (which typically occurs in test environments that use
@@ -319,10 +276,9 @@ absl::Status CreateClientOnce(
 
   auto kv_store =
       std::make_shared<XlaKeyValueStore>(coordination_service_agent);
-  std::map<int, std::unique_ptr<xla::LocalDeviceState>>
-      unique_local_device_states;
+  std::map<int, std::unique_ptr<xla::LocalDeviceState>> local_device_states;
   if (use_creation_info) {
-    unique_local_device_states = GetUniqueDeviceStates(info);
+    local_device_states = std::move(info->local_device_states);
   }
   if (use_creation_info) {
     // Tell any other threads are waiting to call BuildDistributedDevices to
@@ -330,7 +286,7 @@ absl::Status CreateClientOnce(
     creation_state->SetReady();
   }
   auto device_topology_pair = BuildDistributedDevices(
-      platform_name, std::move(unique_local_device_states), node_id, num_nodes,
+      platform_name, std::move(local_device_states), node_id, num_nodes,
       gpu_run_options.get(), kv_store, /*enable_mock_nccl=*/false);
   if (!device_topology_pair.ok()) {
     if (use_creation_info) {
@@ -397,19 +353,19 @@ bool AreLocalDevicesCompatible(const EagerContext* context,
          context->session_options().config.SerializeAsString();
 }
 
-Status AddRemoteDevicesToMgr(const std::vector<string>& added_remote_workers,
-                             WorkerCacheInterface* worker_cache,
-                             DynamicDeviceMgr* remote_device_mgr) {
+absl::Status AddRemoteDevicesToMgr(
+    const std::vector<string>& added_remote_workers,
+    WorkerCacheInterface* worker_cache, DynamicDeviceMgr* remote_device_mgr) {
   std::vector<std::unique_ptr<Device>> remote_devices;
   mutex remote_devices_mu;
   int num_added_workers = added_remote_workers.size();
   BlockingCounter counter(num_added_workers);
-  std::vector<Status> statuses(num_added_workers);
+  std::vector<absl::Status> statuses(num_added_workers);
   for (int i = 0; i < num_added_workers; i++) {
     NewRemoteDevices(
         Env::Default(), worker_cache, added_remote_workers[i],
         [i, &statuses, &counter, &remote_devices, &remote_devices_mu](
-            const Status& s, std::vector<Device*>* devices) {
+            const absl::Status& s, std::vector<Device*>* devices) {
           statuses[i] = s;
           if (s.ok()) {
             mutex_lock l(remote_devices_mu);
@@ -429,9 +385,10 @@ Status AddRemoteDevicesToMgr(const std::vector<string>& added_remote_workers,
   return absl::OkStatus();
 }
 
-Status GetAllRemoteDevices(const std::vector<string>& remote_workers,
-                           WorkerCacheInterface* worker_cache,
-                           std::unique_ptr<DynamicDeviceMgr>* device_mgr) {
+absl::Status GetAllRemoteDevices(
+    const std::vector<string>& remote_workers,
+    WorkerCacheInterface* worker_cache,
+    std::unique_ptr<DynamicDeviceMgr>* device_mgr) {
   auto remote_device_mgr = std::make_unique<DynamicDeviceMgr>();
   TF_RETURN_IF_ERROR(AddRemoteDevicesToMgr(remote_workers, worker_cache,
                                            remote_device_mgr.get()));
@@ -439,7 +396,7 @@ Status GetAllRemoteDevices(const std::vector<string>& remote_workers,
   return absl::OkStatus();
 }
 
-Status RemoveRemoteDevicesFromMgr(
+absl::Status RemoveRemoteDevicesFromMgr(
     const std::vector<string>& removed_remote_workers,
     DynamicDeviceMgr* remote_device_mgr) {
   const std::vector<Device*> remote_devices =
@@ -457,8 +414,9 @@ Status RemoveRemoteDevicesFromMgr(
   return absl::OkStatus();
 }
 
-Status ListRemoteWorkers(ServerInterface* server, const string& local_worker,
-                         std::vector<string>* remote_workers) {
+absl::Status ListRemoteWorkers(ServerInterface* server,
+                               const string& local_worker,
+                               std::vector<string>* remote_workers) {
   server->master_env()->worker_cache->ListWorkers(remote_workers);
   remote_workers->erase(
       std::remove(remote_workers->begin(), remote_workers->end(), local_worker),
@@ -499,13 +457,13 @@ void DifferentiateWorkerLists(const std::vector<string>* current_list,
   existing->resize(existing_it - existing->begin());
 }
 
-Status GetReplacedFromExistingWorkers(
+absl::Status GetReplacedFromExistingWorkers(
     const std::vector<string>* existing_workers, uint64 context_id,
     uint64 context_view_id, const ServerDef& server_def,
     eager::EagerClientCache* client_cache,
     std::vector<string>* replaced_workers) {
   BlockingCounter counter(existing_workers->size());
-  std::vector<Status> statuses(existing_workers->size());
+  std::vector<absl::Status> statuses(existing_workers->size());
   eager::KeepAliveRequest request;
   request.set_context_id(context_id);
   std::vector<eager::KeepAliveResponse> responses(existing_workers->size());
@@ -517,11 +475,12 @@ Status GetReplacedFromExistingWorkers(
       counter.DecrementCount();
       continue;
     }
-    eager_client->KeepAliveAsync(&request, &responses[i],
-                                 [i, &statuses, &counter](const Status& s) {
-                                   statuses[i] = s;
-                                   counter.DecrementCount();
-                                 });
+    eager_client->KeepAliveAsync(
+        &request, &responses[i],
+        [i, &statuses, &counter](const absl::Status& s) {
+          statuses[i] = s;
+          counter.DecrementCount();
+        });
   }
   counter.Wait();
   for (int i = 0; i < existing_workers->size(); i++) {
@@ -537,7 +496,7 @@ Status GetReplacedFromExistingWorkers(
   return absl::OkStatus();
 }
 
-Status CreateRemoteContexts(
+absl::Status CreateRemoteContexts(
     EagerContext* context, const std::vector<string>& remote_workers,
     uint64 context_id, uint64 context_view_id, int keep_alive_secs,
     const ServerDef& server_def, eager::EagerClientCache* remote_eager_workers,
@@ -545,7 +504,7 @@ Status CreateRemoteContexts(
     int64_t init_timeout_in_ms, int retries, bool clear_existing_contexts) {
   int num_remote_workers = remote_workers.size();
   BlockingCounter counter(num_remote_workers);
-  std::vector<Status> statuses(num_remote_workers);
+  std::vector<absl::Status> statuses(num_remote_workers);
   for (int i = 0; i < num_remote_workers; i++) {
     const string& remote_worker = remote_workers[i];
     DeviceNameUtils::ParsedName parsed_name;
@@ -598,7 +557,7 @@ Status CreateRemoteContexts(
 
     eager_client->CreateContextAsync(
         &request, response,
-        [i, &statuses, &counter, response](const Status& s) {
+        [i, &statuses, &counter, response](const absl::Status& s) {
           statuses[i] = s;
           delete response;
           counter.DecrementCount();
@@ -615,17 +574,16 @@ Status CreateRemoteContexts(
   return sg.as_summary_status();
 }
 
-Status UpdateRemoteContexts(EagerContext* context,
-                            const std::vector<string>& remote_workers,
-                            const std::vector<string>& added_workers,
-                            const std::vector<string>& removed_workers,
-                            uint64 context_id, uint64 context_view_id,
-                            const ServerDef& server_def,
-                            eager::EagerClientCache* remote_eager_workers,
-                            const eager::CreateContextRequest& base_request) {
+absl::Status UpdateRemoteContexts(
+    EagerContext* context, const std::vector<string>& remote_workers,
+    const std::vector<string>& added_workers,
+    const std::vector<string>& removed_workers, uint64 context_id,
+    uint64 context_view_id, const ServerDef& server_def,
+    eager::EagerClientCache* remote_eager_workers,
+    const eager::CreateContextRequest& base_request) {
   int num_remote_workers = remote_workers.size();
   BlockingCounter counter(num_remote_workers);
-  std::vector<Status> statuses(num_remote_workers);
+  std::vector<absl::Status> statuses(num_remote_workers);
 
   int cluster_device_count = base_request.cluster_device_attributes_size();
   std::unordered_set<string> added_or_removed(added_workers.begin(),
@@ -705,7 +663,7 @@ Status UpdateRemoteContexts(EagerContext* context,
 
     eager_client->UpdateContextAsync(
         &request, response,
-        [i, &statuses, &counter, response](const Status& s) {
+        [i, &statuses, &counter, response](const absl::Status& s) {
           statuses[i] = s;
           delete response;
           counter.DecrementCount();
@@ -718,11 +676,11 @@ Status UpdateRemoteContexts(EagerContext* context,
   return absl::OkStatus();
 }
 
-Status UpdateContextWithServerDef(EagerContext* context,
-                                  const ServerDef& server_def,
-                                  bool reset_context, int keep_alive_secs,
-                                  int64_t init_timeout_in_ms, int retries,
-                                  bool clear_existing_contexts = false) {
+absl::Status UpdateContextWithServerDef(EagerContext* context,
+                                        const ServerDef& server_def,
+                                        bool reset_context, int keep_alive_secs,
+                                        int64_t init_timeout_in_ms, int retries,
+                                        bool clear_existing_contexts = false) {
   string worker_name =
       strings::StrCat("/job:", server_def.job_name(),
                       "/replica:0/task:", server_def.task_index());
@@ -867,7 +825,7 @@ Status UpdateContextWithServerDef(EagerContext* context,
   }
 
   // Initialize remote eager workers.
-  Status reset_context_status = absl::OkStatus();
+  absl::Status reset_context_status = absl::OkStatus();
   if (reset_context) {
     reset_context_status = CreateRemoteContexts(
         context, remote_workers, context_id, context_view_id, keep_alive_secs,
@@ -964,7 +922,7 @@ Status UpdateContextWithServerDef(EagerContext* context,
 }
 }  // namespace
 
-Status EagerContextDistributedManager::SetOrUpdateServerDef(
+absl::Status EagerContextDistributedManager::SetOrUpdateServerDef(
     const ServerDef& server_def, bool reset_context, int keep_alive_secs,
     int64_t init_timeout_in_ms, int retries, bool clear_existing_contexts) {
   if (server_def.has_cluster_device_filters()) {
@@ -990,9 +948,9 @@ Status EagerContextDistributedManager::SetOrUpdateServerDef(
                       "when updating the server def.";
     }
   }
-  Status s = UpdateContextWithServerDef(context_, server_def, reset_context,
-                                        keep_alive_secs, init_timeout_in_ms,
-                                        retries, clear_existing_contexts);
+  absl::Status s = UpdateContextWithServerDef(
+      context_, server_def, reset_context, keep_alive_secs, init_timeout_in_ms,
+      retries, clear_existing_contexts);
   if (!s.ok()) {
     coordination_service_agent_ = nullptr;
     return s;
@@ -1005,7 +963,7 @@ Status EagerContextDistributedManager::SetOrUpdateServerDef(
   return absl::OkStatus();
 }
 
-Status EagerContextDistributedManager::InitializeLocalOnlyContext(
+absl::Status EagerContextDistributedManager::InitializeLocalOnlyContext(
     const ServerDef& server_def, int keep_alive_secs) {
   string worker_name =
       strings::StrCat("/job:", server_def.job_name(),
@@ -1073,7 +1031,7 @@ Status EagerContextDistributedManager::InitializeLocalOnlyContext(
   return absl::OkStatus();
 }
 
-Status EagerContextDistributedManager::EnableCollectiveOps(
+absl::Status EagerContextDistributedManager::EnableCollectiveOps(
     const ServerDef& server_def) {
   ServerInterface* server = context_->GetServer();
   if (server == nullptr) {
@@ -1096,7 +1054,7 @@ Status EagerContextDistributedManager::EnableCollectiveOps(
       LOG_AND_RETURN_IF_ERROR(session_mgr->CreateSession(
           session_name, server_def,
           context_->session_options().config.isolate_session_state(),
-          [this](Status s) {
+          [this](absl::Status s) {
             context_->GetCollectiveExecutorHandle()->get()->StartAbort(s);
           }));
       LOG_AND_RETURN_IF_ERROR(
@@ -1114,13 +1072,15 @@ Status EagerContextDistributedManager::EnableCollectiveOps(
               absl::StatusOr<absl::Time> time_or_status) {
             if (time_or_status.ok()) {
               const auto coord_task = coord_agent->GetOwnTask().value();
-              Status s = coord_agent->InsertKeyValue(
+              absl::Status s = coord_agent->InsertKeyValue(
                   "TF_DEFAULT_PREEMPTION_NOTICE_KEY",
                   absl::StrCat("/job:", coord_task.job_name(),
                                "/task:", coord_task.task_id()));
               if (!s.ok()) {
-                LOG(INFO) << "Preemption not exported to coordination service: "
-                          << s;
+                // Dev note: `ALREADY_EXISTS` errors are expected if multiple
+                // workers receive a SIGTERM.
+                VLOG(3) << "Preemption not exported to coordination service: "
+                        << s;
               }
             }
           });
@@ -1191,7 +1151,7 @@ Status EagerContextDistributedManager::EnableCollectiveOps(
   return absl::OkStatus();
 }
 
-Status EagerContextDistributedManager::CheckRemoteAlive(
+absl::Status EagerContextDistributedManager::CheckRemoteAlive(
     const std::string& remote_task_name, bool* is_alive) {
   *is_alive = false;
   WorkerInterface* wi =
@@ -1205,10 +1165,10 @@ Status EagerContextDistributedManager::CheckRemoteAlive(
 
   GetStatusRequest request;
   GetStatusResponse response;
-  Status remote_status;
+  absl::Status remote_status;
   Notification done;
   wi->GetStatusAsync(/*opts_=*/nullptr, &request, &response, /*fail_fast=*/true,
-                     [&remote_status, &done](const Status& s) {
+                     [&remote_status, &done](const absl::Status& s) {
                        remote_status = s;
                        done.Notify();
                      });

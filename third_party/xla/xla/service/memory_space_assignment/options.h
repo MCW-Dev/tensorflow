@@ -30,8 +30,8 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/service/buffer_value.h"
-#include "xla/service/heap_simulator/heap_simulator.h"
 #include "xla/service/hlo_value.h"
+#include "xla/service/memory_space_assignment/allocation_value.h"
 #include "xla/service/memory_space_assignment/buffer_interval_comparator.h"
 #include "xla/service/memory_space_assignment/cost_analysis.h"
 #include "xla/service/memory_space_assignment/memory_space_assignment.pb.h"
@@ -57,9 +57,18 @@ using ReservedScopedMemoryFunction = std::function<int64_t(
     const absl::flat_hash_set<ShapeIndex>& /*outputs_in_alternate_memory*/)>;
 using PositionRequiresContiguousAllocationFunction =
     std::function<bool(const HloPosition&)>;
+using WindowPrefetchDetailFunction =
+    std::function<WindowPrefetchDetail(const HloInstruction*)>;
+using WindowPrefetchNotifyOperandAppendedFunction =
+    std::function<void(HloInstruction*, int64_t, int64_t)>;
+using IsAsyncSliceImplementedFunction =
+    std::function<bool(const HloInstruction*)>;
 
 // The different options to be passed to the Run() API.
 struct Options {
+  // The backend-specific integer value that describes the default memory.
+  int64_t default_memory_space = 0;
+
   // Backend-specific integer value that describes the alternate memory.
   int64_t alternate_memory_space = 0;
 
@@ -99,7 +108,9 @@ struct Options {
           [](const HloPosition&) { return true; };
 
   // This function returns the amount of scoped memory in bytes that should be
-  // reserved during the execution of this instruction.
+  // reserved during the execution of this instruction. Note that the
+  // `operands_in_alternate_memory` also includes the window prefetched
+  // operands.
   ReservedScopedMemoryFunction reserved_scoped_memory_fn =
       [](const HloInstruction*,
          const absl::flat_hash_set<
@@ -110,6 +121,32 @@ struct Options {
   PositionRequiresContiguousAllocationFunction
       position_requires_contiguous_allocation_fn =
           [](const HloPosition&) { return false; };
+
+  // This function is called to get details about window prefetches.
+  WindowPrefetchDetailFunction window_prefetch_detail_fn =
+      [](const HloInstruction*) { return WindowPrefetchDetail(); };
+
+  // This function is called to notify that an operand has been appended as a
+  // window prefetch buffer.
+  WindowPrefetchNotifyOperandAppendedFunction notify_operand_appended_fn =
+      [](HloInstruction*, int64_t, int64_t) {};
+
+  // This function can be used to check if an equivalent asynchronous slice
+  // lowering is implemented for a given  synchronous slice instruction.
+  IsAsyncSliceImplementedFunction is_async_slice_implemented_fn =
+      [](const HloInstruction*) { return false; };
+
+  // Should only be used for testing purposes. This function allows us to
+  // modify the AllocationResult after the AllocationRequest has been processed
+  // by AllocateSegment().
+  std::function<void(const AllocationRequest&, AllocationResult&)>
+      allocation_result_modifier_testing_fn = nullptr;
+
+  // Should only be used for testing purposes. This function allows us to
+  // modify the AllocationRequest before the AllocationRequest is passed to
+  // AllocateSegment().
+  std::function<void(AllocationRequest&)>
+      allocation_request_modifier_testing_fn = nullptr;
 
   // If true, we will try to reduce scoped allocation buffer size for all
   // instructions if their operand/output has been allocated in alternate
@@ -147,10 +184,6 @@ struct Options {
   // This is only useful for testing, repack after every allocation.
   bool repack_after_every_allocation = false;
 
-  // If true, tries allocating buffers across (e.g., before and inside a while
-  // loop body) sequential calls (kWhile, kCall, and kConditional).
-  bool allocate_across_sequential_calls = false;
-
   // If true, verifies the memory space assignment against overlapping
   // buffers.
   bool verify = false;
@@ -176,6 +209,11 @@ struct Options {
   // TODO(tjablin): Use a heuristic to determine this automatically.
   int max_cross_program_prefetches = 1;
 
+  // If false, we assume tensors that we couldn't explicitly determine to be
+  // activations are activations. If true, we assume these aren't activations,
+  // so they may be cross-program-prefetch candidates.
+  bool cross_program_prefetch_permissive_mode = false;
+
   // Enable redundant eviction optimization in/around while loops. If enabled,
   // this optimization would keep a copy of the buffer in the default memory in
   // addition to alternate memory to eliminate redundant evictions.
@@ -191,6 +229,18 @@ struct Options {
 
   // If true, enforces the FIFO order for prefetches.
   bool enforce_prefetch_fifo_order = false;
+
+  // If true, tries to replace synchronous copy instructions with asynchronous
+  // ones. If it fails to replace the copy, it keeps the sync version.
+  bool enable_sync_copy_replacement = false;
+
+  // If true, tries to replace synchronous slice instructions with asynchronous
+  // ones. If it fails to replace the slice, it keeps the sync version.
+  bool enable_sync_slice_replacement = false;
+
+  // If non-zero, this is the number of extra outstanding async copies that we
+  // allow for each sync mem op that is converted to an async mem op.
+  int extend_async_copies_limit_for_sync_mem_op_conversion = 0;
 
   // The ratio of use bytes to copy bytes for a given allocation site below
   // which we consider the site to be inefficient. A value of 0 would treat all
@@ -229,6 +279,15 @@ struct Options {
   // Option to always spill buffers from alternate memory to default memory
   // and prefetching back to alternate memory(if needed) just in time for use.
   bool always_spill_to_default_memory = false;
+
+  // If true, enables window prefetching. Window prefetching is a mechanism
+  // where we prefetch windows of data into the alternate memory before the
+  // first use of the buffer. This allows large tensors to be prefetched as well
+  // and gives MSA more flexibility in choosing the prefetch time and how much
+  // data to prefetch.
+  bool enable_window_prefetch = false;
+
+  MsaSortOrderOverrides msa_sort_order_overrides;
 };
 }  // namespace memory_space_assignment
 }  // namespace xla

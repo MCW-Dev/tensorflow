@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
@@ -38,7 +39,8 @@ namespace xla::gpu {
 class CommandBufferThunk : public Thunk {
  public:
   CommandBufferThunk(CommandBufferCmdSequence commands, ThunkInfo thunk_info,
-                     std::unique_ptr<SequentialThunk> thunks = nullptr);
+                     std::unique_ptr<SequentialThunk> thunks = nullptr,
+                     bool enable_command_buffers_during_profiling = false);
 
   const std::unique_ptr<SequentialThunk>& thunks() const { return thunks_; }
 
@@ -52,6 +54,8 @@ class CommandBufferThunk : public Thunk {
   // buffer but will be consumed by non-command buffer operations.
   absl::StatusOr<se::DeviceMemoryBase> GetCommandBufferAllocationAddress(
       const ExecuteParams& params, int64_t index);
+
+  void ForAllThunks(absl::FunctionRef<void(const Thunk*)> fn) const override;
 
  private:
   // Command buffer instantiated on a `se::StreamExecutor` instance, and
@@ -127,6 +131,10 @@ class CommandBufferThunk : public Thunk {
   // thunk mechanism. We use it as a fallback mechanism to work around CUPTI
   // bugs that lead to memory corruption when CUPTI traces CUDA graph execution.
   std::unique_ptr<SequentialThunk> thunks_;
+
+  // When true, allows command buffers to be used while profiling active.
+  // TODO(b/355487968): Remove this option when validation complete.
+  bool enable_command_buffers_during_profiling_;
 
   // Command buffer thunk state allocated in heap to allow global (per-process)
   // management of instantiated command buffers.

@@ -15,25 +15,30 @@ limitations under the License.
 
 #include "xla/backends/profiler/gpu/cupti_tracer.h"
 
-#include <cstdint>
+#include <algorithm>
+#include <list>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/log.h"
 #include "absl/types/span.h"
+#include "third_party/gpus/cuda/extras/CUPTI/include/cupti_activity.h"
+#include "third_party/gpus/cuda/extras/CUPTI/include/cupti_result.h"
 #include "third_party/gpus/cuda/extras/CUPTI/include/generated_nvtx_meta.h"
 #include "third_party/gpus/cuda/include/cuda.h"
+#include "xla/backends/profiler/gpu/cupti_buffer_events.h"
 #include "xla/backends/profiler/gpu/cupti_collector.h"
 #include "xla/backends/profiler/gpu/cupti_interface.h"
 #include "xla/backends/profiler/gpu/nvtx_utils.h"
+#include "xla/tsl/profiler/backends/cpu/annotation_stack.h"
+#include "xla/tsl/profiler/utils/per_thread.h"
 #include "tsl/platform/env.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/host_info.h"
 #include "tsl/platform/logging.h"
-#include "tsl/platform/macros.h"
-#include "tsl/platform/mem.h"
-#include "tsl/profiler/backends/cpu/annotation_stack.h"
-#include "tsl/profiler/utils/per_thread.h"
 
 namespace xla {
 namespace profiler {
@@ -75,6 +80,11 @@ inline void LogIfError(const absl::Status &status) {
   if (status.ok()) return;
   LOG(ERROR) << status.message();
 }
+
+// CUPTI_ERROR_INSUFFICIENT_PRIVILEGES is introduced at CUDA 10.1.
+#if CUDA_VERSION <= 10000
+#define CUPTI_ERROR_INSUFFICIENT_PRIVILEGES 35
+#endif
 
 #define RETURN_IF_CUPTI_ERROR(expr)                                         \
   do {                                                                      \
@@ -668,7 +678,9 @@ static void SetCallbackEventUponApiExit(CuptiTracerEvent &event,
                                         uint64_t start_tsc, uint64_t end_tsc) {
   switch (cbid) {
     case CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel:
+#if CUDA_VERSION >= 11080  // CUDA 11.8
     case CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx:
+#endif  // CUDA_VERSION >= 11080
     case CUPTI_DRIVER_TRACE_CBID_cuLaunchCooperativeKernel:
     case CUPTI_DRIVER_TRACE_CBID_cuLaunchCooperativeKernelMultiDevice:
       SetKernelEventUponApiExit(event, device_id, cbdata, start_tsc, end_tsc);
@@ -795,14 +807,42 @@ class GuardedCallbackAnnotationsAndEvents {
     annotations_and_events_.Clear();
   }
 
+  void IncNumDroppedEvents() {
+    tsl::mutex_lock lock(mu_);
+    annotations_and_events_.IncNumDroppedEvents();
+  }
+
+  void Push(const CuptiTracer &tracer, CuptiTracerEvent &&event) {
+    tsl::mutex_lock lock(mu_);
+    // Some logic change as no cross thread string comparison should be
+    // made here. The max_annotation_string is used to limit per-thread
+    // annotation string count. And annotation string is not collected
+    // if total callback event count overflow.
+    bool too_many_annotations = tracer.TooManyAnnotationStrings(
+        annotations_and_events_.NumAnnotations());
+    event.annotation = annotations_and_events_.DedupAnnotation(
+        too_many_annotations ? absl::string_view() : event.annotation),
+    event.nvtx_range = annotations_and_events_.DedupNvtxRange(
+        too_many_annotations ? absl::string_view() : event.nvtx_range);
+    annotations_and_events_.event_queue().Push(std::move(event));
+  }
+
+  void AddScopeRangeIdSequence(absl::Span<const int64_t> sequence) {
+    if (sequence.size() > 1) {
+      const int64_t *head = sequence.data();
+      const int64_t *curr = &sequence.back();
+
+      tsl::mutex_lock lock(mu_);
+      ScopeRangeIdTree &tree = annotations_and_events_.scope_range_id_tree();
+      for (; curr > head && !tree.contains(*curr); --curr) {
+        tree.emplace(*curr, *(curr - 1));
+      }
+    }
+  }
+
  private:
   tsl::mutex mu_;
   CallbackAnnotationsAndEvents annotations_and_events_ TF_GUARDED_BY(mu_);
-
-  friend absl::Status AddDriverApiCallbackEvent(
-      CuptiTracer *tracer, CuptiInterface *cupti_interface, int device_id,
-      uint64_t start_tsc, uint64_t end_tsc, CUpti_CallbackDomain domain,
-      CUpti_CallbackId cbid, const CUpti_CallbackData *cbdata);
 };
 
 using PerThreadCallbackAnnotationsAndEvents =
@@ -814,44 +854,23 @@ absl::Status AddDriverApiCallbackEvent(
     CUpti_CallbackId cbid, const CUpti_CallbackData *cbdata) {
   absl::string_view annotation = AnnotationStack::Get();
   absl::string_view nvtx_range = "";
-  if (!annotation.empty() &&
-      cbid != CUPTI_DRIVER_TRACE_CBID_cuLaunchCooperativeKernelMultiDevice) {
-    nvtx_range = NVTXRangeTracker::CurrentRange();
-  }
-
-  // Thread under tracing try the lock, most of the time, it should get it
-  // immediately. Once it found the lock is occupied by others, it could treat
-  // the tracing could be stopped, just ignore adding more event.
   auto &guarded_annotations_and_events =
       PerThreadCallbackAnnotationsAndEvents::Get();
-  tsl::mutex_lock lock(guarded_annotations_and_events.mu_,
-                       std::try_to_lock_t());
-  if (!(bool)lock) return absl::OkStatus();
-  auto &annotations_and_events =
-      guarded_annotations_and_events.annotations_and_events_;
-
   if (tracer->TooManyCallbackEvents()) {
-    annotations_and_events.IncNumDroppedEvents();
+    guarded_annotations_and_events.IncNumDroppedEvents();
     return absl::OkStatus();
   }
   tracer->IncCallbackEventCount();
-
-  // Some logic change as no cross thread string comparison should be
-  // made here. The max_annotation_string is used to limit per-thread
-  // annotation string count. And annotation string is not collected
-  // if total callback event count overflow.
-  bool too_many_annotations =
-      tracer->TooManyAnnotationStrings(annotations_and_events.NumAnnotations());
-  annotation = annotations_and_events.DedupAnnotation(
-      too_many_annotations ? absl::string_view() : annotation),
-  nvtx_range = annotations_and_events.DedupNvtxRange(
-      too_many_annotations ? absl::string_view() : nvtx_range);
-  CuptiTracerEvent event{.annotation = annotation,
-                         .nvtx_range = nvtx_range,
-                         .correlation_id = cbdata->correlationId};
+  absl::Span<const int64_t> range_ids = AnnotationStack::GetScopeRangeIds();
+  guarded_annotations_and_events.AddScopeRangeIdSequence(range_ids);
+  CuptiTracerEvent event{};
+  event.correlation_id = cbdata->correlationId;
+  event.annotation = annotation;
+  event.nvtx_range = nvtx_range;
+  event.scope_range_id = range_ids.empty() ? 0 : range_ids.back();
   SetCallbackEventUponApiExit(event, cupti_interface, device_id, cbid, cbdata,
                               start_tsc, end_tsc);
-  annotations_and_events.event_queue().Push(std::move(event));
+  guarded_annotations_and_events.Push(*tracer, std::move(event));
   return absl::OkStatus();
 }
 
@@ -925,9 +944,9 @@ class CuptiDriverApiHookWithActivityApi : public CuptiDriverApiHook {
 
 absl::Span<const uint32_t> GetCudaGraphTracingResourceCbids() {
 #if CUDA_VERSION >= 11070
-  constexpr uint32_t res_cbids[] = {CUPTI_CBID_RESOURCE_GRAPH_CREATED,
-                                    CUPTI_CBID_RESOURCE_GRAPH_CLONED,
-                                    CUPTI_CBID_RESOURCE_GRAPHEXEC_CREATED};
+  static constexpr uint32_t res_cbids[] = {
+      CUPTI_CBID_RESOURCE_GRAPH_CREATED, CUPTI_CBID_RESOURCE_GRAPH_CLONED,
+      CUPTI_CBID_RESOURCE_GRAPHEXEC_CREATED};
   return absl::MakeSpan(res_cbids);
 #else
   return absl::Span<const uint32_t>();
@@ -972,6 +991,12 @@ const char *GetTraceEventTypeName(const CuptiTracerEventType &type) {
       return "HostUnregister";
     case CuptiTracerEventType::CudaGraph:
       return "CudaGraph";
+    case CuptiTracerEventType::ThreadMarkerRange:
+      return "ThreadMarkerRange";
+    case CuptiTracerEventType::ThreadMarkerStart:
+      return "ThreadMarkerStart";
+    case CuptiTracerEventType::ThreadMarkerEnd:
+      return "ThreadMarkerEnd";
     case CuptiTracerEventType::Unsupported:
       return "";
   }
@@ -1009,8 +1034,21 @@ void CuptiTracer::Enable(const CuptiTracerOptions &option,
   option_ = option;
   collector_ = collector;
 
+  // For nvtx tracking, utilize CUPTI activity marker and marker_data.
+  if (option_->enable_nvtx_tracking) {
+    std::vector<CUpti_ActivityKind> &activities = option_->activities_selected;
+    if (std::find(activities.begin(), activities.end(),
+                  CUPTI_ACTIVITY_KIND_MARKER) == activities.end()) {
+      VLOG(1) << "Adding CUPTI_ACTIVITY_KIND_MARKER to activities:"
+              << (int)CUPTI_ACTIVITY_KIND_MARKER;
+      activities.push_back(CUPTI_ACTIVITY_KIND_MARKER);
+    }
+    // TODO: Add CUPTI_ACTIVITY_KIND_MARKER_DATA to activities after cupti
+    // more detailed data could be provided by cupti.
+  }
+
   cupti_driver_api_hook_ = std::make_unique<CuptiDriverApiHookWithActivityApi>(
-      option, cupti_interface_, this);
+      *option_, cupti_interface_, this);
 
   absl::Status status = EnableApiTracing();
   need_root_access_ |= status.code() == tsl::error::PERMISSION_DENIED;
@@ -1027,10 +1065,21 @@ void CuptiTracer::Disable() {
   Finalize().IgnoreError();
   cupti_driver_api_hook_->SyncAndFlush().IgnoreError();
 
+  collector_->SetTracingEndTimeNs(GetTimestamp());
+
+  // The callback API events must be processed before activity API buffers
+  // because the AnnotationMap is populated from the callback API events and
+  // queried by the activity API events.
   collector_->OnTracerCollectedCallbackData(
-      GatherCallbackAnnotationsAndEvents(),
-      option_.has_value() ? option_->required_callback_api_events : false);
-  collector_->OnTracerCachedActivityBuffers(std::move(activity_buffers_));
+      GatherCallbackAnnotationsAndEvents(/*stop_recording=*/true),
+      IsCallbackApiEventsRequired());
+
+  if (activity_buffers_) {
+    auto cached_buffers = activity_buffers_->PopCachedBuffers();
+    activity_buffers_.reset();
+    collector_->OnTracerCachedActivityBuffers(std::move(cached_buffers));
+  }
+
   if (cupti_dropped_activity_event_count_ > 0) {
     collector_->OnEventsDropped("Activity Event dropped by Cupti Lib:",
                                 cupti_dropped_activity_event_count_);
@@ -1045,6 +1094,41 @@ void CuptiTracer::Disable() {
   option_.reset();
   cupti_driver_api_hook_.reset();
   tsl::profiler::AnnotationStack::Enable(false);
+}
+
+absl::Status CuptiTracer::FlushEventsToCollector() {
+  if (!api_tracing_enabled_ && !activity_tracing_enabled_)
+    return absl::OkStatus();
+
+  // Need get the cached activity buffers first, but send to collector after
+  // the callback events are processed.
+  std::list<CuptiActivityBufferManager::ActivityBufferAndSize> cached_buffers;
+  if (activity_tracing_enabled_) {
+    cached_buffers = activity_buffers_->PopCachedBuffers();
+  }
+
+  if (api_tracing_enabled_) {
+    collector_->OnTracerCollectedCallbackData(
+        GatherCallbackAnnotationsAndEvents(/*stop_recording=*/false),
+        IsCallbackApiEventsRequired());
+  }
+
+  collector_->OnTracerCachedActivityBuffers(std::move(cached_buffers));
+  return absl::OkStatus();
+}
+
+absl::Status CuptiTracer::SetActivityFlushPeriod(uint32_t period_ms) {
+  if (activity_tracing_enabled_) {
+    LOG(INFO) << "Set CUPTI activity flush period to " << period_ms << "ms.";
+    RETURN_IF_CUPTI_ERROR(cupti_interface_->SetActivityFlushPeriod(period_ms));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status CuptiTracer::FlushActivityBuffers() {
+  // Not forced flush. Only flush completed activity buffers.
+  RETURN_IF_CUPTI_ERROR(cupti_interface_->ActivityFlushAll(0));
+  return absl::OkStatus();
 }
 
 // Need to trace graph ids from creation and instantiation.
@@ -1077,10 +1161,10 @@ absl::Status CuptiTracer::EnableApiTracing() {
         1 /* ENABLE */, subscriber_, CUPTI_CB_DOMAIN_DRIVER_API));
   }
 
-  if (option_->enable_nvtx_tracking) {
-    RETURN_IF_CUPTI_ERROR(cupti_interface_->EnableDomain(
-        1 /* ENABLE */, subscriber_, CUPTI_CB_DOMAIN_NVTX));
-  }
+  // There is no easy api to get the domain string from CUPTI_CB_DOMAIN_NVTX
+  // callback. So we use ACTIVIY_MARKERS to get the domain/range_name strings,
+  // and generate the related nvtx range event. So we do not need to use the
+  // CUPTI_CB_DOMAIN_NVTX callback here.
   return absl::OkStatus();
 }
 
@@ -1105,11 +1189,6 @@ absl::Status CuptiTracer::DisableApiTracing() {
         0 /* DISABLE */, subscriber_, CUPTI_CB_DOMAIN_DRIVER_API));
   }
 
-  if (option_->enable_nvtx_tracking) {
-    RETURN_IF_CUPTI_ERROR(cupti_interface_->EnableDomain(
-        0 /* DISABLE */, subscriber_, CUPTI_CB_DOMAIN_NVTX));
-  }
-
   VLOG(1) << "Disable subscriber";
   RETURN_IF_CUPTI_ERROR(cupti_interface_->Unsubscribe(subscriber_));
   return absl::OkStatus();
@@ -1119,6 +1198,14 @@ absl::Status CuptiTracer::EnableActivityTracing() {
   if (activity_tracing_enabled_) return absl::OkStatus();
   PrepareActivityStart();
   if (!option_->activities_selected.empty()) {
+    if (cupti_interface_->SetThreadIdType(
+            CUPTI_ACTIVITY_THREAD_ID_TYPE_SYSTEM) != CUPTI_SUCCESS) {
+      LOG(WARNING)
+          << "Failed to set CUPTI activity thread id type to "
+             "CUPTI_ACTIVITY_THREAD_ID_TYPE_SYSTEM, CUPTI reported thread id "
+             "may be different from system thread id get with gettid()";
+    };
+
     // Initialize callback functions for Cupti Activity API.
     VLOG(1) << "Registering CUPTI activity callbacks";
     if (auto err = cupti_interface_->ActivityUsePerThreadBuffer();
@@ -1182,25 +1269,6 @@ absl::Status CuptiTracer::Finalize() {
   // Return 0 on error. If an activity timestamp is 0, the activity will be
   // dropped during time normalization.
   return 0;
-}
-
-absl::Status CuptiTracer::HandleNVTXCallback(CUpti_CallbackId cbid,
-                                             const CUpti_CallbackData *cbdata) {
-  const CUpti_NvtxData *pdata =
-      reinterpret_cast<const CUpti_NvtxData *>(cbdata);
-  if (cbid == CUPTI_CBID_NVTX_nvtxDomainRangePushEx) {
-    const nvtxDomainRangePushEx_params *params =
-        reinterpret_cast<const nvtxDomainRangePushEx_params *>(
-            pdata->functionParams);
-    // TODO(profiler): The messageType is actually NVTX_MESSAGE_TYPE_REGISTERED
-    // (which is 3), However it seems to me that we can not get the registered
-    // string from nvtxDomainRegisterStringA_params. If we reinterpret the
-    // payload as ascii, it happen to work.
-    NVTXRangeTracker::EnterRange(params->core.eventAttrib->message.ascii);
-  } else if (cbid == CUPTI_CBID_NVTX_nvtxDomainRangePop) {
-    NVTXRangeTracker::ExitRange();
-  }
-  return absl::OkStatus();
 }
 
 // Resource callback happens logically inside a driver API call's enter/exit.
@@ -1267,7 +1335,6 @@ absl::Status CuptiTracer::HandleCallback(CUpti_CallbackDomain domain,
   if (!api_tracing_enabled_) return absl::OkStatus();  // already unsubscribed.
   if (!cupti_driver_api_hook_)
     return absl::OkStatus();  // already unsubscribed.
-  if (domain == CUPTI_CB_DOMAIN_NVTX) return HandleNVTXCallback(cbid, cbdata);
   if (domain == CUPTI_CB_DOMAIN_DRIVER_API)
     return HandleDriverApiCallback(cbid, cbdata);
   if (domain == CUPTI_CB_DOMAIN_RESOURCE)
@@ -1362,8 +1429,11 @@ absl::Status CuptiTracer::ProcessActivityBuffer(CUcontext context,
       collector_->GetOptions().max_activity_api_events;
   if (max_activity_event_count > 0 &&
       num_activity_events_in_cached_buffer_ >= max_activity_event_count) {
-    LOG(WARNING) << "Already too many activity events, drop the buffer of "
-                 << size << "bytes of event to reuse.";
+    LOG_EVERY_N(WARNING, 10000)
+        << "Already too many activity events, drop the buffer of " << size
+        << "bytes of event to reuse. This warning is logged once per 10000 "
+           "occurrences, the current count is "
+        << COUNTER << ".";
     num_activity_events_in_dropped_buffer_ += event_count_in_buffer;
     // buffer will be return to the pool
     return absl::OkStatus();
@@ -1394,9 +1464,12 @@ absl::Status CuptiTracer::ProcessActivityBuffer(CUcontext context,
 }
 
 std::vector<CallbackAnnotationsAndEvents>
-CuptiTracer::GatherCallbackAnnotationsAndEvents() {
+CuptiTracer::GatherCallbackAnnotationsAndEvents(bool stop_recording) {
+  // Note that it is OK to call PerThread<T>'s StartRecording() multiple times
+  // without calling StopRecording().
   auto guarded_collection =
-      PerThreadCallbackAnnotationsAndEvents::StopRecording();
+      stop_recording ? PerThreadCallbackAnnotationsAndEvents::StopRecording()
+                     : PerThreadCallbackAnnotationsAndEvents::StartRecording();
   VLOG(3) << "Total grabbed per thread annotated events buffer: "
           << guarded_collection.size();
 

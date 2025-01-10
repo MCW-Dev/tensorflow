@@ -21,7 +21,6 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -31,7 +30,7 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "llvm/Support/Casting.h"
-#include "third_party/nanobind/include/nanobind/nanobind.h"
+#include "nanobind/nanobind.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/layout.h"
 #include "xla/pjrt/exceptions.h"
@@ -41,6 +40,7 @@ limitations under the License.
 #include "xla/pjrt/pjrt_future.h"
 #include "xla/pjrt/pjrt_layout.h"
 #include "xla/python/ifrt/array.h"
+#include "xla/python/ifrt/attribute_map.h"
 #include "xla/python/ifrt/executable.h"
 #include "xla/python/nb_class_ptr.h"
 #include "xla/python/pjrt_ifrt/pjrt_executable.h"
@@ -148,11 +148,6 @@ class PyLoadedExecutable {
     return ifrt_loaded_executable_;
   }
 
-  absl::Span<const PjRtLoadedExecutable::LogicalDeviceIds>
-  addressable_device_logical_ids() const {
-    return ifrt_loaded_executable_->addressable_device_logical_ids();
-  }
-
   std::vector<nb_class_ptr<PyDevice>> AddressableDevices() const;
 
   int64_t SizeOfGeneratedCodeInBytes() const {
@@ -164,8 +159,7 @@ class PyLoadedExecutable {
     return ifrt_loaded_executable_->GetCompiledMemoryStats();
   }
 
-  absl::StatusOr<absl::flat_hash_map<std::string, PjRtValueType>>
-  GetCostAnalysis() const {
+  absl::StatusOr<xla::ifrt::AttributeMap> GetCostAnalysis() const {
     return ifrt_loaded_executable_->GetCostAnalysis();
   }
 
@@ -192,7 +186,7 @@ class PyLoadedExecutable {
 
   absl::StatusOr<std::vector<std::shared_ptr<HloModule>>> HloModules() const;
 
-  absl::StatusOr<std::vector<std::vector<std::string_view>>>
+  absl::StatusOr<std::vector<std::vector<absl::string_view>>>
   GetOutputMemoryKinds() const;
 
   absl::StatusOr<std::vector<std::unique_ptr<PjRtLayout>>> GetParameterLayouts()
@@ -232,7 +226,7 @@ class PyLoadedExecutable {
     return exec->shared_ptr_pjrt_loaded_executable();
   }
 
-  const ExecuteOptions& options() const { return options_; }
+  const ifrt::ExecuteOptions& options() const { return options_; }
   const std::optional<std::string>& fingerprint() const { return fingerprint_; }
 
   // Keep `obj` alive as long as PyLoadedExecutable.
@@ -251,7 +245,7 @@ class PyLoadedExecutable {
   std::optional<std::string> fingerprint_;
 
   // The options to pass to `executable_.Execute`.
-  ExecuteOptions options_;
+  ifrt::ExecuteOptions options_;
 
   // Python objects to keep alive as requested by user.
   std::vector<nanobind::object> keepalives_;

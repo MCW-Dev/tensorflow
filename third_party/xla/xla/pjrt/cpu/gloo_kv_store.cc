@@ -19,13 +19,12 @@ limitations under the License.
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "third_party/gloo/gloo/rendezvous/store.h"
+#include "gloo/rendezvous/store.h"
 #include "xla/pjrt/distributed/key_value_store_interface.h"
 #include "xla/pjrt/status_casters.h"
 
@@ -39,7 +38,8 @@ GlooKeyValueStore::~GlooKeyValueStore() = default;
 
 void GlooKeyValueStore::set(const std::string& key,
                             const std::vector<char>& data) {
-  ThrowIfError(kv_store_->Set(key, std::string_view(data.data(), data.size())));
+  ThrowIfError(
+      kv_store_->Set(key, absl::string_view(data.data(), data.size())));
 }
 
 std::vector<char> GlooKeyValueStore::get(const std::string& key) {

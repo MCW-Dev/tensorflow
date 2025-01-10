@@ -22,28 +22,19 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/service/gpu/model/hlo_op_profiles.h"
 #include "xla/service/hlo_cost_analysis.h"
-#include "xla/shape.h"
-#include "xla/shape_util.h"
 #include "xla/test_helpers.h"
 #include "xla/tests/hlo_test_base.h"
+#include "xla/xla_data.pb.h"
 #include "tsl/platform/statusor.h"
 
 namespace xla {
 namespace gpu {
 
 class GpuHloCostAnalysisTest : public HloTestBase {
-  HloCostAnalysis::ShapeSizeFunction ShapeSizeBytesFunction() const {
-    return [&](const Shape& shape) {
-      constexpr int64_t kPointerSize = 8;
-      return ShapeUtil::ByteSizeOf(shape, kPointerSize);
-    };
-  }
-
  public:
-  HloCostAnalysis::Options options_{ShapeSizeBytesFunction(),
-                                    /*per_second_rates=*/{},
-                                    /*count_multiple_input_accesses=*/true};
+  HloCostAnalysis::Options options_{.count_multiple_input_accesses = true};
   GpuHloCostAnalysis analysis_{options_};
   GpuHloCostAnalysisTest() : HloTestBase() {}
 };
@@ -317,8 +308,8 @@ f {
   m0 = s8[10] multiply(n0, n0)
   a0 = s8[10] add(n0, n0)
   s0 = s8[5] slice(a0), slice={[0:5]}
-  s1 = s8[2] slice(n0), slice={[4:6]}
-  n1 = s8[2] negate(s1)
+  svar1 = s8[2] slice(n0), slice={[4:6]}
+  n1 = s8[2] negate(svar1)
   ROOT c0 = s8[17] concatenate(s0, m0, n1), dimensions={0}
 }
 
@@ -650,6 +641,52 @@ ENTRY entry_computation {
                                                    output_bytes_accessed);
   EXPECT_EQ(analysis_.flop_count(*reduce), 32 * 39 * 6);
 }
+
+TEST_F(GpuHloCostAnalysisTest, CustomOpProfileIsUsed) {
+  absl::string_view hlo_string = R"(
+HloModule m
+
+ENTRY entry_computation {
+  param_0 = f32[10] parameter(0)
+  param_1 = f32[10] parameter(1)
+  param_2 = f32[10] parameter(2)
+  param_3 = f32[10] parameter(3)
+  tanh = f32[10] tanh(param_0)
+  mul = f32[10] multiply(tanh, param_1)
+  ROOT clamp = f32[10] clamp(mul, param_2, param_3)
+}
+)";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+
+  HloOpProfiles::HloOpProfile hlo_op_profile;
+
+  const int kF32ClampFlopsPerElement = 7;
+  const int kF32MultiplyFlopsPerElement = 11;
+  const int kF32TanhFlopsPerElement = 13;
+
+  const int kNumElements = 10;
+
+  hlo_op_profile[{HloOpcode::kClamp, PrimitiveType::F32}] =
+      kF32ClampFlopsPerElement;
+  hlo_op_profile[{HloOpcode::kMultiply, PrimitiveType::F32}] =
+      kF32MultiplyFlopsPerElement;
+  hlo_op_profile[{HloOpcode::kTanh, PrimitiveType::F32}] =
+      kF32TanhFlopsPerElement;
+
+  GpuHloCostAnalysis analysis(options_, hlo_op_profile);
+  ASSERT_IS_OK(module->entry_computation()->Accept(&analysis));
+
+  const HloInstruction* clamp = module->entry_computation()->root_instruction();
+  const HloInstruction* mul = clamp->operand(0);
+  const HloInstruction* tanh = mul->operand(0);
+
+  EXPECT_EQ(analysis.flop_count(*clamp),
+            kF32ClampFlopsPerElement * kNumElements);
+  EXPECT_EQ(analysis.flop_count(*mul),
+            kF32MultiplyFlopsPerElement * kNumElements);
+  EXPECT_EQ(analysis.flop_count(*tanh), kF32TanhFlopsPerElement * kNumElements);
+};
 
 }  // namespace gpu
 }  // namespace xla

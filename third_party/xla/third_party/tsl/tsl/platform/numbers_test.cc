@@ -18,7 +18,9 @@ limitations under the License.
 #include <cmath>
 #include <string>
 
+#include "absl/strings/str_cat.h"
 #include "tsl/platform/test.h"
+#include "tsl/platform/types.h"
 
 namespace tsl {
 namespace strings {
@@ -26,29 +28,28 @@ namespace strings {
 // NOTE: most of the routines in numbers.h are tested indirectly through
 // strcat_test.cc in this directory.
 
-// Test StrCat of ints and longs of various sizes and signdedness.
+// Test StrCat of ints and longs of various sizes and signedness.
 TEST(FpToString, Ints) {
   for (int s = 0; s < 64; s++) {
     for (int delta = -1; delta <= 1; delta++) {
       uint64 fp = (1ull << s) + delta;
       string s = FpToString(fp);
       uint64 fp2;
-      EXPECT_TRUE(StringToFp(s, &fp2));
+      EXPECT_TRUE(HexStringToUint64(s, &fp2));
       EXPECT_EQ(fp, fp2);
     }
   }
   Fprint dummy;
-  EXPECT_FALSE(StringToFp("", &dummy));
-  EXPECT_FALSE(StringToFp("xyz", &dummy));
-  EXPECT_FALSE(StringToFp("0000000000000000xyz", &dummy));
+  EXPECT_FALSE(HexStringToUint64("", &dummy));
+  EXPECT_FALSE(HexStringToUint64("xyz", &dummy));
+  EXPECT_FALSE(HexStringToUint64("0000000000000000xyz", &dummy));
 }
 
 TEST(Uint64ToHexString, Ints) {
   for (int s = 0; s < 64; s++) {
     for (int delta = -1; delta <= 1; delta++) {
       uint64 fp = (1ull << s) + delta;
-      char buf[kFastToBufferSize];
-      StringPiece s = Uint64ToHexString(fp, buf);
+      std::string s = absl::StrCat(absl::Hex(fp, absl::kZeroPad16));
       uint64 fp2;
       EXPECT_TRUE(HexStringToUint64(s, &fp2));
       EXPECT_EQ(fp, fp2) << s;
@@ -145,11 +146,11 @@ TEST(safe_strto32, Int32s) {
   EXPECT_EQ(false, safe_strto32("-2147483649", &result));
 
   // Check that the StringPiece's length is respected.
-  EXPECT_EQ(true, safe_strto32(StringPiece("123", 1), &result));
+  EXPECT_EQ(true, safe_strto32(absl::string_view("123", 1), &result));
   EXPECT_EQ(1, result);
-  EXPECT_EQ(true, safe_strto32(StringPiece(" -123", 4), &result));
+  EXPECT_EQ(true, safe_strto32(absl::string_view(" -123", 4), &result));
   EXPECT_EQ(-12, result);
-  EXPECT_EQ(false, safe_strto32(StringPiece(nullptr, 0), &result));
+  EXPECT_EQ(false, safe_strto32(absl::string_view(nullptr, 0), &result));
 }
 
 TEST(safe_strtou32, UInt32s) {
@@ -178,11 +179,11 @@ TEST(safe_strtou32, UInt32s) {
   EXPECT_FALSE(safe_strtou32("-1", &result));
 
   // Check that the StringPiece's length is respected.
-  EXPECT_TRUE(safe_strtou32(StringPiece("123", 1), &result));
+  EXPECT_TRUE(safe_strtou32(absl::string_view("123", 1), &result));
   EXPECT_EQ(1, result);
-  EXPECT_TRUE(safe_strtou32(StringPiece(" 123", 3), &result));
+  EXPECT_TRUE(safe_strtou32(absl::string_view(" 123", 3), &result));
   EXPECT_EQ(12, result);
-  EXPECT_FALSE(safe_strtou32(StringPiece(nullptr, 0), &result));
+  EXPECT_FALSE(safe_strtou32(absl::string_view(nullptr, 0), &result));
 }
 
 TEST(safe_strto64, Int64s) {
@@ -214,11 +215,11 @@ TEST(safe_strto64, Int64s) {
   EXPECT_EQ(false, safe_strto64("-9223372036854775809", &result));
 
   // Check that the StringPiece's length is respected.
-  EXPECT_EQ(true, safe_strto64(StringPiece("123", 1), &result));
+  EXPECT_EQ(true, safe_strto64(absl::string_view("123", 1), &result));
   EXPECT_EQ(1, result);
-  EXPECT_EQ(true, safe_strto64(StringPiece(" -123", 4), &result));
+  EXPECT_EQ(true, safe_strto64(absl::string_view(" -123", 4), &result));
   EXPECT_EQ(-12, result);
-  EXPECT_EQ(false, safe_strto64(StringPiece(nullptr, 0), &result));
+  EXPECT_EQ(false, safe_strto64(absl::string_view(nullptr, 0), &result));
 }
 
 TEST(safe_strtou64, UInt64s) {
@@ -249,11 +250,11 @@ TEST(safe_strtou64, UInt64s) {
   EXPECT_FALSE(safe_strtou64("-1", &result));
 
   // Check that the StringPiece's length is respected.
-  EXPECT_TRUE(safe_strtou64(StringPiece("123", 1), &result));
+  EXPECT_TRUE(safe_strtou64(absl::string_view("123", 1), &result));
   EXPECT_EQ(1, result);
-  EXPECT_TRUE(safe_strtou64(StringPiece(" 123", 3), &result));
+  EXPECT_TRUE(safe_strtou64(absl::string_view(" 123", 3), &result));
   EXPECT_EQ(12, result);
-  EXPECT_FALSE(safe_strtou64(StringPiece(nullptr, 0), &result));
+  EXPECT_FALSE(safe_strtou64(absl::string_view(nullptr, 0), &result));
 }
 
 TEST(safe_strtof, Float) {
@@ -353,7 +354,7 @@ TEST(safe_strtod, Double) {
   EXPECT_TRUE(safe_strtod("\t82.0\t ", &result));
   EXPECT_EQ(82.0, result);
 
-  EXPECT_FALSE(safe_strtod("infinity", &result));
+  EXPECT_TRUE(safe_strtod("infinity", &result));
 
   EXPECT_TRUE(safe_strtod("-inf", &result));
   EXPECT_EQ(-std::numeric_limits<double>::infinity(), result);

@@ -29,8 +29,8 @@ limitations under the License.
 #include <string>
 
 #include "absl/strings/match.h"
-#include "tsl/platform/env.h"
-#include "tsl/platform/file_system.h"
+#include "xla/tsl/platform/env.h"
+#include "xla/tsl/platform/file_system.h"
 #include "tsl/platform/mutex.h"
 #include "tsl/platform/stringpiece.h"
 #include "tsl/platform/types.h"
@@ -49,12 +49,12 @@ class RamRandomAccessFile : public RandomAccessFile, public WritableFile {
       : name_(name), data_(cord) {}
   ~RamRandomAccessFile() override {}
 
-  absl::Status Name(StringPiece* result) const override {
+  absl::Status Name(absl::string_view* result) const override {
     *result = name_;
     return absl::OkStatus();
   }
 
-  absl::Status Read(uint64 offset, size_t n, StringPiece* result,
+  absl::Status Read(uint64 offset, size_t n, absl::string_view* result,
                     char* scratch) const override {
     if (offset >= data_->size()) {
       return errors::OutOfRange("");
@@ -65,7 +65,7 @@ class RamRandomAccessFile : public RandomAccessFile, public WritableFile {
     auto end = data_->begin() + offset + left;
 
     std::copy(start, end, scratch);
-    *result = StringPiece(scratch, left);
+    *result = absl::string_view(scratch, left);
 
     // In case of a partial read, we must still fill `result`, but also return
     // OutOfRange.
@@ -75,7 +75,7 @@ class RamRandomAccessFile : public RandomAccessFile, public WritableFile {
     return absl::OkStatus();
   }
 
-  absl::Status Append(StringPiece data) override {
+  absl::Status Append(absl::string_view data) override {
     data_->append(data.data(), data.size());
     return absl::OkStatus();
   }

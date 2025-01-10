@@ -55,7 +55,7 @@ string WordWrap(StringPiece prefix, StringPiece str, int width) {
     StringPiece to_append = str.substr(0, space);
     str.remove_prefix(space + 1);
     // Remove spaces at break.
-    while (str_util::EndsWith(to_append, " ")) {
+    while (absl::EndsWith(to_append, " ")) {
       to_append.remove_suffix(1);
     }
     while (absl::ConsumePrefix(&str, " ")) {
@@ -362,7 +362,7 @@ void MergeAttr(ApiDef::Attr* base_attr, const ApiDef::Attr& new_attr) {
 }
 
 // Updates base_api_def based on overrides in new_api_def.
-Status MergeApiDefs(ApiDef* base_api_def, const ApiDef& new_api_def) {
+absl::Status MergeApiDefs(ApiDef* base_api_def, const ApiDef& new_api_def) {
   // Merge visibility
   if (new_api_def.visibility() != ApiDef::DEFAULT_VISIBILITY) {
     base_api_def->set_visibility(new_api_def.visibility());
@@ -466,7 +466,7 @@ Status MergeApiDefs(ApiDef* base_api_def, const ApiDef& new_api_def) {
         strings::StrCat(description, "\n", new_api_def.description_suffix());
   }
   base_api_def->set_description(description);
-  return OkStatus();
+  return absl::OkStatus();
 }
 }  // namespace
 
@@ -480,28 +480,29 @@ ApiDefMap::ApiDefMap(const OpList& op_list) {
 
 ApiDefMap::~ApiDefMap() {}
 
-Status ApiDefMap::LoadFileList(Env* env, const std::vector<string>& filenames) {
+absl::Status ApiDefMap::LoadFileList(Env* env,
+                                     const std::vector<string>& filenames) {
   for (const auto& filename : filenames) {
     TF_RETURN_IF_ERROR(LoadFile(env, filename));
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
-Status ApiDefMap::LoadFile(Env* env, const string& filename) {
-  if (filename.empty()) return OkStatus();
+absl::Status ApiDefMap::LoadFile(Env* env, const string& filename) {
+  if (filename.empty()) return absl::OkStatus();
   string contents;
   TF_RETURN_IF_ERROR(ReadFileToString(env, filename, &contents));
-  Status status = LoadApiDef(contents);
+  absl::Status status = LoadApiDef(contents);
   if (!status.ok()) {
     // Return failed status annotated with filename to aid in debugging.
     return errors::CreateWithUpdatedMessage(
         status, strings::StrCat("Error parsing ApiDef file ", filename, ": ",
                                 status.message()));
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
-Status ApiDefMap::LoadApiDef(const string& api_def_file_contents) {
+absl::Status ApiDefMap::LoadApiDef(const string& api_def_file_contents) {
   const string contents = PBTxtFromMultiline(api_def_file_contents);
   ApiDefs api_defs;
   TF_RETURN_IF_ERROR(
@@ -514,7 +515,7 @@ Status ApiDefMap::LoadApiDef(const string& api_def_file_contents) {
       TF_RETURN_IF_ERROR(MergeApiDefs(&map_[api_def.graph_op_name()], api_def));
     }
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 void ApiDefMap::UpdateDocs() {

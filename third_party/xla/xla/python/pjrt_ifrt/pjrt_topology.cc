@@ -29,6 +29,7 @@ limitations under the License.
 #include "xla/pjrt/pjrt_device_description.h"
 #include "xla/python/ifrt/attribute_map.h"
 #include "xla/python/pjrt_ifrt/pjrt_attribute_map_util.h"
+#include "xla/xla_data.pb.h"
 
 namespace xla::ifrt {
 
@@ -37,7 +38,7 @@ char PjRtTopology::ID = 0;
 PjRtTopology::PjRtTopology(
     std::shared_ptr<const xla::PjRtTopologyDescription> description)
     : description_(std::move(description)),
-      attributes_(FromPjRtDeviceAttributeMap(description_->Attributes())) {}
+      attributes_(FromPjRtAttributeMap(description_->Attributes())) {}
 
 absl::string_view PjRtTopology::platform_name() const {
   return description_->platform_name();

@@ -23,12 +23,14 @@ limitations under the License.
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
+#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/synchronization/mutex.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/gpu/buffer_allocations.h"
 #include "xla/service/gpu/runtime/annotation.h"
 #include "xla/service/gpu/runtime/command_buffer_cmd.h"
+#include "xla/service/gpu/runtime/sequential_thunk.h"
 #include "xla/service/gpu/runtime/thunk.h"
 #include "xla/stream_executor/command_buffer.h"
 #include "xla/stream_executor/device_memory.h"
@@ -54,12 +56,15 @@ CommandBufferThunk::ExecutorCommandBuffer::ExecutorCommandBuffer(
     std::unique_ptr<se::CommandBuffer> command_buffer)
     : command_buffer(std::move(command_buffer)) {}
 
-CommandBufferThunk::CommandBufferThunk(CommandBufferCmdSequence commands,
-                                       ThunkInfo thunk_info,
-                                       std::unique_ptr<SequentialThunk> thunks)
+CommandBufferThunk::CommandBufferThunk(
+    CommandBufferCmdSequence commands, ThunkInfo thunk_info,
+    std::unique_ptr<SequentialThunk> thunks,
+    bool enable_command_buffers_during_profiling)
     : Thunk(Thunk::kCommandBuffer, std::move(thunk_info)),
       commands_(std::move(commands)),
       thunks_(std::move(thunks)),
+      enable_command_buffers_during_profiling_(
+          enable_command_buffers_during_profiling),
       state_(std::make_shared<State>()) {
   // When we create a new command buffer thunk (which happens when we
   // instantiate a new Gpu executable) we evict command buffers for all
@@ -149,7 +154,9 @@ absl::Status CommandBufferThunk::Initialize(const InitializeParams& params) {
       params.collective_cliques, /*device_to_host_stream=*/nullptr,
       /*host_to_device_stream=*/nullptr,
       /*send_device_memory_function=*/nullptr,
-      /*recv_device_memory_function=*/nullptr, params.ffi_execution_context);
+      /*recv_device_memory_function=*/nullptr, params.ffi_execution_context,
+      /*additional_compute_streams=*/{}, /*mock_collectives=*/false,
+      /*requires_exclusive_lock_on_gpu=*/params.requires_exclusive_lock_on_gpu);
 
   // If command buffer is in `kCreate` state it means that command buffer
   // sequence was never recorded into it. We initialize all command buffers
@@ -160,13 +167,16 @@ absl::Status CommandBufferThunk::Initialize(const InitializeParams& params) {
   // If command buffer in any other state we check it is has to be updated, i.e.
   // if captured pointers changed or command buffer has commands that require
   // update on each call.
-  if (cmd_buffer->command_buffer->state() ==
-          se::CommandBuffer::State::kCreate &&
+  if ((cmd_buffer->command_buffer->state() ==
+           se::CommandBuffer::State::kCreate ||
+       params.requires_exclusive_lock_on_gpu) &&
       cmd_buffer->ShouldUpdateCommandBuffer(commands_, execute_params)) {
-    VLOG(3) << "Initialize command buffer on device #"
+    VLOG(3) << "Initialize/Update command buffer on device #"
             << params.executor->device_ordinal()
             << " by recoding command buffer cmd sequence"
-            << "; num_commands=" << commands_.size();
+            << "; num_commands=" << commands_.size()
+            << " requires_exclusive_lock_on_gpu="
+            << params.requires_exclusive_lock_on_gpu;
 
     TraceMe trace([&] {
       return TraceMeEncode("command_buffer::initialize",
@@ -199,7 +209,8 @@ absl::Status CommandBufferThunk::ExecuteOnStream(const ExecuteParams& params) {
   // TODO(b/290773547): Profiler (CUPTI) + CUDA graphs lead to memory
   // corruption. As a work around disable command buffers (CUDA graphs) and run
   // everything in op-by-op mode.
-  if (tsl::profiler::ProfilerLock::HasActiveSession() && thunks_) {
+  if (tsl::profiler::ProfilerLock::HasActiveSession() && thunks_ &&
+      !enable_command_buffers_during_profiling_) {
     VLOG(1) << "Execute command buffer thunk as a regular thunk sequence "
                "because we detected active profiling session";
     TF_RETURN_IF_ERROR(thunks_->ExecuteOnStream(params));
@@ -212,9 +223,10 @@ absl::Status CommandBufferThunk::ExecuteOnStream(const ExecuteParams& params) {
 
   absl::MutexLock lock(&cmd_buffer->mutex);
 
-  if (cmd_buffer->ShouldUpdateCommandBuffer(commands_, params)) {
+  if ((!params.requires_exclusive_lock_on_gpu) &&
+      cmd_buffer->ShouldUpdateCommandBuffer(commands_, params)) {
     VLOG(3) << "Update command buffer on device #" << executor->device_ordinal()
-            << " by recoding command buffer cmd sequence" << " after "
+            << " by recoding command buffer cmd sequence after "
             << cmd_buffer->num_executions << " executions since last update"
             << "; num_commands=" << commands_.size();
 
@@ -251,7 +263,7 @@ absl::Status CommandBufferThunk::ExecuteOnStream(const ExecuteParams& params) {
                           {"num_executions", cmd_buffer->num_executions}});
   });
 
-  return executor->Submit(params.stream, *cmd_buffer->command_buffer);
+  return cmd_buffer->command_buffer->Submit(params.stream);
 }
 
 absl::StatusOr<std::shared_ptr<CommandBufferThunk::ExecutorCommandBuffer>>
@@ -329,4 +341,11 @@ void CommandBufferThunk::EvictCommandBuffers() {
   }
 }
 
+void CommandBufferThunk::ForAllThunks(
+    absl::FunctionRef<void(const Thunk*)> fn) const {
+  fn(this);
+  if (thunks_ != nullptr) {
+    thunks_->ForAllThunks(fn);
+  }
+}
 }  // namespace xla::gpu

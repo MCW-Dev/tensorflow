@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef XLA_SHAPE_H_
 #define XLA_SHAPE_H_
 
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <ostream>
@@ -74,7 +75,6 @@ class Shape {
   // Returns the rank (number of dimensions) of the given shape. Shape must be
   // an array.
   int64_t rank() const {
-    DCHECK(IsArray()) << "Non-arrays do not have a rank, shape: " << ToString();
     return dimensions_.size();
   }
 
@@ -151,17 +151,10 @@ class Shape {
     return absl::MakeSpan(dynamic_dimensions_);
   }
 
-  // Add dimension_upper_bound().
-
   // Removes the given dimension from the shape. Layout, if it exists, is
   // adjusted to match the modified shape.
   void DeleteDimension(int64_t dim_to_delete);
-
-  // The following methods mirror the protobuf generated code interface for the
-  // message ShapeProto. This enabled easy migration of this data structure
-  // from a proto to a proper C++ class.
-  // TODO(b/29771030): Replace or augment these methods with a more ergonomic
-  // interface.
+  void DeleteDimensions(absl::Span<const int64_t> sorted_dims_to_delete);
 
   // Methods for accessing the primitive type.
   PrimitiveType element_type() const { return element_type_; }
@@ -235,11 +228,6 @@ class Shape {
     }
   }
 
-  void Swap(Shape* other) {
-    using std::swap;
-    swap(*this, *other);
-  }
-
   void Clear() {
     element_type_ = PRIMITIVE_TYPE_INVALID;
     clear_dimensions();
@@ -289,6 +277,7 @@ class Shape {
       ignore_element_size_in_layout_ = true;
       ignore_memory_space_in_layout_ = true;
       ignore_tail_padding_alignment_in_elements_in_layout_ = true;
+      ignore_split_config_in_layout_ = true;
       return *this;
     }
     Equal& IgnoreElementType() {
@@ -311,6 +300,10 @@ class Shape {
       ignore_tail_padding_alignment_in_elements_in_layout_ = true;
       return *this;
     }
+    Equal& IgnoreSplitConfigInLayout() {
+      ignore_split_config_in_layout_ = true;
+      return *this;
+    }
 
    private:
     bool ignore_layout_ = false;
@@ -322,6 +315,7 @@ class Shape {
     bool ignore_dynamic_dimension_ = false;
     bool ignore_dimensions_ = false;
     bool ignore_tail_padding_alignment_in_elements_in_layout_ = false;
+    bool ignore_split_config_in_layout_ = false;
   };
 
   // Test that all fields of the shape are the same, equivalent to Equal().

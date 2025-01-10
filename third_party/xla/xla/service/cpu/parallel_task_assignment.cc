@@ -28,13 +28,13 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "xla/backends/cpu/codegen/target_machine_features.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/service/cpu/backend_config.pb.h"
 #include "xla/service/cpu/ir_emission_utils.h"
 #include "xla/service/cpu/shape_partition.h"
-#include "xla/service/cpu/target_machine_features.h"
 #include "xla/service/hlo_cost_analysis.h"
 #include "xla/service/llvm_ir/dynamic_update_slice_util.h"
 #include "xla/util.h"
@@ -95,8 +95,8 @@ class DefaultCostModel : public ParallelCostModel {
       // TODO(b/29630486) Develop system bandwidth model.
       max_parallelism = std::min<int64_t>(
           max_parallelism_, std::ceil(std::sqrt(tsl::port::MaxParallelism())));
-      // Use shape size instruction cost and L2 cache size min per-thread cost.
-      instruction_cost = shape_size_(instruction->shape());
+      // Use bytes accessed cost and L2 cache size min per-thread cost.
+      instruction_cost = bytes_accessed;
       min_cost_per_thread = 256LL << 10;  // 256KB L2 Cache size.
     } else {
       // Use max parallelism for compute bound instructions.

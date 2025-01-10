@@ -29,8 +29,8 @@ load("//third_party/flatbuffers:workspace.bzl", flatbuffers = "repo")
 load("//third_party/FP16:workspace.bzl", FP16 = "repo")
 load("//third_party/gemmlowp:workspace.bzl", gemmlowp = "repo")
 load("//third_party/git:git_configure.bzl", "git_configure")
-load("//third_party/gpus:cuda_configure.bzl", "cuda_configure")
 load("//third_party/gpus:rocm_configure.bzl", "rocm_configure")
+load("//third_party/gpus:sycl_configure.bzl", "sycl_configure")
 load("//third_party/hexagon:workspace.bzl", hexagon_nn = "repo")
 load("//third_party/highwayhash:workspace.bzl", highwayhash = "repo")
 load("//third_party/hwloc:workspace.bzl", hwloc = "repo")
@@ -40,14 +40,15 @@ load("//third_party/jpeg:workspace.bzl", jpeg = "repo")
 load("//third_party/kissfft:workspace.bzl", kissfft = "repo")
 load("//third_party/libprotobuf_mutator:workspace.bzl", libprotobuf_mutator = "repo")
 load("//third_party/llvm:setup.bzl", "llvm_setup")
+load("//third_party/nanobind:workspace.bzl", nanobind = "repo")
 load("//third_party/nasm:workspace.bzl", nasm = "repo")
-load("//third_party/nccl:nccl_configure.bzl", "nccl_configure")
 load("//third_party/opencl_headers:workspace.bzl", opencl_headers = "repo")
 load("//third_party/pasta:workspace.bzl", pasta = "repo")
 load("//third_party/py:python_configure.bzl", "python_configure")
 load("//third_party/py/ml_dtypes:workspace.bzl", ml_dtypes = "repo")
 load("//third_party/pybind11_abseil:workspace.bzl", pybind11_abseil = "repo")
 load("//third_party/pybind11_bazel:workspace.bzl", pybind11_bazel = "repo")
+load("//third_party/robin_map:workspace.bzl", robin_map = "repo")
 load("//third_party/ruy:workspace.bzl", ruy = "repo")
 load("//third_party/shardy:workspace.bzl", shardy = "repo")
 load("//third_party/sobol_data:workspace.bzl", sobol_data = "repo")
@@ -79,11 +80,13 @@ def _initialize_third_party():
     kissfft()
     libprotobuf_mutator()
     ml_dtypes()
+    nanobind()
     nasm()
     opencl_headers()
     pasta()
     pybind11_abseil()
     pybind11_bazel()
+    robin_map()
     ruy()
     shardy()
     sobol_data()
@@ -105,13 +108,12 @@ def _tf_toolchains():
     # Note that we check the minimum bazel version in WORKSPACE.
     clang6_configure(name = "local_config_clang6")
     cc_download_clang_toolchain(name = "local_config_download_clang")
-    cuda_configure(name = "local_config_cuda")
     tensorrt_configure(name = "local_config_tensorrt")
-    nccl_configure(name = "local_config_nccl")
     git_configure(name = "local_config_git")
     syslibs_configure(name = "local_config_syslibs")
     python_configure(name = "local_config_python")
     rocm_configure(name = "local_config_rocm")
+    sycl_configure(name = "local_config_sycl")
     remote_execution_configure(name = "local_config_remote_execution")
 
     # For windows bazel build
@@ -152,11 +154,19 @@ def _tf_repositories():
     # LINT.IfChange
     tf_http_archive(
         name = "XNNPACK",
-        sha256 = "bdd80688631851c6d3e5be31ce302c7f6a200301867494bcde62549b74fddf16",
-        strip_prefix = "XNNPACK-6346dbfe3f9ce02d750619b340680a1cc209dd07",
-        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/6346dbfe3f9ce02d750619b340680a1cc209dd07.zip"),
+        sha256 = "2a33eb922e6a4b55dfe9332ac61c8d4d128ae8f9e24e873e756a474e983d50a1",
+        strip_prefix = "XNNPACK-02764b305b430aec42c3df85ba32b9a3f8d6e3d4",
+        urls = tf_mirror_urls("https://github.com/google/XNNPACK/archive/02764b305b430aec42c3df85ba32b9a3f8d6e3d4.zip"),
     )
     # LINT.ThenChange(//tensorflow/lite/tools/cmake/modules/xnnpack.cmake)
+
+    # XNNPack dependency.
+    tf_http_archive(
+        name = "KleidiAI",
+        sha256 = "8ba8cdb9f945941174d34d10eb4ad158ad1cbc1aef259de5ad992b0bbe85861f",
+        strip_prefix = "kleidiai-7e8c4baf953227fa447a2f345e5d6491a504aa56",
+        urls = tf_mirror_urls("https://gitlab.arm.com/kleidi/kleidiai/-/archive/7e8c4baf953227fa447a2f345e5d6491a504aa56/kleidiai-7e8c4baf953227fa447a2f345e5d6491a504aa56.zip"),
+    )
 
     tf_http_archive(
         name = "FXdiv",
@@ -174,18 +184,19 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "cpuinfo",
-        strip_prefix = "cpuinfo-6543fec09b2f04ac4a666882998b534afc9c1349",
-        sha256 = "17180581df58b811ef93cfafd074598966a185f48e5a574e8947ca51419f7ca6",
-        urls = tf_mirror_urls("https://github.com/pytorch/cpuinfo/archive/6543fec09b2f04ac4a666882998b534afc9c1349.zip"),
+        sha256 = "52e0ffd7998d8cb3a927d8a6e1145763744d866d2be09c4eccea27fc157b6bb0",
+        strip_prefix = "cpuinfo-cebb0933058d7f181c979afd50601dc311e1bf8c",
+        patch_file = ["//third_party/cpuinfo:cpuinfo_ppc64le_support.patch"],
+        urls = tf_mirror_urls("https://github.com/pytorch/cpuinfo/archive/cebb0933058d7f181c979afd50601dc311e1bf8c.zip"),
     )
 
     tf_http_archive(
         name = "cudnn_frontend_archive",
         build_file = "//third_party:cudnn_frontend.BUILD",
         patch_file = ["//third_party:cudnn_frontend_header_fix.patch"],
-        sha256 = "281789777ac296f5f8215a7c4bd066de8816d240eb44c760788beebf8d25a99f",
-        strip_prefix = "cudnn-frontend-1.5.1",
-        urls = tf_mirror_urls("https://github.com/NVIDIA/cudnn-frontend/archive/refs/tags/v1.5.1.zip"),
+        sha256 = "5f77784dc3ccbca7aca5ea0b5a6e31b95aa85023c5942d22be5fa8dd6c339d81",
+        strip_prefix = "cudnn-frontend-1.8.0",
+        urls = tf_mirror_urls("https://github.com/NVIDIA/cudnn-frontend/archive/refs/tags/v1.8.0.zip"),
     )
 
     tf_http_archive(
@@ -222,6 +233,10 @@ def _tf_repositories():
             "//third_party/mkl_dnn:onednn_acl_fp32_bf16_reorder.patch",
             "//third_party/mkl_dnn:onednn_acl_bf16_capability_detection_for_ubuntu20.04.patch",
             "//third_party/mkl_dnn:onednn_acl_indirect_conv.patch",
+            "//third_party/mkl_dnn:onednn_acl_allow_blocked_weight_format_for_matmul_primitive.patch",
+            "//third_party/mkl_dnn:onednn_acl_fix_segfault_during_postop_execute.patch",
+            "//third_party/mkl_dnn:onednn_acl_add_bf16_platform_support_check.patch",
+            "//third_party/mkl_dnn:onednn_acl_add_sbgemm_matmul_primitive_definition.patch",
         ],
         sha256 = "2f76b407ef8893cca71340f88cd800019a1f14f8ac1bbdbb89a84be1370b52e3",
         strip_prefix = "oneDNN-3.2.1",
@@ -324,10 +339,10 @@ def _tf_repositories():
         name = "png",
         build_file = "//third_party:png.BUILD",
         patch_file = ["//third_party:png_fix_rpi.patch"],
-        sha256 = "a00e9d2f2f664186e4202db9299397f851aea71b36a35e74910b8820e380d441",
-        strip_prefix = "libpng-1.6.39",
+        sha256 = "fecc95b46cf05e8e3fc8a414750e0ba5aad00d89e9fdf175e94ff041caf1a03a",
+        strip_prefix = "libpng-1.6.43",
         system_build_file = "//third_party/systemlibs:png.BUILD",
-        urls = tf_mirror_urls("https://github.com/glennrp/libpng/archive/v1.6.39.tar.gz"),
+        urls = tf_mirror_urls("https://github.com/glennrp/libpng/archive/v1.6.43.tar.gz"),
     )
 
     tf_http_archive(
@@ -389,15 +404,6 @@ def _tf_repositories():
     )
 
     tf_http_archive(
-        name = "nsync",
-        patch_file = ["//third_party:nsync.patch"],
-        sha256 = "1d63e967973733d2c97e841e3c05fac4d3fa299f01d14c86f2695594c7a4a2ec",
-        strip_prefix = "nsync-1.29.2",
-        system_build_file = "//third_party/systemlibs:nsync.BUILD",
-        urls = tf_mirror_urls("https://github.com/google/nsync/archive/1.29.2.tar.gz"),
-    )
-
-    tf_http_archive(
         name = "com_google_googletest",
         sha256 = "81964fe578e9bd7c94dfdb09c8e4d6e6759e19967e397dbea48d1c10e45d0df2",
         strip_prefix = "googletest-release-1.12.1",
@@ -421,10 +427,10 @@ def _tf_repositories():
     tf_http_archive(
         name = "curl",
         build_file = "//third_party:curl.BUILD",
-        sha256 = "9c6db808160015f30f3c656c0dec125feb9dc00753596bf858a272b5dd8dc398",
-        strip_prefix = "curl-8.6.0",
+        sha256 = "264537d90e58d2b09dddc50944baf3c38e7089151c8986715e2aaeaaf2b8118f",
+        strip_prefix = "curl-8.11.0",
         system_build_file = "//third_party/systemlibs:curl.BUILD",
-        urls = tf_mirror_urls("https://curl.se/download/curl-8.6.0.tar.gz"),
+        urls = tf_mirror_urls("https://curl.se/download/curl-8.11.0.tar.gz"),
     )
 
     # WARNING: make sure ncteisen@ and vpai@ are cc-ed on any CL to change the below rule
@@ -489,10 +495,10 @@ def _tf_repositories():
     tf_http_archive(
         name = "zlib",
         build_file = "//third_party:zlib.BUILD",
-        sha256 = "b3a24de97a8fdbc835b9833169501030b8977031bcb54b3b3ac13740f846ab30",
-        strip_prefix = "zlib-1.2.13",
+        sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+        strip_prefix = "zlib-1.3.1",
         system_build_file = "//third_party/systemlibs:zlib.BUILD",
-        urls = tf_mirror_urls("https://zlib.net/fossils/zlib-1.2.13.tar.gz"),
+        urls = tf_mirror_urls("https://zlib.net/fossils/zlib-1.3.1.tar.gz"),
     )
 
     # LINT.IfChange
@@ -518,9 +524,17 @@ def _tf_repositories():
         name = "nccl_archive",
         build_file = "//third_party:nccl/archive.BUILD",
         patch_file = ["//third_party/nccl:archive.patch"],
-        sha256 = "1923596984d85e310b5b6c52b2c72a1b93da57218f2bc5a5c7ac3d59297a3303",
-        strip_prefix = "nccl-2.21.5-1",
-        urls = tf_mirror_urls("https://github.com/nvidia/nccl/archive/v2.21.5-1.tar.gz"),
+        sha256 = "6b946b70a9d2d01871842cbd15ec56488d358abe9a0f3767e372fddc3e241ba7",
+        strip_prefix = "nccl-2.23.4-1",
+        urls = tf_mirror_urls("https://github.com/nvidia/nccl/archive/v2.23.4-1.tar.gz"),
+    )
+
+    tf_http_archive(
+        name = "nvtx_archive",
+        build_file = "//third_party:nvtx/BUILD",
+        sha256 = "e4438f921fb88a564b0b92791c1c1fdd0f388901213e6a31fdd0dc3803fb9764",
+        strip_prefix = "NVTX-bf31d7859ab3130cbf1ef77c33d18d0ebb8c8d08/c/include",
+        urls = tf_mirror_urls("https://github.com/NVIDIA/NVTX/archive/bf31d7859ab3130cbf1ef77c33d18d0ebb8c8d08.tar.gz"),
     )
 
     java_import_external(
@@ -608,15 +622,6 @@ def _tf_repositories():
         sha256 = "162514b3cc264ac89d91898b58450190b8192e2af1142cf8ccac2d59aa160dda",
         strip_prefix = "cub-1.9.9",
         urls = tf_mirror_urls("https://github.com/NVlabs/cub/archive/1.9.9.zip"),
-    )
-
-    # Note that we are currently taking NVTX headers from a NCCL release to get nvToolsExtPayload.h
-    tf_http_archive(
-        name = "nvtx_archive",
-        build_file = "//third_party:nvtx/BUILD",
-        sha256 = "1c5474553afedb88e878c772f13d6f90b9226b3f2971dfa6f873adb9443100c2",
-        strip_prefix = "nccl-2.19.3-1/src/include/nvtx3",
-        urls = tf_mirror_urls("https://github.com/nvidia/nccl/archive/v2.19.3-1.tar.gz"),
     )
 
     tf_http_archive(
@@ -727,9 +732,9 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "rules_android_ndk",
-        sha256 = "b29409496439cdcdb50a8e161c4953ca78a548e16d3ee729a1b5cd719ffdacbf",
-        strip_prefix = "rules_android_ndk-81ec8b79dc50ee97e336a25724fdbb28e33b8d41",
-        urls = tf_mirror_urls("https://github.com/bazelbuild/rules_android_ndk/archive/81ec8b79dc50ee97e336a25724fdbb28e33b8d41.zip"),
+        sha256 = "0ab5ddae72dff0dfae92a31a0704d4543e818e360786e44d2093a6b8ff5e8fda",
+        strip_prefix = "rules_android_ndk-461e8c99b7f06bc86a15317505d48fc0decd7dcc",
+        urls = tf_mirror_urls("https://github.com/bazelbuild/rules_android_ndk/archive/461e8c99b7f06bc86a15317505d48fc0decd7dcc.zip"),
     )
 
     # Apple and Swift rules.
@@ -779,9 +784,9 @@ def _tf_repositories():
 
     tf_http_archive(
         name = "pybind11",
-        urls = tf_mirror_urls("https://github.com/pybind/pybind11/archive/v2.10.4.tar.gz"),
-        sha256 = "832e2f309c57da9c1e6d4542dedd34b24e4192ecb4d62f6f4866a737454c9970",
-        strip_prefix = "pybind11-2.10.4",
+        urls = tf_mirror_urls("https://github.com/pybind/pybind11/archive/v2.13.4.tar.gz"),
+        sha256 = "efc901aa0aab439a3fea6efeaf930b5a349fb06394bf845c64ce15a9cf8f0240",
+        strip_prefix = "pybind11-2.13.4",
         build_file = "//third_party:pybind11.BUILD",
         system_build_file = "//third_party/systemlibs:pybind11.BUILD",
     )
@@ -791,7 +796,9 @@ def _tf_repositories():
         urls = tf_mirror_urls("https://github.com/pybind/pybind11_protobuf/archive/80f3440cd8fee124e077e2e47a8a17b78b451363.zip"),
         sha256 = "c7ab64b1ccf9a678694a89035a8c865a693e4e872803778f91f0965c2f281d78",
         strip_prefix = "pybind11_protobuf-80f3440cd8fee124e077e2e47a8a17b78b451363",
-        patch_file = ["//third_party/pybind11_protobuf:remove_license.patch"],
+        patch_file = [
+            "//third_party/pybind11_protobuf:remove_license.patch",
+        ],
     )
 
     tf_http_archive(

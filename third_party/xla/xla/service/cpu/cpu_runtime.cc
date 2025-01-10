@@ -17,12 +17,12 @@ limitations under the License.
 
 #include <cstdarg>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -39,6 +39,7 @@ limitations under the License.
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "xla/executable_run_options.h"
+#include "xla/hlo/parser/hlo_parser.h"
 #include "xla/layout_util.h"
 #include "xla/service/collective_ops_utils.h"
 #include "xla/service/computation_placer.h"
@@ -47,11 +48,11 @@ limitations under the License.
 #include "xla/service/cpu/in_process_collectives.h"
 #include "xla/service/cpu/xfeed_manager.h"
 #include "xla/service/global_device_id.h"
-#include "xla/service/hlo_parser.h"
 #include "xla/shape_util.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/util.h"
+#include "xla/xla_data.pb.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"
 #include "tsl/platform/status.h"
@@ -71,6 +72,17 @@ XfeedManager* GetXfeedManager(int device_ordinal) {
     it = managers->emplace(device_ordinal, new XfeedManager()).first;
   }
   return it->second;
+}
+
+// TODO(zhangqiaorjc): Prefer to make callers set and use device_ordinal
+// directly since callers may not have a Stream*.
+int GetDeviceOrdinal(const xla::ExecutableRunOptions* run_options) {
+  if (!run_options) {
+    return 0;
+  } else if (run_options->device_ordinal() != -1) {
+    return run_options->device_ordinal();
+  }
+  return run_options->stream()->parent()->device_ordinal();
 }
 
 extern const char* const kEigenMatMulF16SymbolName =
@@ -106,6 +118,10 @@ extern const char* const kEigenConv3DF32SymbolName =
 extern const char* const kDuccFftSymbolName = "__xla_cpu_runtime_DuccFft";
 extern const char* const kDuccSingleThreadedFftSymbolName =
     "__xla_cpu_runtime_DuccSingleThreadedFft";
+extern const char* const kEigenSingleThreadedMatMulF8E4M3FNSymbolName =
+    "__xla_cpu_runtime_EigenSingleThreadedMatMulF8E4M3FN";
+extern const char* const kEigenSingleThreadedMatMulF8E5M2SymbolName =
+    "__xla_cpu_runtime_EigenSingleThreadedMatMulF8E5M2";
 extern const char* const kEigenSingleThreadedMatMulF16SymbolName =
     "__xla_cpu_runtime_EigenSingleThreadedMatMulF16";
 extern const char* const kEigenSingleThreadedMatMulF32SymbolName =
@@ -196,17 +212,6 @@ std::string ShapeString(const void* shape_ptr, int32_t shape_length) {
     return ShapeUtil::HumanStringWithLayout(shape.value());
   }
   return "<invalid shape>";
-}
-
-// TODO(zhangqiaorjc): Prefer to make callers set and use device_ordinal
-// directly since callers may not have a Stream*.
-int GetDeviceOrdinal(const ExecutableRunOptions* run_options) {
-  if (!run_options) {
-    return 0;
-  } else if (run_options->device_ordinal() != -1) {
-    return run_options->device_ordinal();
-  }
-  return run_options->stream()->parent()->device_ordinal();
 }
 
 ABSL_ATTRIBUTE_NO_SANITIZE_MEMORY
@@ -365,7 +370,7 @@ void AllToAllImpl(const ExecutableRunOptions* run_options,
                   int64_t buffer_size, void** source_buffers,
                   void** destination_buffers) {
   GlobalDeviceId device(GetDeviceOrdinal(run_options));
-  std::string_view replica_groups_serialized(
+  absl::string_view replica_groups_serialized(
       static_cast<const char*>(replica_groups_str), replica_groups_str_size);
   std::vector<ReplicaGroup> group =
       ParseReplicaGroupsOnly(replica_groups_serialized).value();
@@ -397,7 +402,7 @@ void AllGatherImpl(const ExecutableRunOptions* run_options,
                    int32_t replica_groups_str_size, int64_t buffer_size,
                    void* source_buffer, void* destination_buffer) {
   GlobalDeviceId device(GetDeviceOrdinal(run_options));
-  std::string_view replica_groups_serialized(
+  absl::string_view replica_groups_serialized(
       static_cast<const char*>(replica_groups_str), replica_groups_str_size);
   std::vector<ReplicaGroup> group =
       ParseReplicaGroupsOnly(replica_groups_serialized).value();
@@ -426,7 +431,7 @@ void ReduceScatterImpl(const ExecutableRunOptions* run_options,
                        int64_t chunk_elems, void* input_buffer,
                        void* output_buffer) {
   GlobalDeviceId device(GetDeviceOrdinal(run_options));
-  std::string_view replica_groups_serialized(
+  absl::string_view replica_groups_serialized(
       static_cast<const char*>(replica_groups_str), replica_groups_str_size);
   std::vector<ReplicaGroup> group =
       ParseReplicaGroupsOnly(replica_groups_serialized).value();
@@ -455,7 +460,7 @@ void AllReduceImpl(const ExecutableRunOptions* run_options,
                    int32_t shape_length, int32_t num_buffers,
                    void** input_buffers, void** output_buffers) {
   GlobalDeviceId device(GetDeviceOrdinal(run_options));
-  std::string_view replica_groups_serialized(
+  absl::string_view replica_groups_serialized(
       static_cast<const char*>(replica_groups_str), replica_groups_str_size);
   std::vector<ReplicaGroup> group =
       ParseReplicaGroupsOnly(replica_groups_serialized).value();
@@ -493,7 +498,7 @@ void CollectivePermuteImpl(const ExecutableRunOptions* run_options,
                            void* output_buffer, const void* source_target_pairs,
                            int32_t source_target_pairs_size) {
   GlobalDeviceId device(GetDeviceOrdinal(run_options));
-  std::string_view source_target_pairs_serialized(
+  absl::string_view source_target_pairs_serialized(
       static_cast<const char*>(source_target_pairs), source_target_pairs_size);
   auto pairs = absl::StrSplit(source_target_pairs_serialized, ',');
   const DeviceAssignment::LogicalID logical_id =

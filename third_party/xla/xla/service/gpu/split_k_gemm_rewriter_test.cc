@@ -37,15 +37,12 @@ limitations under the License.
 #include "xla/shape_util.h"
 #include "xla/tests/hlo_test_base.h"
 #include "xla/tests/verified_hlo_module.h"
+#include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/lib/core/status_test_util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/status_matchers.h"
 #include "tsl/platform/statusor.h"
-
-// TODO(b/317016172): Inspect usages of TritonGemmConfig and potentially update
-// them to to use newly exposed parameters.
 
 namespace xla {
 namespace gpu {
@@ -690,7 +687,7 @@ class SplitKTestWithMorePreciseReduction
     : public HloTestBase,
       public ::testing::WithParamInterface<int> {
  public:
-  DebugOptions GetDebugOptionsForTest() override {
+  DebugOptions GetDebugOptionsForTest() const override {
     DebugOptions debug_options = HloTestBase::GetDebugOptionsForTest();
     debug_options.set_xla_gpu_triton_gemm_disable_reduced_precision_reduction(
         true);

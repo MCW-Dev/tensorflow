@@ -52,12 +52,10 @@ absl::StatusOr<std::unique_ptr<xla::PjRtBuffer>> HostTensorToPjRtBuffer(
                           cpu_tensor->shape(), cpu_tensor->dtype(),
                           /*fast_mem=*/false, layout_preference));
   const xla::Layout* device_layout = &(shape.layout());
-  // The device id should match the local_hardware_id in
+  // The device id should match the local_device_id in
   // tensorflow/compiler/xla/pjrt/pjrt_client.h.
-  TF_ASSIGN_OR_RETURN(
-      const int pjrt_device_id,
-      tsl::GetDeviceIdFromDeviceParsedName(device->parsed_name(),
-                                           DeviceType(device->device_type())));
+  const int pjrt_device_id =
+      tsl::GetDeviceIdFromDeviceParsedName(device->parsed_name());
   TF_ASSIGN_OR_RETURN(xla::PjRtDevice * pjrt_device,
                       pjrt_client->LookupAddressableDevice(
                           xla::PjRtLocalDeviceId(pjrt_device_id)));
@@ -140,7 +138,7 @@ void PjRtDeviceContext::CopyDeviceTensorToCPU(const Tensor* device_tensor,
 
   xla::PjRtFuture<> future = device_buffer->ToLiteral(literal.get());
   future.OnReady([literal = std::move(literal), done = std::move(done)](
-                     const tensorflow::Status& status) { done(status); });
+                     const absl::Status& status) { done(status); });
 }
 
 void PjRtDeviceContext::CopyCPUTensorToDevice(const Tensor* cpu_tensor,
@@ -260,12 +258,10 @@ void PjRtDeviceToDeviceCopy(DeviceContext* send_dev_context,
   xla::PjRtBuffer* src_device_buffer =
       tensorflow::AsyncValueTensor::FromTensor(input)->GetBuffer().get();
 
-  // The device id should match the local_hardware_id in
+  // The device id should match the local_device_id in
   // tensorflow/compiler/xla/pjrt/pjrt_client.h.
   const int pjrt_dst_device_id =
-      tsl::GetDeviceIdFromDeviceParsedName(dst->parsed_name(),
-                                           DeviceType(dst->device_type()))
-          .value();
+      tsl::GetDeviceIdFromDeviceParsedName(dst->parsed_name());
   xla::PjRtDevice* pjrt_dst_device =
       (*pjrt_dst_client)
           ->LookupAddressableDevice(xla::PjRtLocalDeviceId(pjrt_dst_device_id))

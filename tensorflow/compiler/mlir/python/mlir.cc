@@ -22,21 +22,20 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "absl/algorithm/container.h"
-#include "absl/container/flat_hash_set.h"
-#include "absl/container/inlined_vector.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
+#include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Bytecode/BytecodeWriter.h"  // from @llvm-project
 #include "mlir/Dialect/Func/Extensions/AllExtensions.h"  // from @llvm-project
-#include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Dialect/Shape/IR/Shape.h"  // from @llvm-project
 #include "mlir/Dialect/Tosa/IR/TosaOps.h"  // from @llvm-project
 #include "mlir/IR/AsmState.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "mlir/IR/Location.h"  // from @llvm-project
+#include "mlir/IR/OwningOpRef.h"  // from @llvm-project
 #include "mlir/InitAllPasses.h"  // from @llvm-project
 #include "mlir/Parser/Parser.h"  // from @llvm-project
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
@@ -47,35 +46,37 @@ limitations under the License.
 #include "tensorflow/c/eager/tfe_context_internal.h"
 #include "tensorflow/c/tf_status.h"
 #include "tensorflow/c/tf_status_helper.h"
+#include "tensorflow/cc/saved_model/bundle_v2.h"
+#include "tensorflow/cc/saved_model/loader.h"
 #include "tensorflow/compiler/mlir/lite/flatbuffer_import.h"
-#include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"
 #include "tensorflow/compiler/mlir/quantization/stablehlo/passes/bridge/passes.h"
 #include "tensorflow/compiler/mlir/tensorflow/dialect_registration.h"
 #include "tensorflow/compiler/mlir/tensorflow/transforms/passes.h"
 #include "tensorflow/compiler/mlir/tensorflow/transforms/tf_saved_model_passes.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/import_model.h"
+#include "tensorflow/compiler/mlir/tensorflow/translate/mlir_import_options.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/mlir_roundtrip_flags.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/tf_mlir_translate.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/error_util.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/import_utils.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/mlprogram_util.h"
+#include "tensorflow/compiler/mlir/tf2xla/api/v2/graph_to_tf_executor.h"
 #include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
-#include "tensorflow/compiler/mlir/tools/kernel_gen/ir/tf_framework_ops.h"
 #include "tensorflow/compiler/mlir/tosa/tf_passes.h"
 #include "tensorflow/compiler/mlir/tosa/tf_tfl_passes.h"
 #include "tensorflow/compiler/mlir/tosa/tfl_passes.h"
 #include "tensorflow/compiler/mlir/tosa/transforms/passes.h"
 #include "xla/mlir/framework/transforms/passes.h"
 #include "xla/mlir_hlo/mhlo/transforms/passes.h"
-#include "xla/status_macros.h"
 #include "tensorflow/core/common_runtime/eager/context.h"
 #include "tensorflow/core/common_runtime/function_body.h"
 #include "tensorflow/core/common_runtime/function_def_utils.h"
+#include "tensorflow/core/common_runtime/graph_constructor.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/function.pb.h"
+#include "tensorflow/core/framework/graph_debug_info.pb.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/tensor_shape.pb.h"
-#include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/platform/types.h"
@@ -150,8 +151,12 @@ static std::string ImportGraphDefImpl(const std::string& proto,
   mlir::DialectRegistry registry;
   mlir::func::registerAllExtensions(registry);
   mlir::MLIRContext context(registry);
-  auto module = ConvertGraphdefToMlir(graphdef, debug_info, specs, &context);
-  if (!module.ok()) {
+  GraphConstructorOptions options;
+  Graph graph(OpRegistry::Global());
+  absl::Status graph_status = ConvertGraphDefToGraph(options, graphdef, &graph);
+  auto module = tensorflow::tf2xla::v2::ConvertGraphToTfExecutor(
+      graph, debug_info, graph.flib_def(), specs, &context);
+  if (!module.ok() || !graph_status.ok()) {
     tsl::Set_TF_Status_from_Status(status, module.status());
     return "// error";
   }
@@ -192,7 +197,15 @@ std::string ImportFunction(const std::string& functiondef_proto,
   mlir::DialectRegistry registry;
   mlir::func::registerAllExtensions(registry);
   mlir::MLIRContext context(registry);
-  auto module = ConvertFunctionToMlir(fbody.get(), flib_def, &context);
+
+  tensorflow::GraphImportConfig specs;
+  specs.graph_func_name = fbody->record->fdef().signature().name();
+  specs.enable_shape_inference = false;
+  specs.graph_as_function = true;
+  for (const auto* control_ret_node : fbody->control_ret_nodes)
+    specs.control_outputs.push_back(control_ret_node->name());
+  auto module = tensorflow::tf2xla::v2::ConvertGraphToTfExecutor(
+      *fbody->graph, {}, flib_def, specs, &context);
   if (!module.ok()) {
     tsl::Set_TF_Status_from_Status(status, module.status());
     return "// error";
@@ -441,7 +454,7 @@ void ExperimentalTFLiteToTosaBytecode(
     }
 
     auto buffer_view =
-        std::string_view(buffer->getBufferStart(), buffer->getBufferSize());
+        absl::string_view(buffer->getBufferStart(), buffer->getBufferSize());
     module = tflite::FlatBufferToMlir(
         buffer_view, &context, loc, use_external_constant, ordered_input_arrays,
         ordered_output_arrays);

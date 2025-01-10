@@ -16,13 +16,16 @@ limitations under the License.
 #ifndef TENSORFLOW_LITE_TOOLS_BENCHMARK_PROFILING_LISTENER_H_
 #define TENSORFLOW_LITE_TOOLS_BENCHMARK_PROFILING_LISTENER_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
+#include "tensorflow/lite/interpreter.h"
 #include "tensorflow/lite/profiling/buffered_profiler.h"
 #include "tensorflow/lite/profiling/profile_summarizer.h"
 #include "tensorflow/lite/profiling/profile_summary_formatter.h"
 #include "tensorflow/lite/tools/benchmark/benchmark_model.h"
+#include "tensorflow/lite/tools/benchmark/benchmark_params.h"
 
 namespace tflite {
 namespace benchmark {

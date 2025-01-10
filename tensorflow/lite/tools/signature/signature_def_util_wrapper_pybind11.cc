@@ -12,11 +12,17 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#include <cstdint>
+#include <map>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
+#include "absl/status/status.h"
 #include "pybind11/pybind11.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
 #include "pybind11/stl.h"  // from @pybind11
+#include "tensorflow/core/protobuf/meta_graph.pb.h"
 #include "tensorflow/lite/core/model_builder.h"
 #include "tensorflow/lite/tools/signature/signature_def_util.h"
 #include "tensorflow/python/lib/core/pybind11_lib.h"

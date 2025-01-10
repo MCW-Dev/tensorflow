@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "xla/tsl/util/stats_calculator.h"
@@ -24,6 +25,7 @@ limitations under the License.
 #include "tensorflow/lite/core/interpreter.h"
 #include "tensorflow/lite/core/kernels/register.h"
 #include "tensorflow/lite/core/model.h"
+#include "tensorflow/lite/model_builder.h"
 #include "tensorflow/lite/tools/evaluation/evaluation_delegate_provider.h"
 #include "tensorflow/lite/tools/evaluation/evaluation_stage.h"
 #include "tensorflow/lite/tools/evaluation/proto/evaluation_config.pb.h"

@@ -32,21 +32,28 @@ limitations under the License.
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_replace.h"
+#include "absl/types/span.h"
 #include "absl/utility/utility.h"
 #include "xla/hlo/ir/collective_device_list.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
+#include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/hlo/ir/hlo_sharding.h"
+#include "xla/hlo/transforms/simplifiers/hlo_dce.h"
 #include "xla/hlo/utils/hlo_query.h"
 #include "xla/hlo/utils/hlo_sharding_util.h"
+#include "xla/literal.h"
 #include "xla/literal_util.h"
 #include "xla/service/collective_ops_utils.h"
-#include "xla/service/hlo_dce.h"
 #include "xla/service/spmd/spmd_partitioner.h"
+#include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
@@ -77,6 +84,7 @@ HloInstruction* CreateConstantBase(const Shape& shape, Literal value, T* b,
                                                               PrimitiveType)) {
   if (shape.IsTuple()) {
     std::vector<HloInstruction*> elements;
+    elements.reserve(ShapeUtil::TupleElementCount(shape));
     for (int64_t i = 0; i < ShapeUtil::TupleElementCount(shape); ++i) {
       elements.push_back(
           CreateConstantBase(ShapeUtil::GetTupleElementShape(shape, i),
@@ -528,7 +536,7 @@ HloSharding CreateMatchingShardingOnDims(const Shape& target_shape,
 std::optional<GatherScatterParallelDimSharding>
 GatherScatterOperandsShardedAcrossParallelDims(
     const HloInstruction& operand, const HloInstruction& indices,
-    const hlo_sharding_util::GatherScatterParallelDims& parallel_dims);
+    const hlo_sharding_util::GatherScatterDims& parallel_dims);
 
 // Pattern rewrite preprocessing utilities.
 

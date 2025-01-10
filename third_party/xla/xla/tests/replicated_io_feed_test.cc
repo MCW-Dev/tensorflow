@@ -20,7 +20,7 @@ limitations under the License.
 #include "xla/test_helpers.h"
 #include "xla/tests/hlo_test_base.h"
 #include "xla/tests/test_macros.h"
-#include "tsl/lib/core/status_test_util.h"
+#include "xla/tsl/lib/core/status_test_util.h"
 
 // Tests replicated infeed/outfeed operations.
 
@@ -50,14 +50,16 @@ XLA_TEST_F(ReplicatedIOFeedTest, InfeedAndOutfeed) {
     result = u32[] add(infeed.data, replica_id)
     outfeed = token[] outfeed(result, infeed.token), outfeed_shape=u32[]
   })";
+
   const int kNumReplicas = 4;
+  SKIP_TEST_IF_NUM_DEVICES_LESS_THAN(kNumReplicas);
+
   auto config = GetModuleConfigForTest();
   config.set_replica_count(kNumReplicas);
   std::unique_ptr<HloModule> module =
       ParseAndReturnVerifiedModule(hlo_text, config).value();
   auto executable =
-      test_runner_.CreateExecutable(std::move(module), /*run_hlo_passes=*/true)
-          .value();
+      CreateExecutable(std::move(module), /*run_hlo_passes=*/true).value();
 
   auto device_assn = MakeDeviceAssn(kNumReplicas);
 
@@ -78,7 +80,7 @@ XLA_TEST_F(ReplicatedIOFeedTest, InfeedAndOutfeed) {
   opts.use_threads = true;
 
   TF_ASSERT_OK(
-      test_runner_.ExecuteReplicated(executable.get(), opts, &device_assn)
+      ExecuteReplicatedWithHloRunner(executable.get(), opts, &device_assn)
           .status());
 
   // Verify that each infeed and outfeed is routed correctly. Each replica

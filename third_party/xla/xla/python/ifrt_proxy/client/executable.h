@@ -23,17 +23,20 @@
 #include <string>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/node_hash_set.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 #include "llvm/Support/ExtensibleRTTI.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/layout.h"
 #include "xla/pjrt/pjrt_executable.h"
 #include "xla/python/ifrt/array.h"
+#include "xla/python/ifrt/attribute_map.h"
 #include "xla/python/ifrt/client.h"
 #include "xla/python/ifrt/device.h"
 #include "xla/python/ifrt/executable.h"
@@ -53,8 +56,6 @@ class LoadedExecutable final
   LoadedExecutable(xla::ifrt::Client* client,
                    std::shared_ptr<RpcHelper> rpc_helper, uint64_t handle,
                    std::string name, int num_devices,
-                   std::vector<xla::ifrt::LoadedExecutable::LogicalDeviceIds>
-                       addressable_device_logical_device_ids,
                    std::vector<xla::ifrt::Device*> addressable_devices,
                    absl::StatusOr<std::optional<std::string>> fingerprint,
                    Future<> ready_future,
@@ -76,29 +77,25 @@ class LoadedExecutable final
 
   std::optional<std::vector<OpSharding>> GetParameterShardings() const override;
   std::optional<std::vector<OpSharding>> GetOutputShardings() const override;
-  absl::StatusOr<std::vector<std::unique_ptr<Layout>>> GetParameterLayouts()
-      const override;
-  absl::StatusOr<std::vector<std::unique_ptr<Layout>>> GetOutputLayouts()
-      const override;
+  absl::StatusOr<std::vector<std::unique_ptr<xla::PjRtLayout>>>
+  GetParameterLayouts() const override;
+  absl::StatusOr<std::vector<std::unique_ptr<xla::PjRtLayout>>>
+  GetOutputLayouts() const override;
   absl::StatusOr<std::vector<std::vector<absl::string_view>>>
   GetOutputMemoryKinds() const override;
   absl::StatusOr<std::vector<std::shared_ptr<HloModule>>> GetHloModules()
       const override;
 
-  absl::StatusOr<absl::flat_hash_map<std::string,
-                                     xla::ifrt::Executable::CostAnalysisValue>>
-  GetCostAnalysis() const override;
+  absl::StatusOr<xla::ifrt::AttributeMap> GetCostAnalysis() const override;
 
   absl::StatusOr<ExecuteResult> Execute(
       absl::Span<tsl::RCReference<xla::ifrt::Array>> args,
       const ExecuteOptions& options,
-      std::optional<DeviceList> devices) override;
+      std::optional<tsl::RCReference<xla::ifrt::DeviceList>> devices) override;
 
   Future<> Delete() override;
   bool IsDeleted() const override;
 
-  absl::Span<const LogicalDeviceIds> addressable_device_logical_ids()
-      const override;
   absl::Span<xla::ifrt::Device* const> addressable_devices() const override;
 
   static char ID;  // NOLINT
@@ -129,11 +126,12 @@ class LoadedExecutable final
   const uint64_t handle_;
   const std::string name_;
   const int num_devices_;
-  const std::vector<xla::ifrt::LoadedExecutable::LogicalDeviceIds>
-      addressable_device_logical_device_ids_;
   const std::vector<xla::ifrt::Device*> addressable_devices_;
   const absl::StatusOr<std::optional<std::string>> fingerprint_;
   const Future<> ready_future_;
+
+  class OutputSpecCache;
+  const std::unique_ptr<OutputSpecCache> output_spec_cache_;
 
   // Metadata queried when the executable is created. Declared as `mutable`
   // since `Future::Await()` is not const.

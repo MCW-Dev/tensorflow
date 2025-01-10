@@ -15,7 +15,9 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "tensorflow/core/platform/logging.h"
+#include "tensorflow/core/platform/status.h"
 #include "tensorflow/lite/toco/graph_transformations/graph_transformations.h"
 #include "tensorflow/lite/toco/model.h"
 #include "tensorflow/lite/toco/tooling_util.h"
@@ -49,9 +51,9 @@ bool TransposeAffectsMemoryOrder(std::vector<int> perm,
 
 }  // namespace
 
-::tensorflow::Status ConvertTrivialTransposeToReshape::Run(Model* model,
-                                                           std::size_t op_index,
-                                                           bool* modified) {
+absl::Status ConvertTrivialTransposeToReshape::Run(Model* model,
+                                                   std::size_t op_index,
+                                                   bool* modified) {
   *modified = false;
   auto transpose_it = model->operators.begin() + op_index;
   if (transpose_it->get()->type != OperatorType::kTranspose) {

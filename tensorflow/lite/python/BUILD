@@ -10,6 +10,7 @@ package(
         "//tensorflow:__subpackages__",
         "//tensorflow:internal",
         "//third_party/odml/model_customization/quantization:__subpackages__",
+        "//third_party/py/ai_edge_torch:__subpackages__",
         "//third_party/py/tensorflow_federated:__subpackages__",
         "//third_party/tflite_micro:__subpackages__",
     ],
@@ -21,11 +22,12 @@ exports_files(["tflite_convert.py"])
 flatbuffer_py_library(
     name = "schema_py",
     srcs = ["//tensorflow/compiler/mlir/lite/schema:schema.fbs"],
+    visibility = ["//visibility:public"],
 )
 
 flatbuffer_py_library(
     name = "conversion_metadata_schema_py",
-    srcs = ["//tensorflow/lite/schema:conversion_metadata.fbs"],
+    srcs = ["//tensorflow/compiler/mlir/lite/schema:conversion_metadata.fbs"],
 )
 
 py_strict_library(
@@ -52,6 +54,9 @@ py_strict_test(
         "//tensorflow/lite/python/testdata:interpreter_test_data",
         "//tensorflow/lite/python/testdata:test_delegate.so",
     ],
+    # Static linking is required because this loads a cc_binary as a shared
+    # library, which would otherwise create ODR violations.
+    # copybara:uncomment linking_mode = "static",
     python_version = "PY3",
     srcs_version = "PY3",
     tags = [
@@ -197,6 +202,7 @@ py_strict_library(
         "//tensorflow/compiler/mlir/quantization/tensorflow/python:representative_dataset",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/lite/experimental/microfrontend:audio_microfrontend_py",
+        "//tensorflow/lite/profiling/proto:model_runtime_info_py",
         "//tensorflow/lite/profiling/proto:profiling_info_py",
         "//tensorflow/lite/python/metrics",
         "//tensorflow/lite/python/optimize:calibrator",
@@ -458,7 +464,7 @@ py_strict_library(
     srcs = ["lite_constants.py"],
     srcs_version = "PY3",
     deps = [
-        "//tensorflow/lite/toco:toco_flags_proto_py",
+        "//tensorflow/compiler/mlir/lite:converter_flags_proto_py",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/util:all_util",
         "//tensorflow/python/util:tf_export",
@@ -474,19 +480,17 @@ pytype_strict_library(
         ":convert_phase",
         ":lite_constants",
         ":util",
+        "//tensorflow/compiler/mlir/lite:converter_flags_proto_py",
+        "//tensorflow/compiler/mlir/lite:model_flags_proto_py",
+        "//tensorflow/compiler/mlir/lite:types_proto_py",
+        "//tensorflow/compiler/mlir/lite/metrics:converter_error_data_proto_py",
         "//tensorflow/compiler/mlir/lite/python:wrap_converter",
         "//tensorflow/compiler/mlir/quantization/stablehlo:quantization_config_proto_py",
         "//tensorflow/compiler/mlir/quantization/stablehlo:quantization_options_proto_py",
-        "//tensorflow/lite/python/metrics:converter_error_data_proto_py",
         "//tensorflow/lite/python/metrics:metrics_wrapper",
-        "//tensorflow/lite/toco:model_flags_proto_py",
-        "//tensorflow/lite/toco:toco_flags_proto_py",
-        "//tensorflow/lite/toco:types_proto_py",
-        "//tensorflow/lite/toco/python:toco_from_protos",
         "//tensorflow/lite/tools:flatbuffer_utils",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:tensor_shape",
-        "//tensorflow/python/platform:resource_loader",
         "//tensorflow/python/util:deprecation",
         "//tensorflow/python/util:tf_export",
     ],
@@ -517,9 +521,9 @@ pytype_strict_contrib_test(
         ":convert",
         ":interpreter",
         ":op_hint",
-        "//tensorflow/lite/python/metrics:converter_error_data_proto_py",
+        "//tensorflow/compiler/mlir/lite:converter_flags_proto_py",
+        "//tensorflow/compiler/mlir/lite/metrics:converter_error_data_proto_py",
         "//tensorflow/lite/python/metrics:metrics_wrapper",
-        "//tensorflow/lite/toco:toco_flags_proto_py",
         "//tensorflow/python/client:session",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:graph_util",
@@ -618,8 +622,8 @@ py_strict_library(
     srcs_version = "PY3",
     visibility = ["//tensorflow/lite:__subpackages__"],
     deps = [
+        "//tensorflow/compiler/mlir/lite/metrics:converter_error_data_proto_py",
         "//tensorflow/lite/python/metrics",
-        "//tensorflow/lite/python/metrics:converter_error_data_proto_py",
     ],
 )
 

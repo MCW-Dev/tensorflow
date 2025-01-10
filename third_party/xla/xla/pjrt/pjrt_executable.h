@@ -124,10 +124,6 @@ struct CompileOptions {
       const google::protobuf::Map<std::string, xla::OptionOverrideProto>&
           env_option_overrides);
 
-  void SerializeEnvOptionOverrides(
-      google::protobuf::Map<std::string, xla::OptionOverrideProto>*
-          output_env_option_overrides) const;
-
   // Serialize the CompileOptions into a CompileOptionsProto.
   absl::StatusOr<CompileOptionsProto> ToProto() const;
 
@@ -299,7 +295,7 @@ struct CompiledMemoryStats {
   std::string serialized_hlo_proto = "";
   std::string DebugString() const;
 
-  CompiledMemoryStatsProto ToProto();
+  CompiledMemoryStatsProto ToProto() const;
 
   static CompiledMemoryStats FromProto(const CompiledMemoryStatsProto& proto);
 

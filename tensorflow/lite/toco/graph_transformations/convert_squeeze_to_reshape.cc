@@ -17,11 +17,12 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
-#include "absl/strings/str_cat.h"
+#include "absl/status/status.h"
+#include "tensorflow/core/platform/logging.h"
+#include "tensorflow/core/platform/status.h"
 #include "tensorflow/lite/toco/graph_transformations/graph_transformations.h"
 #include "tensorflow/lite/toco/model.h"
 #include "tensorflow/lite/toco/tooling_util.h"
-#include "tensorflow/core/platform/logging.h"
 
 namespace toco {
 
@@ -30,9 +31,8 @@ namespace toco {
 // means that the data layout will never change with this op, just the shape.
 // By converting these to reshapes once we have run shape propagation we allow
 // standard reshape optimization transforms to do their magic.
-::tensorflow::Status ConvertSqueezeToReshape::Run(Model* model,
-                                                  std::size_t op_index,
-                                                  bool* modified) {
+absl::Status ConvertSqueezeToReshape::Run(Model* model, std::size_t op_index,
+                                          bool* modified) {
   *modified = false;
   auto squeeze_it = model->operators.begin() + op_index;
   if (squeeze_it->get()->type != OperatorType::kSqueeze) {

@@ -17,8 +17,10 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 
 #include "absl/algorithm/container.h"
+#include "absl/strings/string_view.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
@@ -32,7 +34,8 @@ namespace hlo_query {
 
 bool IsCollectiveCommunicationOp(HloOpcode op) {
   return op == HloOpcode::kAllReduce || op == HloOpcode::kAllGather ||
-         op == HloOpcode::kAllToAll || op == HloOpcode::kCollectivePermute ||
+         op == HloOpcode::kAllToAll || op == HloOpcode::kRaggedAllToAll ||
+         op == HloOpcode::kCollectivePermute ||
          op == HloOpcode::kCollectiveBroadcast ||
          op == HloOpcode::kReduceScatter || op == HloOpcode::kAllReduceStart ||
          op == HloOpcode::kAllGatherStart ||
@@ -175,6 +178,13 @@ bool IsBroadcastOfParameter(const HloInstruction& instr) {
          instr.operand(0)->opcode() == HloOpcode::kParameter;
 }
 
+bool IsEffectiveParameter(const HloInstruction& instr) {
+  return instr.opcode() == HloOpcode::kParameter ||
+         ((instr.opcode() == HloOpcode::kBitcast ||
+           instr.opcode() == HloOpcode::kGetTupleElement) &&
+          IsEffectiveParameter(*instr.operand(0)));
+}
+
 HloInstruction* GetFirstInstructionWithOpcode(const HloComputation& computation,
                                               const HloOpcode opcode) {
   auto instructions = computation.instructions();
@@ -266,6 +276,32 @@ HloInstruction* GetUniqueGteInstruction(const HloInstruction* operand,
     gte = instr;
   }
   return gte;
+}
+
+HloComputation* FindComputation(HloModule* module, absl::string_view name) {
+  auto computations = module->computations();
+  auto it = absl::c_find_if(
+      computations, [&](HloComputation* c) { return c->name() == name; });
+  if (it == computations.end()) {
+    return nullptr;
+  }
+  return *it;
+}
+
+HloInstruction* FindInstruction(const HloComputation* computation,
+                                absl::string_view name) {
+  for (HloInstruction* instruction : computation->instructions()) {
+    if (instruction->name() == name) return instruction;
+  }
+  return nullptr;
+}
+
+HloInstruction* FindInstruction(const HloComputation* computation,
+                                HloOpcode opcode) {
+  for (auto* instruction : computation->instructions()) {
+    if (instruction->opcode() == opcode) return instruction;
+  }
+  return nullptr;
 }
 
 }  // namespace hlo_query

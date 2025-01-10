@@ -24,11 +24,11 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/strings/numbers.h"
 #include "absl/time/time.h"
+#include "xla/hlo/analysis/hlo_dataflow_analysis.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/model/gpu_hlo_cost_analysis.h"
-#include "xla/service/hlo_dataflow_analysis.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/util.h"
 
@@ -111,8 +111,11 @@ float GetMaxSysBwFromGpu(const se::CudaComputeCapability cc,
       return bandwidths_table[1];
     case se::CudaComputeCapability::HOPPER:
       return bandwidths_table[2];
+    case se::CudaComputeCapability::BLACKWELL:
+      return bandwidths_table[3];
+    default:
+      return bandwidths_table[4];
   }
-  return -1;
 }
 
 }  // namespace
@@ -133,7 +136,7 @@ float GpuPerformanceWithCollectiveModel::GetNvlinkBw(
 }
 
 /*static*/ bool GpuPerformanceWithCollectiveModel::InitNvml() {
-#if GOOGLE_CUDA
+#if GOOGLE_CUDA && (defined(PLATFORM_POSIX) || defined(PLATFORM_GOOGLE))
   void* libhandle = dlopen("libnvidia-ml.so.1", RTLD_NOW);
   CHECK(libhandle != nullptr) << "Failed to open libnvidia-ml.so.1";
 
@@ -189,7 +192,8 @@ GpuPerformanceWithCollectiveModel::CheckIfNvlinkSupportsP2P() {
   nvmlReturn_t nvlink_cap_result = xla_nvmlDeviceGetNvLinkCapability(
       nvml_device, /*nvlink link number*/ 0, NVML_NVLINK_CAP_P2P_SUPPORTED,
       &supported_p2p);
-  CHECK(nvlink_cap_result == NVML_SUCCESS);
+  CHECK(nvlink_cap_result == NVML_SUCCESS ||
+        nvlink_cap_result == NVML_ERROR_NOT_SUPPORTED);
   CHECK(ShutdownNvml()) << "NVML shutdown failed.";
   return supported_p2p;
 #else

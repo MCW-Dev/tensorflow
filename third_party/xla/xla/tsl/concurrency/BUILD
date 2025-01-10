@@ -1,6 +1,6 @@
-load("@local_tsl//tsl/platform:build_config.bzl", "tsl_cc_test")
-load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
 load("//xla/tsl:tsl.default.bzl", "get_compatible_with_portable")
+load("//xla/tsl/platform:build_config.bzl", "tsl_cc_test")
+load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -31,7 +31,6 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:logging",
-        "@local_tsl//tsl/platform:platform_port",
     ],
 )
 
@@ -72,6 +71,7 @@ tsl_cc_test(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:test",
+        "@local_tsl//tsl/platform:test_benchmark",
         "@local_tsl//tsl/platform:test_main",
     ],
 )

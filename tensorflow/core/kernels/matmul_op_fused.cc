@@ -57,7 +57,6 @@ limitations under the License.
 #endif
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-#include "xla/stream_executor/gpu/gpu_asm_opts.h"
 #include "xla/stream_executor/gpu/redzone_allocator.h"
 #include "xla/stream_executor/integrations/tf_allocator_adapter.h"
 #include "tensorflow/core/kernels/conv_ops_gpu.h"
@@ -283,7 +282,7 @@ StatusOr<std::vector<xla::AutotuneResult>> AutotuneMatMulImpl(
     // TODO(zhengxq): profile each algorithm multiple times to better
     // accuracy.
     se::RedzoneAllocator rz_scratch_allocator(
-        stream, &tf_allocator_adapter, se::GpuAsmOpts(),
+        stream, &tf_allocator_adapter,
         /*memory_limit=*/scratch_size_limit);
     BlasScratchAllocator scratch_allocator(ctx, scratch_size_limit);
     se::ScratchAllocator* allocator_used =
@@ -355,8 +354,7 @@ StatusOr<AutotuneEntry<se::dnn::FusedMatmulOp>> AutotuneFusedMatmul(
 
     se::TfAllocatorAdapter tf_allocator_adapter(ctx->device()->GetAllocator({}),
                                                 stream);
-    se::RedzoneAllocator rz_allocator(stream, &tf_allocator_adapter,
-                                      se::GpuAsmOpts());
+    se::RedzoneAllocator rz_allocator(stream, &tf_allocator_adapter);
     se::DeviceMemory<T> c_ptr_rz(WrapRedzoneBestEffort(&rz_allocator, c_ptr));
 
     std::vector<std::unique_ptr<const se::dnn::FusedMatmulRunner>> runners;
@@ -368,7 +366,7 @@ StatusOr<AutotuneEntry<se::dnn::FusedMatmulOp>> AutotuneFusedMatmul(
     TF_RETURN_IF_ERROR(dnn->GetFusedMatmulRunners(
         CudnnUseFrontend(), element_type, element_type, element_type, stream,
         trans_a, trans_b, m, n, k, lda, ldb, ldc, activation_mode,
-        /*use_fallback=*/false, GetNumericOptions(), &runners));
+        /*use_fallback=*/false, GetNumericOptionsForCuDnn(), &runners));
 
     auto launch_func =
         [&](se::ScratchAllocator* allocator_used,
@@ -412,7 +410,8 @@ StatusOr<AutotuneEntry<se::dnn::FusedMatmulOp>> AutotuneFusedMatmul(
       TF_RETURN_IF_ERROR(dnn->GetFusedMatmulRunners(
           CudnnUseFrontend(), element_type, element_type, element_type, stream,
           trans_a, trans_b, m, n, k, lda, ldb, ldc, activation_mode,
-          /*use_fallback=*/true, GetNumericOptions(), &fallback_runners));
+          /*use_fallback=*/true, GetNumericOptionsForCuDnn(),
+          &fallback_runners));
 
       TF_ASSIGN_OR_RETURN(
           auto fallback_results,

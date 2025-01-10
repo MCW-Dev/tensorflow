@@ -16,14 +16,20 @@ limitations under the License.
 #ifndef XLA_SERVICE_HLO_VERIFIER_H_
 #define XLA_SERVICE_HLO_VERIFIER_H_
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "xla/hlo/ir/dfs_hlo_visitor_with_default.h"
-#include "xla/service/hlo_pass_interface.h"
+#include "xla/hlo/pass/hlo_pass_interface.h"
+#include "xla/xla_data.pb.h"
 
 namespace xla {
 
@@ -96,6 +102,11 @@ struct HloVerifierOpts {
     return std::move(*this);
   }
 
+  HloVerifierOpts&& VerifyInstructionNameUnchanged() {
+    verify_instruction_name_unchanged = true;
+    return std::move(*this);
+  }
+
   bool IsLayoutSensitive() const { return layout_sensitive; }
 
   bool AllowMixedPrecision() const { return allow_mixed_precision; }
@@ -139,6 +150,14 @@ struct HloVerifierOpts {
   // Whether unbounded dynamic sizes should be allowed for shapes.
   bool allow_unbounded_dynamism = false;
 
+  // Check whether instruction has been renamed.
+  // Should enforce no function renames unless the name instruction has been
+  // cloned (".clone" suffix) or rematted (".remat");
+  bool verify_instruction_name_unchanged = false;
+
+  // Check if channel instructions all have unique channel ids.
+  bool verify_unique_channel_ids = true;
+
   HloPredicate instruction_can_change_layout;
 
   // Returns a target-specific shape size.
@@ -181,11 +200,13 @@ class ShapeVerifier : public DfsHloVisitor {
   absl::Status HandleAllReduceStart(HloInstruction* hlo) override;
   absl::Status HandleAllReduceDone(HloInstruction* hlo) override;
   absl::Status HandleAllToAll(HloInstruction* hlo) override;
+  absl::Status HandleRaggedAllToAll(HloInstruction* hlo) override;
   absl::Status HandleCollectiveBroadcast(HloInstruction* hlo) override;
   absl::Status HandleCollectivePermute(HloInstruction* hlo) override;
   absl::Status HandleCollectivePermuteStart(HloInstruction* hlo) override;
   absl::Status HandleCollectivePermuteDone(HloInstruction* hlo) override;
   absl::Status HandlePartitionId(HloInstruction* hlo) override;
+  absl::Status HandleRaggedDot(HloInstruction* ragged_dot) override;
   absl::Status HandleReplicaId(HloInstruction* hlo) override;
   absl::Status HandleReducePrecision(HloInstruction* reduce_precision) override;
   absl::Status HandleInfeed(HloInstruction*) override;

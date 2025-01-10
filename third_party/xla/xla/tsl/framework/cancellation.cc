@@ -78,7 +78,7 @@ void CancellationManager::StartCancelWithStatus(const absl::Status& status) {
       LOG(WARNING) << "Cancellation callback \"" << config.name
                    << "\" is triggered due to a "
                    << (StatusGroup::IsDerived(status) ? "derived" : "root")
-                   << " error: " << status.ToString();
+                   << " error: " << status;
     }
     config.callback();
   }
@@ -103,7 +103,7 @@ bool CancellationManager::RegisterCallback(CancellationToken token,
 
 bool CancellationManager::RegisterCallbackWithErrorLogging(
     CancellationToken token, CancelCallback callback,
-    tsl::StringPiece callback_name) {
+    absl::string_view callback_name) {
   return RegisterCallbackConfig(
       token, CallbackConfiguration{callback, std::string(callback_name), true});
 }

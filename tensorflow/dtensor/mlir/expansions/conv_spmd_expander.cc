@@ -17,18 +17,27 @@ limitations under the License.
 
 #include <string>
 
+#include "absl/status/status.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "mlir/IR/Attributes.h"  // from @llvm-project
+#include "mlir/IR/Builders.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
+#include "mlir/IR/Value.h"  // from @llvm-project
+#include "mlir/IR/ValueRange.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_attributes.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_device.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/core/platform/errors.h"
+#include "tensorflow/core/platform/types.h"
 #include "tensorflow/dtensor/cc/dstatus.h"
 #include "tensorflow/dtensor/cc/tensor_layout.h"
 #include "tensorflow/dtensor/mlir/collectives.h"
+#include "tensorflow/dtensor/mlir/dtensor_dialect/ir/dtensor_attributes.h"
+#include "tensorflow/dtensor/mlir/ir/tf_dtensor.h"
 #include "tensorflow/dtensor/mlir/layout_parsing.h"
 #include "tensorflow/dtensor/mlir/op_utils.h"
 #include "tensorflow/dtensor/mlir/shape_utils.h"
@@ -41,8 +50,8 @@ namespace dtensor {
 namespace {
 
 template <typename ConvOp>
-Status VerifyConvLayout(const Layout& input_layout, const Layout& filter_layout,
-                        ConvOp conv_op) {
+absl::Status VerifyConvLayout(const Layout& input_layout,
+                              const Layout& filter_layout, ConvOp conv_op) {
   if (!filter_layout.IsFullyReplicated())
     return errors::InvalidArgument(
         "Filter for convolution must have fully replicated layout.");
@@ -323,7 +332,7 @@ StatusOr<mlir::Operation*> HandleConvBackpropInput(
   }
 
   llvm::SmallVector<int64_t, 4> global_shape;
-  Status extract_status =
+  absl::Status extract_status =
       ExtractConstVectorFromValue(conv_op.getInputSizes(), &global_shape);
 
   // If the input is dynamic size, we expect the output is all so dynamic size

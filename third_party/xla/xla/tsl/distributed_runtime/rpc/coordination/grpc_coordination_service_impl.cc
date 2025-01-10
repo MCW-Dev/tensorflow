@@ -57,6 +57,8 @@ void GrpcCoordinationServiceImpl::HandleRPCsLoop() {
   ENQUEUE_REQUEST(DeleteKeyValue);
   ENQUEUE_REQUEST(Barrier);
   ENQUEUE_REQUEST(CancelBarrier);
+  ENQUEUE_REQUEST(GetAliveTasks);
+  ENQUEUE_REQUEST(PollForError);
 #undef ENQUEUE_REQUEST
 
   void* tag;  // Matches the operation started against this cq_.

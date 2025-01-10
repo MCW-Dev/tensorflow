@@ -279,7 +279,7 @@ static absl::StatusOr<Tensor> GetOrCreateTensorForOutput(
 }
 
 // Sets output `output_num` for `ctx` provided it is known at a compile time.
-Status SetOutputForConstant(
+absl::Status SetOutputForConstant(
     OpKernelContext* ctx, bool requires_copy_to_device,
     const XlaCompiler::CompilationResult* compilation_result, int output_num) {
   CHECK(compilation_result->outputs[output_num].is_constant);
@@ -302,7 +302,7 @@ Status SetOutputForConstant(
     }
     ctx->op_device_context()->CopyCPUTensorToDevice(
         &const_tensor, device, output_tensor,
-        [&](Status status) { TF_CHECK_OK(status); });
+        [&](absl::Status status) { TF_CHECK_OK(status); });
 
     if (device->device_type() == DEVICE_GPU) {
       // The GPUDeviceContext enqueues the host->device transfer in a
@@ -357,7 +357,7 @@ absl::StatusOr<std::vector<VariableInfo>> GatherVariableInfo(
   return std::move(out);
 }
 
-Status XlaComputationLaunchContext::PopulateOutputs(
+absl::Status XlaComputationLaunchContext::PopulateOutputs(
     OpKernelContext* ctx,
     const XlaCompiler::CompilationResult* compilation_result,
     ScopedShapedBuffer output, int missing_ctx_input_prefix,
@@ -606,7 +606,7 @@ XlaComputationLaunchContext::BuildXlaCompilerArguments(
 }
 
 // TODO(b/289002708) Create a unit test to cover use_pjrt_tensor_buffer=true.
-Status PreparePjRtExecutableArguments(
+absl::Status PreparePjRtExecutableArguments(
     int num_missing_prefix_ctx_inputs, const std::vector<int>& input_mapping,
     const std::vector<const Tensor*>& inputs,
     const absl::flat_hash_map<int, const Tensor*>& variable_snapshots,
@@ -653,13 +653,8 @@ Status PreparePjRtExecutableArguments(
             tensor->tensor_data().size());
         absl::Span<const std::shared_ptr<xla::BufferSequencingEvent>>
             definition_events;
-        TF_ASSIGN_OR_RETURN(
-            xla::LocalDeviceState * local_device_state,
-            tensorflow::down_cast<xla::PjRtStreamExecutorDevice*>(pjrt_device)
-                ->GetLocalDeviceState());
         auto device_buffer = std::make_shared<xla::TrackedDeviceBuffer>(
-            /*allocator=*/nullptr,
-            local_device_state->local_device_id().value(),
+            /*allocator=*/nullptr, pjrt_device,
             std::initializer_list<se::DeviceMemoryBase>{dmem},
             definition_events, /*on_delete_callback=*/[]() {});
         xla::Shape device_shape;
@@ -689,7 +684,7 @@ Status PreparePjRtExecutableArguments(
 }
 
 // TODO(b/289002708) Create a unit test to cover use_pjrt_tensor_buffer=true.
-Status PopulateCtxOutputsFromPjRtExecutableOutputs(
+absl::Status PopulateCtxOutputsFromPjRtExecutableOutputs(
     int num_missing_prefix_ctx_inputs, const std::vector<const Tensor*>& inputs,
     const std::vector<VariableInfo>& variables,
     const XlaCompiler::CompilationResult& compilation_result,
@@ -830,7 +825,7 @@ DeviceType GetDeviceType(OpKernelContext* ctx) {
   return DeviceType(device->device_type());
 }
 
-Status RunPjRtExecutable(
+absl::Status RunPjRtExecutable(
     const std::vector<const Tensor*>& inputs,
     const std::vector<VariableInfo>& variables,
     const XlaCompiler::CompilationResult& compilation_result,
@@ -846,7 +841,7 @@ Status RunPjRtExecutable(
 }
 
 // TODO(b/289421064): Add unit test for this.
-Status RunPjRtExecutable(
+absl::Status RunPjRtExecutable(
     int num_missing_prefix_ctx_inputs, const std::vector<const Tensor*>& inputs,
     const absl::flat_hash_map<int, const Tensor*>& variable_snapshots,
     const std::vector<VariableInfo>& updated_variables,
@@ -858,9 +853,8 @@ Status RunPjRtExecutable(
                                           ->use_pjrt_tensor_buffer;
 
   const DeviceType& device_type = GetDeviceType(ctx);
-  TF_ASSIGN_OR_RETURN(const int pjrt_device_id,
-                      tsl::GetDeviceIdFromDeviceParsedName(
-                          ctx->device()->parsed_name(), device_type));
+  const int pjrt_device_id =
+      tsl::GetDeviceIdFromDeviceParsedName(ctx->device()->parsed_name());
   TF_ASSIGN_OR_RETURN(xla::PjRtDevice * device,
                       pjrt_client->LookupAddressableDevice(
                           xla::PjRtLocalDeviceId(pjrt_device_id)));
@@ -946,7 +940,7 @@ absl::StatusOr<std::vector<std::unique_ptr<xla::PjRtBuffer>>> RunPjRtExecutable(
   // is ready i.e. when the execution is complete.
   if (!owned_executable_args.empty() && future.has_value()) {
     future->OnReady([owned_executable_args =
-                         std::move(owned_executable_args)](Status s) {});
+                         std::move(owned_executable_args)](absl::Status s) {});
   }
 
   return execute_outputs;

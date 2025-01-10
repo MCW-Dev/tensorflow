@@ -72,6 +72,8 @@ class CuptiErrorManager : public xla::profiler::CuptiInterface {
 
   CUptiResult ActivityUsePerThreadBuffer() override;
 
+  CUptiResult SetActivityFlushPeriod(uint32_t period_ms) override;
+
   // Returns device ID for a given context.
   CUptiResult GetDeviceId(CUcontext context, uint32_t* device_id) override;
 
@@ -114,6 +116,8 @@ class CuptiErrorManager : public xla::profiler::CuptiInterface {
 
   CUptiResult GetGraphExecId(CUgraphExec graph_exec,
                              uint32_t* graph_id) override;
+
+  CUptiResult SetThreadIdType(CUpti_ActivityThreadIdType type) override;
 
   // Clears Undo stack. We are maintaining undo stack for each profiling phase.
   // Once the profiling is done, we need to clear the undo stack.

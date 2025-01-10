@@ -1,167 +1,105 @@
-diff --ruN a/stablehlo/CMakeLists.txt b/stablehlo/CMakeLists.txt
---- stablehlo/CMakeLists.txt
-+++ stablehlo/CMakeLists.txt
-@@ -13,154 +13,20 @@
- # See the License for the specific language governing permissions and
- # limitations under the License.
- #
--cmake_minimum_required(VERSION 3.15.0)
+diff --ruN a/stablehlo/build_tools/math/generate_ChloDecompositionPatternsMath.py b/stablehlo/build_tools/math/generate_ChloDecompositionPatternsMath.py
+--- stablehlo/build_tools/math/generate_ChloDecompositionPatternsMath.py
++++ stablehlo/build_tools/math/generate_ChloDecompositionPatternsMath.py
+@@ -71,8 +71,15 @@
  
--if(POLICY CMP0068)
--  cmake_policy(SET CMP0068 NEW)
--  set(CMAKE_BUILD_WITH_INSTALL_NAME_DIR ON)
--endif()
--
--if(POLICY CMP0075)
--  cmake_policy(SET CMP0075 NEW)
--endif()
--
--if(POLICY CMP0077)
--  cmake_policy(SET CMP0077 NEW)
--endif()
--
--# CMP0116: Ninja generators transform `DEPFILE`s from `add_custom_command()`
--# New in CMake 3.20. https://cmake.org/cmake/help/latest/policy/CMP0116.html
--if(POLICY CMP0116)
--  cmake_policy(SET CMP0116 OLD)
--endif()
--
--# Support for return(PROPAGATE ...) in functions.
--if (POLICY CMP0140)
--  cmake_policy(SET CMP0140 NEW)
--endif()
-+# This build of StableHLO is meant to be embedded in MLIR-HLO.
-+# As a result, its root CMakeLists.txt is different from the original
-+# CMakeLists.txt from https://github.com/openxla/stablehlo.
-+# All other files of this build of StableHLO except for this one are the same
-+# as the original files.
-+# To get access to a standalone build of StableHLO, check out the
-+# openxla/stablehlo repository.
+   output_file = os.path.relpath(
+       os.path.normpath(
+-          os.path.join(os.path.dirname(__file__), "..", "..", "stablehlo",
+-                       "transforms", output_filename)),
++          os.path.join(
++              os.path.dirname(__file__),
++              "..",
++              "..",
++              "stablehlo",
++              "transforms",
++              output_filename,
++          )
++      ),
+       os.getcwd(),
+   )
  
- #-------------------------------------------------------------------------------
- # Options and settings
- #-------------------------------------------------------------------------------
--option(STABLEHLO_BUILD_EMBEDDED "Build StableHLO as part of another project" OFF)
--option(STABLEHLO_ENABLE_BINDINGS_PYTHON "Enables StableHLO Python bindings" OFF)
--option(STABLEHLO_ENABLE_PYTHON_TF_TESTS "Enables StableHLO to SavedModel tests requiring TF" OFF)
--option(STABLEHLO_ENABLE_STRICT_BUILD "Build StableHLO with strict warnings and warnings as errors" OFF)
--option(STABLEHLO_ENABLE_SANITIZER "Enable a sanitizer [OFF, address]" OFF)
--option(STABLEHLO_ENABLE_SPLIT_DWARF "Enable split DWARF if the platform supports it" OFF)
--option(STABLEHLO_ENABLE_LLD "Use LLD as the linker if available" OFF)
+@@ -105,7 +112,8 @@
+     func = getattr(fa.algorithms, fname, None)
+     if func is None:
+       warnings.warn(
+-          f"{fa.algorithms.__name__} does not define {fname}. Skipping.")
++          f"{fa.algorithms.__name__} does not define {fname}. Skipping."
++      )
+       continue
+     ctx = fa.Context(paths=[fa.algorithms],
+                      parameters=dict(rewrite_keep_integer_literals=True))
+@@ -116,14 +124,15 @@
+     sources[-1] += src
+   source = "\n\n".join(sources) + "\n"
  
--#-------------------------------------------------------------------------------
--# Project setup and globals
--#-------------------------------------------------------------------------------
--set(STABLEHLO_EXTERNAL_PROJECT_BUILD OFF)
--
--if(NOT (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR) AND NOT MLIR_BINARY_DIR)
--  # Building as part of LLVM via the external project mechanism.
--  set(STABLEHLO_EXTERNAL_PROJECT_BUILD ON)
--else()
--  # Building standalone.
--  project(stablehlo LANGUAGES CXX C)
--  set(CMAKE_C_STANDARD 11)
--  set(CMAKE_CXX_STANDARD 17)
--endif()
--
--#-------------------------------------------------------------------------------
--# MLIR/LLVM Configuration
--#-------------------------------------------------------------------------------
--if (STABLEHLO_ENABLE_STRICT_BUILD)
--  set(LLVM_ENABLE_WARNINGS ON)
--  set(LLVM_ENABLE_WERROR ON)
--  set(LLVM_ENABLE_PEDANTIC ON)
--endif()
--
--# Find MLIR to install if we are building standalone. If building as part of
--# another project, let it handle the MLIR dependency. The dependent project
--# might use a bundled version of MLIR instead of installing, for instance.
--if(STABLEHLO_EXTERNAL_PROJECT_BUILD)
--  message(STATUS "Building StableHLO as an external LLVM project")
--  set(MLIR_MAIN_SRC_DIR ${LLVM_MAIN_SRC_DIR}/../mlir ) # --src-root
--  set(MLIR_INCLUDE_DIR ${MLIR_MAIN_SRC_DIR}/include ) # --includedir
--  set(MLIR_GENERATED_INCLUDE_DIR ${LLVM_BINARY_DIR}/tools/mlir/include)
--  include_directories(SYSTEM ${MLIR_INCLUDE_DIR})
--  include_directories(SYSTEM ${MLIR_GENERATED_INCLUDE_DIR})
--  include_directories(SYSTEM ${MLIR_TABLEGEN_OUTPUT_DIR})
--
--  set(BACKEND_PACKAGE_STRING "${PACKAGE_STRING}")
--  list(APPEND CMAKE_MODULE_PATH "${MLIR_MAIN_SRC_DIR}/cmake/modules")
--elseif(NOT STABLEHLO_BUILD_EMBEDDED)
--  message(STATUS "Building StableHLO with an installed MLIR")
--  find_package(MLIR REQUIRED CONFIG)
--  message(STATUS "Using MLIRConfig.cmake in: ${MLIR_DIR}")
--  message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
--  set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/bin)
--  set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/lib)
--  list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}")
--  list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
--else()
--  message(STATUS "Building StableHLO embedded in another project")
--endif()
--
--# Add the CMake modules specific to StableHLO
--list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
--
--if(LLVM_ENABLE_ZLIB)
--  find_package(ZLIB)
--endif()
--
--#-------------------------------------------------------------------------------
--# Performance configuration
--#-------------------------------------------------------------------------------
--
--include(CheckCXXCompilerFlag)
--include(CheckLinkerFlag)
--if (STABLEHLO_ENABLE_LLD)
--  message(STATUS "Enabling LLD as the linker")
--  add_link_options("-fuse-ld=lld")
--endif()
--
--if(STABLEHLO_ENABLE_SPLIT_DWARF)
--    check_cxx_compiler_flag(-gsplit-dwarf STABLEHLO_SUPPORTS_SPLIT_DWARF)
--    if (STABLEHLO_SUPPORTS_SPLIT_DWARF)
--      message(STATUS "Enabling split-dwarf build")
--      add_compile_options(-gsplit-dwarf -ggnu-pubnames)
--    endif()
--    check_linker_flag(CXX "-Wl,--gdb-index" STABLEHLO_SUPPORTS_GDB_INDEX)
--    # If we set LLD it doesn't seem to affect the check_linker_flag above.
--    # Account for it with the generator expression OR
--    if (STABLEHLO_SUPPORTS_GDB_INDEX OR STABLEHLO_ENABLE_LLD)
--      message(STATUS "Enabling GDB index in binary")
--      add_link_options("-Wl,--gdb-index")
--    endif()
--endif()
--
--include(TableGen)
--include(AddLLVM)
--include(AddMLIR)
--include(HandleLLVMOptions)
--include_directories(${LLVM_INCLUDE_DIRS})
--include_directories(${MLIR_INCLUDE_DIRS})
--include_directories(${CMAKE_CURRENT_SOURCE_DIR})
--include_directories(${CMAKE_CURRENT_BINARY_DIR})
--link_directories(${LLVM_BUILD_LIBRARY_DIR})
--add_definitions(${LLVM_DEFINITIONS})
--
--
--#-------------------------------------------------------------------------------
--# Sanitizer configuration
--#-------------------------------------------------------------------------------
--
--include(SetupSanitizers)
--setup_sanitizers()
--
--#-------------------------------------------------------------------------------
--# Python configuration
--#-------------------------------------------------------------------------------
--
--if(STABLEHLO_ENABLE_BINDINGS_PYTHON)
--  include(MLIRDetectPythonEnv)
--  mlir_configure_python_dev_packages()
--endif()
-+set(STABLEHLO_ENABLE_BINDINGS_PYTHON ${MHLO_ENABLE_BINDINGS_PYTHON})
+-  if chloname.startswith('StableHLO_'):
++  if chloname.startswith("StableHLO_"):
+     # an ugly hack to fix the definition of stablehlo complex math
+     # functions. TODO(pearu): add the corresponding feature to
+     # functional_algorithms stablehlo printer
+-    NameOp = chloname.split('_', 1)[1]
++    NameOp = chloname.split("_", 1)[1]
+     source = source.replace(
+-        f'def : Pat<({chloname}',
+-        f'def {NameOp}_ComplexElementType_ComplexMathExpander : Pat<({chloname}'
++        f"def : Pat<({chloname}",
++        f"def {NameOp}_ComplexElementType_ComplexMathExpander :"
++        f" Pat<({chloname}",
+     )
  
- #-------------------------------------------------------------------------------
- # Directory setup
+   if os.path.isfile(output_file):
+diff --ruN a/stablehlo/build_tools/math/generate_tests.py b/stablehlo/build_tools/math/generate_tests.py
+--- stablehlo/build_tools/math/generate_tests.py
++++ stablehlo/build_tools/math/generate_tests.py
+@@ -64,10 +64,12 @@
+     dict(name="acosh", mpmath_name="arccosh"),
+     dict(name="atanh", mpmath_name="arctanh"),
+     dict(name="square", mpmath_name="square"),
+-    dict(name="log_plus_one",
+-         mpmath_name="log1p",
+-         namespace="stablehlo",
+-         passes="--stablehlo-complex-math-expander"),
++    dict(
++        name="log_plus_one",
++        mpmath_name="log1p",
++        namespace="stablehlo",
++        passes="--stablehlo-complex-math-expander",
++    ),
+ ]
+ 
+ 
+@@ -138,13 +140,16 @@
+       params = fa.utils.function_validation_parameters(opname, dtype)
+       max_ulp_difference = op.get(
+           "max_ulp_difference",
+-          params.get("max_valid_ulp_count", default_max_ulp_difference))
++          params.get("max_valid_ulp_count", default_max_ulp_difference),
++      )
+ 
+       nmp = fa.utils.numpy_with_mpmath(
+           extra_prec_multiplier=op.get(
+               "extra_prec_multiplier",
+-              params.get("extra_prec_multiplier",
+-                         default_extra_prec_multiplier)),
++              params.get(
++                  "extra_prec_multiplier", default_extra_prec_multiplier
++              ),
++          ),
+           flush_subnormals=flush_subnormals,
+       )
+ 
+@@ -208,8 +213,10 @@
+           continue
+ 
+       f = open(fname, "w")
+-      f.write(f"// RUN: stablehlo-opt {passes} %s |"
+-              " stablehlo-translate --interpret\n")
++      f.write(
++          f"// RUN: stablehlo-opt {passes} %s |"
++          " stablehlo-translate --interpret\n"
++      )
+       f.write(
+           "// This file is generated, see build_tools/math/README.md for more"
+           " information.\n")
 

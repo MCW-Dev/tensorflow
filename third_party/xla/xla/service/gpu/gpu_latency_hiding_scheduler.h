@@ -21,6 +21,7 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/service/latency_hiding_scheduler.h"
+#include "xla/service/profile_guided_latency_estimator.h"
 #include "xla/shape.h"
 
 namespace xla {
@@ -33,6 +34,15 @@ CanonicalAsyncOp GpuGetCanonicalAsyncOp(const HloInstruction& hlo);
 // Returns size of the `shape` given the `pointer_size`.
 int64_t GetSizeOfShape(const Shape& shape, int pointer_size);
 
+// GPU overlap limit rule rule for scheduling candidate.
+// On top of the default rule, we do not allow collectives with more than 1
+// overlapping ranks to overlap. This is because the execution order of NCCL
+// kernels is not deterministic and cannot be controlled by launch order at the
+// moment. A cyclic dependency can be formed with at least 2 overlapping ranks.
+bool GpuScheduleCrossesOverlapLimit(
+    const DefaultSchedulerCore::SchedulingState& sched_state,
+    const HloGraphNode* node);
+
 // GPU specific resources for latency hiding scheduler.
 //
 // We use two different set of resources to model the scheduling of asynchronous
@@ -40,14 +50,18 @@ int64_t GetSizeOfShape(const Shape& shape, int pointer_size);
 // the fact that the runtime use a stream to run asynchronous collective
 // operations and two other streams to run P2P Send and Recv operations.
 enum class GpuResourceType {
-  kGpuAsyncStreamSend0 = 0,        // A resource for P2P Send operation.
-  kGpuAsyncStreamSend1 = 1,        // Another resource for P2P Send operation.
-  kGpuAsyncStreamRecv0 = 2,        // A resource for P2P Recv operation.
-  kGpuAsyncStreamRecv1 = 3,        // Another resource for P2P Recv operation.
-  kGpuAsyncStreamCollectives = 4,  // The resource for collective operations.
-  kGpuAsyncStreamComputes = 5,     // The resource for async compute operations.
-  kNumTargetResources = 6,
+  kGpuAsyncStreamSend0 = ResourceTypeToIndex(
+      ResourceType::kTargetDefinedResourceTypeBegin),  // A resource for P2P
+                                                       // Send operation.
+  kGpuAsyncStreamSend1,        // Another resource for P2P Send operation.
+  kGpuAsyncStreamRecv0,        // A resource for P2P Recv operation.
+  kGpuAsyncStreamRecv1,        // Another resource for P2P Recv operation.
+  kGpuAsyncStreamCollectives,  // The resource for collective operations.
+  kGpuAsyncStreamComputes,     // The resource for async compute operations.
+  kGpuResourceTypeEnd,
 };
+
+constexpr int32_t kP2pResourceCount = 4;
 
 // Base GPU async tracker that enables async tracking only for async collectives
 // that are marked for async execution.
@@ -75,7 +89,7 @@ class GpuAsyncTracker : public GpuAsyncTrackerBase {
   explicit GpuAsyncTracker(const SchedulerConfig& config);
 
   // Returns resources used (occupied or released) by `instr`.
-  ResourcesVector GetResourcesFromInstruction(
+  ResourcesVector GetResourcesFromInstructionImpl(
       const HloInstruction& instr) const override;
 
   // Returns the number of target defined resources
@@ -116,6 +130,24 @@ class GpuLatencyEstimator : public ApproximateLatencyEstimator {
 
  private:
   int64_t pointer_size_;
+};
+
+// GPU PGLE statistics tracker.
+class GPUProfileStatisticsAggregator : public ProfileStatisticsAggregator {
+ public:
+  // Counts `instruction` as missing if is not a NOP.
+  void HandleMissingInstructionCost(const HloInstruction& instruction) override;
+
+  // Counts `instruction` as found.
+  void HandleFoundInstructionCost(const HloInstruction& instruction) override;
+
+  // Counts `from` -> `to` pair as missing if it is an async pair.
+  void HandleMissingInstructionLatency(const HloInstruction& from,
+                                       const HloInstruction& to) override;
+
+  // Counts `from` -> `to` pair as found.
+  void HandleFoundInstructionLatency(const HloInstruction& from,
+                                     const HloInstruction& to) override;
 };
 
 }  // namespace gpu

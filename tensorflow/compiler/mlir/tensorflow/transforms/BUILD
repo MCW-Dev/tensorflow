@@ -264,6 +264,7 @@ cc_library(
         "tf_saved_model_freeze_variables.h",
     ],
     deps = [
+        ":tf_saved_model_freeze_utils",
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/compiler/mlir/tensorflow:convert_tensor",
         "//tensorflow/compiler/mlir/tensorflow:resource_value_typed_analyzer",
@@ -271,11 +272,29 @@ cc_library(
         "//tensorflow/core:core_cpu_base",
         "//tensorflow/core:framework_internal",
         "//tensorflow/core:protos_all_cc",
-        "@com_google_absl//absl/algorithm:container",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_library(
+    name = "tf_saved_model_freeze_utils",
+    srcs = [
+        "tf_saved_model_freeze_utils.cc",
+    ],
+    hdrs = [
+        "tf_saved_model_freeze_utils.h",
+    ],
+    deps = [
+        "//tensorflow/compiler/mlir/tensorflow",
+        "//tensorflow/core:framework_internal",
+        "//tensorflow/core:protos_all_cc",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
     ],
 )
 
@@ -323,6 +342,7 @@ cc_library(
     deps = [
         ":tensorflow_passes",
         ":tf_saved_model_asset_sinking_pass",
+        ":tf_saved_model_freeze_utils",
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/compiler/mlir/tensorflow:resource_value_typed_analyzer",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_analysis",
@@ -536,7 +556,6 @@ cc_library(
         "tpu_resource_read_for_write.cc",
         "tpu_space_to_depth_pass.cc",
         "tpu_update_embedding_enqueue_op_inputs.cc",
-        "tpu_validate_inputs.cc",
         "update_control_dependencies.cc",
         "verify_suitable_for_graph_export_pass.cc",
         "xla_call_module_deserialization.cc",
@@ -590,10 +609,10 @@ cc_library(
         "//tensorflow/compiler/mlir/tensorflow:mangling_util",
         "//tensorflow/compiler/mlir/tensorflow:parallel_execute_util",
         "//tensorflow/compiler/mlir/tensorflow:serialize_mlir_module_utils",
-        "//tensorflow/compiler/mlir/tensorflow:split_into_island_per_op_pass",
         "//tensorflow/compiler/mlir/tensorflow:stablehlo_custom_call_utils",
         "//tensorflow/compiler/mlir/tensorflow:string_util",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_analysis",
+        "//tensorflow/compiler/mlir/tensorflow:tensorflow_op_interfaces",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_ops",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_side_effects",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_traits",
@@ -614,6 +633,7 @@ cc_library(
         "//tensorflow/compiler/mlir/tensorflow/transforms/host_runtime:tpu_metadata_utils",
         "//tensorflow/compiler/mlir/tf2xla/internal/inference:inference_metrics_pass",
         "//tensorflow/compiler/mlir/tf2xla/transforms:legalization_op_config",
+        "//tensorflow/compiler/mlir/tf2xla/transforms:split_into_island_per_op_pass",
         "//tensorflow/compiler/mlir/tf2xla/transforms:xla_legalize_tf",
         "//tensorflow/compiler/mlir/tf2xla/transforms:xla_legalize_tf_with_tf2xla",
         "//tensorflow/compiler/tf2xla:side_effect_util",
@@ -667,7 +687,7 @@ cc_library(
         "@local_xla//xla:window_util",
         "@local_xla//xla:xla_data_proto_cc",
         "@local_xla//xla:xla_proto_cc",
-        "@local_xla//xla/client:sharding_builder",
+        "@local_xla//xla/hlo/builder:sharding_builder",
         "@local_xla//xla/mlir_hlo",
         "@stablehlo//:chlo_ops",
         "@stablehlo//:stablehlo_ops",
@@ -806,9 +826,10 @@ cc_library(
         "@local_xla//xla:shape_util",
         "@local_xla//xla:window_util",
         "@local_xla//xla:xla_data_proto_cc",
+        "@local_xla//xla/hlo/translate/hlo_to_mhlo:hlo_utils",
+        "@local_xla//xla/hlo/translate/mhlo_to_hlo:type_to_shape",
         "@local_xla//xla/service:shape_inference",
-        "@local_xla//xla/translate/hlo_to_mhlo:hlo_utils",
-        "@local_xla//xla/translate/mhlo_to_hlo:type_to_shape",
+        "@local_xla//xla/tsl/util:env_var",
     ],
 )
 
@@ -927,7 +948,6 @@ cc_library(
         ":constant_fold_utils",
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/compiler/mlir/tensorflow:convert_tensor",
-        "//tensorflow/compiler/mlir/tensorflow:tensorflow_traits",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_types",
         "//tensorflow/core:all_kernels",
         "//tensorflow/core:direct_session",
@@ -937,7 +957,6 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
-        "@local_xla//xla/stream_executor",
     ],
     alwayslink = 1,
 )
@@ -956,8 +975,8 @@ cc_library(
     hdrs = ["tf_graph_optimization_pass.h"],
     deps = [
         "//tensorflow/compiler/mlir/tensorflow",
-        "//tensorflow/compiler/mlir/tensorflow:import_model",
         "//tensorflow/compiler/mlir/tensorflow:mlir_roundtrip_flags",
+        "//tensorflow/compiler/mlir/tf2xla/api/v2:graph_to_tf_executor",
         "//tensorflow/compiler/mlir/tf2xla/api/v2:tf_executor_to_graph",
         "//tensorflow/compiler/tf2xla:functionalize_control_flow_pass_registration",
         "//tensorflow/core:core_cpu",
@@ -1049,10 +1068,10 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
         "@local_xla//xla:shape_util",
+        "@local_xla//xla/hlo/translate/mhlo_to_hlo:type_to_shape",
         "@local_xla//xla/mlir_hlo",
         "@local_xla//xla/stream_executor/tpu:c_api_conversions",
         "@local_xla//xla/stream_executor/tpu:tpu_api",
-        "@local_xla//xla/translate/mhlo_to_hlo:type_to_shape",
     ],
 )
 
@@ -1072,5 +1091,16 @@ cc_library(
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Support",
         "@local_tsl//tsl/platform:path",
+    ],
+)
+
+tf_cc_test(
+    name = "shape_inference_test",
+    srcs = ["shape_inference_test.cc"],
+    deps = [
+        ":shape_inference_pass",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//mlir:IR",
+        "@local_tsl//tsl/platform:env",
     ],
 )

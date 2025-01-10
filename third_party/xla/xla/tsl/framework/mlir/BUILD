@@ -1,5 +1,10 @@
 # MLIR related utilities.
 
+load(
+    "//xla/tsl/platform:rules_cc.bzl",
+    "cc_library",
+)
+
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [

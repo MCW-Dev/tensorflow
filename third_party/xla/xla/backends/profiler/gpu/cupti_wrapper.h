@@ -57,6 +57,8 @@ class CuptiWrapper : public xla::profiler::CuptiInterface {
 
   CUptiResult ActivityUsePerThreadBuffer() override;
 
+  CUptiResult SetActivityFlushPeriod(uint32_t period_ms) override;
+
   CUptiResult GetDeviceId(CUcontext context, uint32_t* deviceId) override;
 
   CUptiResult GetTimestamp(uint64_t* timestamp) override;
@@ -91,6 +93,8 @@ class CuptiWrapper : public xla::profiler::CuptiInterface {
 
   CUptiResult GetGraphExecId(CUgraphExec graph_exec,
                              uint32_t* graph_id) override;
+
+  CUptiResult SetThreadIdType(CUpti_ActivityThreadIdType type) override;
 
   void CleanUp() override {}
   bool Disabled() const override { return false; }
@@ -134,6 +138,8 @@ class CuptiWrapperStub : public xla::profiler::CuptiInterface {
 
   CUptiResult ActivityUsePerThreadBuffer() override;
 
+  CUptiResult SetActivityFlushPeriod(uint32_t period_ms) override;
+
   CUptiResult GetDeviceId(CUcontext context, uint32_t* deviceId) override;
 
   CUptiResult GetTimestamp(uint64_t* timestamp) override;
@@ -168,6 +174,8 @@ class CuptiWrapperStub : public xla::profiler::CuptiInterface {
 
   CUptiResult GetGraphExecId(CUgraphExec graph_exec,
                              uint32_t* graph_id) override;
+
+  CUptiResult SetThreadIdType(CUpti_ActivityThreadIdType type) override;
 
   void CleanUp() override {}
   bool Disabled() const override { return false; }
