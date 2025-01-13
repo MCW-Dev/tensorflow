@@ -47,6 +47,11 @@ tflite::TensorType GetTTEnum<int16_t>() {
 }
 
 template <>
+tflite::TensorType GetTTEnum<int8_t>() {
+  return tflite::TensorType_INT8;
+}
+
+template <>
 tflite::TensorType GetTTEnum<Eigen::half>() {
   return tflite::TensorType_FLOAT16;
 }
@@ -120,7 +125,7 @@ class SignTestInt : public ::testing::Test {
  public:
   using IntType = Int;
 };
-using TestTypesInt = ::testing::Types<int32_t, int16_t>;
+using TestTypesInt = ::testing::Types<int32_t, int16_t, int8_t>;
 
 TYPED_TEST_SUITE(SignTestInt, TestTypesInt);
 

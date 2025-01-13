@@ -78,6 +78,10 @@ TfLiteStatus PointwiseUnaryOpEval(TfLiteContext* context, TfLiteNode* node) {
       TF_LITE_ENSURE_OK(context, (PointwiseUnaryOpDoEval<Op, int16_t>(
                                      context, input, output)));
       break;
+    case kTfLiteInt8:
+      TF_LITE_ENSURE_OK(context, (PointwiseUnaryOpDoEval<Op, int8_t>(
+                                     context, input, output)));
+      break;
     case kTfLiteFloat16:
       TF_LITE_ENSURE_OK(context, (PointwiseUnaryOpDoEval<Op, Eigen::half>(
                                      context, input, output)));
