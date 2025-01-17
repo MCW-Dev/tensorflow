@@ -97,7 +97,9 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
     output_size = TfLiteIntArrayCopy(input1->dims);
   }
 
-  if (output->type == kTfLiteUInt8) {
+  if (output->quantization.type != kTfLiteNoQuantization &&
+      (output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||
+       output->type == kTfLiteInt16)) {
     TF_LITE_ENSURE_STATUS(CalculateActivationRangeQuantized(
         context, params->activation, output, &data->output_activation_min,
         &data->output_activation_max));
@@ -114,6 +116,7 @@ template <KernelType kernel_type>
 void EvalDiv(TfLiteContext* context, TfLiteNode* node, TfLiteDivParams* params,
              const OpData* data, const TfLiteTensor* input1,
              const TfLiteTensor* input2, TfLiteTensor* output) {
+tflite::ArithmeticParams op_params;
 #define TF_LITE_DIV(type, opname, data_type)                             \
   tflite::ArithmeticParams op_params;                                    \
   data_type output_activation_min, output_activation_max;                \
@@ -139,6 +142,34 @@ void EvalDiv(TfLiteContext* context, TfLiteNode* node, TfLiteDivParams* params,
         TF_LITE_DIV(optimized_ops, Div, int32_t);
       }
     }
+  } else if (output->type == kTfLiteFloat16) {
+    if (kernel_type == kReference) {
+      if (data->requires_broadcast) {
+        TF_LITE_DIV(reference_ops, BroadcastDivSlow, Eigen::half);
+      } else {
+        TF_LITE_DIV(reference_ops, Div, Eigen::half);
+      }
+    } else {
+      if (data->requires_broadcast) {
+        TF_LITE_DIV(optimized_ops, BroadcastDivSlow, Eigen::half);
+      } else {
+        TF_LITE_DIV(optimized_ops, Div, Eigen::half);
+      }
+    }
+  } else if (output->type == kTfLiteBFloat16) {
+    if (kernel_type == kReference) {
+      if (data->requires_broadcast) {
+        TF_LITE_DIV(reference_ops, BroadcastDivSlow, Eigen::bfloat16);
+      } else {
+        TF_LITE_DIV(reference_ops, Div, Eigen::bfloat16);
+      }
+    } else {
+      if (data->requires_broadcast) {
+        TF_LITE_DIV(optimized_ops, BroadcastDivSlow, Eigen::bfloat16);
+      } else {
+        TF_LITE_DIV(optimized_ops, Div, Eigen::bfloat16);
+      }
+    }
   } else if (output->type == kTfLiteFloat32) {
     if (kernel_type == kReference) {
       if (data->requires_broadcast) {
@@ -153,6 +184,40 @@ void EvalDiv(TfLiteContext* context, TfLiteNode* node, TfLiteDivParams* params,
         TF_LITE_DIV(optimized_ops, Div, float);
       }
     }
+  } else if (output->type == kTfLiteInt16) {
+    int16_t int16_output_activation_min, int16_output_activation_max;
+    CalculateActivationRange(params->activation, &int16_output_activation_min,
+                             &int16_output_activation_max);
+    SetActivationParams(int16_output_activation_min, int16_output_activation_max,
+                        &op_params);
+    if (data->requires_broadcast) {
+      reference_ops::BroadcastDivSlow<int16_t>(
+          op_params, GetTensorShape(input1), GetTensorData<int16_t>(input1),
+          GetTensorShape(input2), GetTensorData<int16_t>(input2),
+          GetTensorShape(output), GetTensorData<int16_t>(output));
+    } else {
+      reference_ops::Div<int16_t>(
+          op_params, GetTensorShape(input1), GetTensorData<int16_t>(input1),
+          GetTensorShape(input2), GetTensorData<int16_t>(input2),
+          GetTensorShape(output), GetTensorData<int16_t>(output));
+    }
+  } else if (output->type == kTfLiteInt8) {
+    int8_t int8_output_activation_min, int8_output_activation_max;
+    CalculateActivationRange(params->activation, &int8_output_activation_min,
+                             &int8_output_activation_max);
+    SetActivationParams(int8_output_activation_min, int8_output_activation_max,
+                        &op_params);
+    if (data->requires_broadcast) {
+      reference_ops::BroadcastDivSlow<int8_t>(
+          op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
+          GetTensorShape(input2), GetTensorData<int8_t>(input2),
+          GetTensorShape(output), GetTensorData<int8_t>(output));
+    } else {
+      reference_ops::Div<int8_t>(
+          op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
+          GetTensorShape(input2), GetTensorData<int8_t>(input2),
+          GetTensorShape(output), GetTensorData<int8_t>(output));
+    }
   }
 #undef TF_LITE_DIV
 }
@@ -162,8 +227,12 @@ TfLiteStatus EvalQuantized(TfLiteContext* context, TfLiteNode* node,
                            TfLiteDivParams* params, const OpData* data,
                            const TfLiteTensor* input1,
                            const TfLiteTensor* input2, TfLiteTensor* output) {
-  if (input1->type == kTfLiteUInt8 && input2->type == kTfLiteUInt8 &&
-      output->type == kTfLiteUInt8) {
+  if ((input1->type == kTfLiteUInt8 && input2->type == kTfLiteUInt8 &&
+       output->type == kTfLiteUInt8) ||
+      (input1->type == kTfLiteInt8 && input2->type == kTfLiteInt8 &&
+       output->type == kTfLiteInt8) ||
+      (input1->type == kTfLiteInt16 && input2->type == kTfLiteInt16 &&
+       output->type == kTfLiteInt16)) {
     tflite::ArithmeticParams op_params;
     SetActivationParams(data->output_activation_min,
                         data->output_activation_max, &op_params);
@@ -181,15 +250,39 @@ TfLiteStatus EvalQuantized(TfLiteContext* context, TfLiteNode* node,
                GetTensorData<dtype>(output))
     if (kernel_type == kReference) {
       if (need_broadcast) {
-        TF_LITE_DIV(reference_ops, BroadcastDivSlow, uint8_t);
+        if (input1->type == kTfLiteUInt8) {
+          TF_LITE_DIV(reference_ops, BroadcastDivSlow, uint8_t);
+        } else if (input1->type == kTfLiteInt8) {
+          TF_LITE_DIV(reference_ops, BroadcastDivSlow, int8_t);
+        } else {
+          TF_LITE_DIV(reference_ops, BroadcastDivSlow, int16_t);
+        }
       } else {
-        TF_LITE_DIV(reference_ops, Div, uint8_t);
+        if (input1->type == kTfLiteUInt8) {
+          TF_LITE_DIV(reference_ops, Div, uint8_t);
+        } else if (input1->type == kTfLiteInt8) {
+          TF_LITE_DIV(reference_ops, Div, int8_t);
+        } else {
+          TF_LITE_DIV(reference_ops, Div, int16_t);
+        }
       }
     } else {
       if (need_broadcast) {
-        TF_LITE_DIV(optimized_ops, BroadcastDivSlow, uint8_t);
+        if (input1->type == kTfLiteUInt8) {
+          TF_LITE_DIV(optimized_ops, BroadcastDivSlow, uint8_t);
+        } else if (input1->type == kTfLiteInt8) {
+          TF_LITE_DIV(optimized_ops, BroadcastDivSlow, int8_t);
+        } else {
+          TF_LITE_DIV(optimized_ops, BroadcastDivSlow, int16_t);
+        }
       } else {
-        TF_LITE_DIV(optimized_ops, Div, uint8_t);
+        if (input1->type == kTfLiteUInt8) {
+          TF_LITE_DIV(optimized_ops, Div, uint8_t);
+        } else if (input1->type == kTfLiteInt8) {
+          TF_LITE_DIV(optimized_ops, Div, int8_t);
+        } else {
+          TF_LITE_DIV(optimized_ops, Div, int16_t);
+        }
       }
     }
 #undef TF_LITE_DIV
@@ -215,6 +308,7 @@ template <KernelType kernel_type>
 TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   auto* params = reinterpret_cast<TfLiteDivParams*>(node->builtin_data);
   OpData* data = reinterpret_cast<OpData*>(node->user_data);
+  tflite::ArithmeticParams op_params;
 
   const TfLiteTensor* input1;
   TF_LITE_ENSURE_OK(context,
@@ -225,8 +319,8 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   TfLiteTensor* output;
   TF_LITE_ENSURE_OK(context,
                     GetOutputSafe(context, node, kOutputTensor, &output));
-
-
+  
+  bool is_quantized = output->quantization.type != kTfLiteNoQuantization;
   if (output->type == kTfLiteFloat32) {
     // Div by zero seems ok in this case, we don't do a check at this point.
     // However, unlike in TF where infinities are returned, here we return an
@@ -235,6 +329,30 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   } else if (output->type == kTfLiteInt32) {
     CheckNonZero<int32_t>(context, input2);
     EvalDiv<kernel_type>(context, node, params, data, input1, input2, output);
+  } else if (output->type == kTfLiteInt16) {
+    CheckNonZero<int16_t>(context, input2);
+    if (is_quantized) {
+      TF_LITE_ENSURE_OK(context,
+                        EvalQuantized<kernel_type>(context, node, params, data,
+                                                   input1, input2, output));
+    } else {
+      EvalDiv<kernel_type>(context, node, params, data, input1, input2, output);
+    }
+  } else if (output->type == kTfLiteFloat16) {
+    CheckNonZero<Eigen::half>(context, input2);
+    EvalDiv<kernel_type>(context, node, params, data, input1, input2, output);
+  } else if (output->type == kTfLiteBFloat16) {
+    CheckNonZero<Eigen::bfloat16>(context, input2);
+    EvalDiv<kernel_type>(context, node, params, data, input1, input2, output);
+  } else if (output->type == kTfLiteInt8) {
+    CheckNonZero<int8_t>(context, input2);
+    if(is_quantized){
+    TF_LITE_ENSURE_OK(
+        context, EvalQuantized<kernel_type>(context, node, params, data, input1,
+                                            input2, output));
+    } else {
+      EvalDiv<kernel_type>(context, node, params, data, input1, input2, output);
+    }
   } else if (output->type == kTfLiteUInt8) {
     CheckNonZero<uint8_t>(context, input2);
     TF_LITE_ENSURE_OK(
