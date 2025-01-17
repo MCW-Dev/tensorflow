@@ -249,6 +249,110 @@ TEST(IntegerDivOpTest, WithBroadcastInt32) {
   }
 }
 
+TEST(IntegerDivOpTest, NoActivationInt8) {
+  IntegerDivOpModel m({TensorType_INT8, {1, 2, 2, 1}},
+                      {TensorType_INT8, {1, 2, 2, 1}}, {TensorType_INT8, {}},
+                      ActivationFunctionType_NONE);
+  m.PopulateTensor<int8_t>(m.input1(), {-2, 2, -15, 8});
+  m.PopulateTensor<int8_t>(m.input2(), {5, -2, -3, 5});
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  EXPECT_THAT(m.GetOutput<int8_t>(), ElementsAreArray({0, -1, 5, 1}));
+}
+
+TEST(IntegerDivOpTest, ActivationRELU_N1_TO_1Int8) {
+  IntegerDivOpModel m({TensorType_INT8, {1, 2, 2, 1}},
+                      {TensorType_INT8, {1, 2, 2, 1}}, {TensorType_INT8, {}},
+                      ActivationFunctionType_RELU_N1_TO_1);
+  m.PopulateTensor<int8_t>(m.input1(), {-2, 2, -12, 8});
+  m.PopulateTensor<int8_t>(m.input2(), {1, 2, -15, 5});
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  EXPECT_THAT(m.GetOutput<int8_t>(), ElementsAreArray({-1, 1, 0, 1}));
+}
+
+TEST(IntegerDivOpTest, VariousInputShapesInt8) {
+  std::vector<std::vector<int>> test_shapes = {
+      {6}, {2, 3}, {2, 1, 3}, {1, 3, 1, 2}};
+  for (int i = 0; i < test_shapes.size(); ++i) {
+    IntegerDivOpModel m({TensorType_INT8, test_shapes[i]},
+                        {TensorType_INT8, test_shapes[i]},
+                        {TensorType_INT8, {}}, ActivationFunctionType_NONE);
+    m.PopulateTensor<int8_t>(m.input1(), {-20, 2, 3, 8, 11, -20});
+    m.PopulateTensor<int8_t>(m.input2(), {1, 2, 6, 5, -11, -1});
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
+    EXPECT_THAT(m.GetOutput<int8_t>(),
+                ElementsAreArray({-20, 1, 0, 1, -1, 20}))
+        << "With shape number " << i;
+  }
+}
+
+TEST(IntegerDivOpTest, WithBroadcastInt8) {
+  std::vector<std::vector<int>> test_shapes = {
+      {8}, {2, 4}, {2, 1, 4}, {1, 4, 1, 2}, {1, 2, 1, 2, 2}};
+  for (int i = 0; i < test_shapes.size(); ++i) {
+    IntegerDivOpModel m({TensorType_INT8, test_shapes[i]},
+                        {TensorType_INT8, {}},  // always a scalar
+                        {TensorType_INT8, {}}, ActivationFunctionType_NONE);
+    m.PopulateTensor<int8_t>(m.input1(), {-20, 21, 7, 8, 11, -123, -42, -48});
+    m.PopulateTensor<int8_t>(m.input2(), {3});
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
+    EXPECT_THAT(m.GetOutput<int8_t>(),
+                ElementsAreArray({-6, 7, 2, 2, 3, -41, -14, -16}))
+        << "With shape number " << i;
+  }
+}
+
+TEST(IntegerDivOpTest, NoActivationInt16) {
+  IntegerDivOpModel m({TensorType_INT16, {1, 2, 2, 1}},
+                      {TensorType_INT16, {1, 2, 2, 1}}, {TensorType_INT16, {}},
+                      ActivationFunctionType_NONE);
+  m.PopulateTensor<int16_t>(m.input1(), {-2, 2, -15, 8});
+  m.PopulateTensor<int16_t>(m.input2(), {5, -2, -3, 5});
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  EXPECT_THAT(m.GetOutput<int16_t>(), ElementsAreArray({0, -1, 5, 1}));
+}
+
+TEST(IntegerDivOpTest, ActivationRELU_N1_TO_1Int16) {
+  IntegerDivOpModel m({TensorType_INT16, {1, 2, 2, 1}},
+                      {TensorType_INT16, {1, 2, 2, 1}}, {TensorType_INT16, {}},
+                      ActivationFunctionType_RELU_N1_TO_1);
+  m.PopulateTensor<int16_t>(m.input1(), {-2, 2, -12, 8});
+  m.PopulateTensor<int16_t>(m.input2(), {1, 2, -15, 5});
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  EXPECT_THAT(m.GetOutput<int16_t>(), ElementsAreArray({-1, 1, 0, 1}));
+}
+
+TEST(IntegerDivOpTest, VariousInputShapesInt16) {
+  std::vector<std::vector<int>> test_shapes = {
+      {6}, {2, 3}, {2, 1, 3}, {1, 3, 1, 2}};
+  for (int i = 0; i < test_shapes.size(); ++i) {
+    IntegerDivOpModel m({TensorType_INT16, test_shapes[i]},
+                        {TensorType_INT16, test_shapes[i]},
+                        {TensorType_INT16, {}}, ActivationFunctionType_NONE);
+    m.PopulateTensor<int16_t>(m.input1(), {-20, 2, 3, 8, 11, -20});
+    m.PopulateTensor<int16_t>(m.input2(), {1, 2, 6, 5, -11, -1});
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
+    EXPECT_THAT(m.GetOutput<int16_t>(),
+                ElementsAreArray({-20, 1, 0, 1, -1, 20}))
+        << "With shape number " << i;
+  }
+}
+
+TEST(IntegerDivOpTest, WithBroadcastInt16) {
+  std::vector<std::vector<int>> test_shapes = {
+      {8}, {2, 4}, {2, 1, 4}, {1, 4, 1, 2}, {1, 2, 1, 2, 2}};
+  for (int i = 0; i < test_shapes.size(); ++i) {
+    IntegerDivOpModel m({TensorType_INT16, test_shapes[i]},
+                        {TensorType_INT16, {}},  // always a scalar
+                        {TensorType_INT16, {}}, ActivationFunctionType_NONE);
+    m.PopulateTensor<int16_t>(m.input1(), {-20, 21, 7, 8, 11, -123, -42, -48});
+    m.PopulateTensor<int16_t>(m.input2(), {3});
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
+    EXPECT_THAT(m.GetOutput<int16_t>(),
+                ElementsAreArray({-6, 7, 2, 2, 3, -41, -14, -16}))
+        << "With shape number " << i;
+  }
+}
+
 TEST(FloatDivOpTest, NoActivationInplaceInput0Float16) {
   FloatDivOpModel m({TensorType_FLOAT16, {1, 2, 2, 1}},
                     {TensorType_FLOAT16, {1, 2, 2, 1}},
