@@ -124,9 +124,9 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
     output_size = TfLiteIntArrayCopy(input1->dims);
   }
 
-  if (output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||
-      (output->quantization.type != kTfLiteNoQuantization &&
-       output->type == kTfLiteInt16)) {
+  if ((output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||
+       output->type == kTfLiteInt16) &&
+      (output->quantization.type != kTfLiteNoQuantization)) {
     TF_LITE_ENSURE_STATUS(CalculateActivationRangeQuantized(
         context, params->activation, output, &data->output_activation_min,
         &data->output_activation_max));
@@ -271,10 +271,10 @@ void EvalMul(TfLiteContext* context, TfLiteNode* node, TfLiteMulParams* params,
       }
     }
   } else if (output->type == kTfLiteInt16) {
-    int16_t output_activation_min, output_activation_max;
-    CalculateActivationRange(params->activation, &output_activation_min,
-                             &output_activation_max);
-    SetActivationParams(output_activation_min, output_activation_max,
+    int16_t int16_output_activation_min, int16_output_activation_max;
+    CalculateActivationRange(params->activation, &int16_output_activation_min,
+                             &int16_output_activation_max);
+    SetActivationParams(int16_output_activation_min, int16_output_activation_max,
                         &op_params);
     if (need_broadcast) {
       reference_ops::BroadcastMul6DSlow<int16_t, true>(
@@ -286,6 +286,23 @@ void EvalMul(TfLiteContext* context, TfLiteNode* node, TfLiteMulParams* params,
           op_params, GetTensorShape(input1), GetTensorData<int16_t>(input1),
           GetTensorShape(input2), GetTensorData<int16_t>(input2),
           GetTensorShape(output), GetTensorData<int16_t>(output));
+    }
+  } else if (output->type == kTfLiteInt8) {
+    int8_t int8_output_activation_min, int8_output_activation_max;
+    CalculateActivationRange(params->activation, &int8_output_activation_min,
+                             &int8_output_activation_max);
+    SetActivationParams(int8_output_activation_min, int8_output_activation_max,
+                        &op_params);
+    if (need_broadcast) {
+      reference_ops::BroadcastMul6DSlow<int8_t, true>(
+          op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
+          GetTensorShape(input2), GetTensorData<int8_t>(input2),
+          GetTensorShape(output), GetTensorData<int8_t>(output));
+    } else {
+      reference_ops::Mul<int8_t>(
+          op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
+          GetTensorShape(input2), GetTensorData<int8_t>(input2),
+          GetTensorShape(output), GetTensorData<int8_t>(output));
     }
   } else if (output->type == kTfLiteInt64) {
     if (need_broadcast) {
@@ -418,7 +435,8 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node, OpData* data,
   if (output->type == kTfLiteFloat32 || output->type == kTfLiteFloat16 ||
       output->type == kTfLiteBFloat16 || output->type == kTfLiteInt32 ||
       output->type == kTfLiteInt64 || output->type == kTfLiteComplex64 ||
-      (!output_quantized && output->type == kTfLiteInt16) ||
+      (!output_quantized &&
+      (output->type == kTfLiteInt16 || output->type == kTfLiteInt8)) ||
       output->type == kTfLiteUInt32) {
     EvalMul<kernel_type>(context, node, params, data, input1, input2, output);
   } else if (output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||

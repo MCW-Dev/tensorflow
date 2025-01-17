@@ -1063,6 +1063,74 @@ TEST_P(MulOpTest, 16BitIntegerNoActivation) {
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({-20, 4, 21, 40}));
 }
 
+
+TEST_P(MulOpTest, Int8ActivationRELU_N1_TO_1) {
+  bool constant_tensors = GetParam();
+  if (SingleOpModel::GetForceUseNnapi() && constant_tensors) {
+    // NNAPI does not support graphs with all constant inputs.
+    return;
+  }
+  IntegerMulOpModel<int8_t> m(
+      {TensorType_INT8, {1, 2, 2, 1}}, {TensorType_INT8, {1, 2, 2, 1}},
+      {TensorType_INT8, {}}, ActivationFunctionType_RELU_N1_TO_1,
+      {-20, 2, 7, 8}, {1, 2, 3, 5}, constant_tensors);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  EXPECT_THAT(m.GetOutput(), ElementsAreArray({-1, 1, 1, 1}));
+}
+
+TEST_P(MulOpTest, Int8VariousInputShapes) {
+  bool constant_tensors = GetParam();
+  if (SingleOpModel::GetForceUseNnapi() && constant_tensors) {
+    // NNAPI does not support graphs with all constant inputs.
+    return;
+  }
+  const std::vector<std::vector<int>> test_shapes = {
+      {6}, {2, 3}, {2, 1, 3}, {1, 3, 1, 2}};
+  for (int i = 0; i < test_shapes.size(); ++i) {
+    IntegerMulOpModel<int8_t> m(
+        {TensorType_INT8, test_shapes[i]}, {TensorType_INT8, test_shapes[i]},
+        {TensorType_INT8, {}}, ActivationFunctionType_NONE,
+        {-20, 2, 7, 8, 11, 20}, {1, 2, 3, 5, 11, 1}, constant_tensors);
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
+    EXPECT_THAT(m.GetOutput(), ElementsAreArray({-20, 4, 21, 40, 121, 20}))
+        << "With shape number " << i;
+  }
+}
+
+TEST_P(MulOpTest, Int8WithBroadcast) {
+  bool constant_tensors = GetParam();
+  if (SingleOpModel::GetForceUseNnapi() && constant_tensors) {
+    // NNAPI does not support graphs with all constant inputs.
+    return;
+  }
+  const std::vector<std::vector<int>> test_shapes = {
+      {6}, {2, 3}, {2, 1, 3}, {1, 3, 1, 2}};
+  for (int i = 0; i < test_shapes.size(); ++i) {
+    IntegerMulOpModel<int8_t> m({TensorType_INT8, test_shapes[i]},
+                                 {TensorType_INT8, {}},  // always a scalar
+                                 {TensorType_INT8, {}},
+                                 ActivationFunctionType_NONE,
+                                 {-20, 2, 7, 8, 11, 20}, {1}, constant_tensors);
+    ASSERT_EQ(m.Invoke(), kTfLiteOk);
+    EXPECT_THAT(m.GetOutput(), ElementsAreArray({-20, 2, 7, 8, 11, 20}))
+        << "With shape number " << i;
+  }
+}
+
+TEST_P(MulOpTest, 8BitIntegerNoActivation) {
+  bool constant_tensors = GetParam();
+  if (SingleOpModel::GetForceUseNnapi() && constant_tensors) {
+    // NNAPI does not support graphs with all constant inputs.
+    return;
+  }
+  IntegerMulOpModel<int8_t> m({TensorType_INT8, {4}}, {TensorType_INT8, {4}},
+                               {TensorType_INT8, {}},
+                               ActivationFunctionType_NONE, {-20, 2, 7, 8},
+                               {1, 2, 3, 5}, constant_tensors);
+  ASSERT_EQ(m.Invoke(), kTfLiteOk);
+  EXPECT_THAT(m.GetOutput(), ElementsAreArray({-20, 4, 21, 40}));
+}
+
 TEST_P(MulOpTest, 32BitUnsignedIntegerNoActivation) {
   bool constant_tensors = GetParam();
   if (SingleOpModel::GetForceUseNnapi() && constant_tensors) {
@@ -1756,8 +1824,8 @@ void TestFloatMultiDimBroadcast(Eigen::bfloat16) {
 template <typename T>
 class IntegerMulOpTest : public ::testing::Test {};
 
-using Int16OrInt32Or64Types = ::testing::Types<int16_t, int32_t, int64_t>;
-TYPED_TEST_SUITE(IntegerMulOpTest, Int16OrInt32Or64Types);
+using Int8OrInt16OrInt32Or64Types = ::testing::Types<int8_t, int16_t, int32_t, int64_t>;
+TYPED_TEST_SUITE(IntegerMulOpTest, Int8OrInt16OrInt32Or64Types);
 
 // To improve automatic test sharding (via shard_count in the BUILD file),
 // we need to ensure that each individual test case runs in a reasonable time,
