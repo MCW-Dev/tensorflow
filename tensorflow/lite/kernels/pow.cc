@@ -85,7 +85,8 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   data->requires_broadcast = !HaveSameShapes(input1, input2);
 
   // quantize prepare
-  if (input1->type == kTfLiteInt8 || input1->type == kTfLiteInt16) {
+  if ((input1->type == kTfLiteInt8 || input1->type == kTfLiteInt16) &&
+      output->quantization.type != kTfLiteNoQuantization) {
     context->AddTensors(context, kNumTempTensorsForQuantization,
                         &data->scratch_tensor_index);
     TfLiteIntArrayFree(node->temporaries);
@@ -213,7 +214,7 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   TfLiteTensor* output;
   TF_LITE_ENSURE_OK(context,
                     GetOutputSafe(context, node, kOutputTensor, &output));
-
+  bool is_quantized = output->quantization.type != kTfLiteNoQuantization;
   switch (output->type) {
     case kTfLiteInt32: {
       // TensorFlow does not support negative for int32.
@@ -222,13 +223,43 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
       break;
     }
     case kTfLiteInt16: {
-      EvalQuantize<int16_t>(context, node, input1, input2, output,
+      if(is_quantized) {
+        EvalQuantize<int16_t>(context, node, input1, input2, output,
                             data->requires_broadcast);
+      } else {
+        TF_LITE_ENSURE_OK(context, CheckValue(context, input2));
+        if (data->requires_broadcast) {
+          reference_ops::BroadcastPow4DSlow<int16_t>(
+              GetTensorShape(input1), GetTensorData<int16_t>(input1),
+              GetTensorShape(input2), GetTensorData<int16_t>(input2),
+              GetTensorShape(output), GetTensorData<int16_t>(output));
+        } else {
+          reference_ops::Pow<int16_t>(
+              GetTensorShape(input1), GetTensorData<int16_t>(input1),
+              GetTensorShape(input2), GetTensorData<int16_t>(input2),
+              GetTensorShape(output), GetTensorData<int16_t>(output));
+        }
+      }
       break;
     }
     case kTfLiteInt8: {
-      EvalQuantize<int8_t>(context, node, input1, input2, output,
-                           data->requires_broadcast);
+      if(is_quantized) {
+        EvalQuantize<int8_t>(context, node, input1, input2, output,
+                            data->requires_broadcast);
+      } else {
+        TF_LITE_ENSURE_OK(context, CheckValue(context, input2));
+        if (data->requires_broadcast) {
+          reference_ops::BroadcastPow4DSlow<int8_t>(
+              GetTensorShape(input1), GetTensorData<int8_t>(input1),
+              GetTensorShape(input2), GetTensorData<int8_t>(input2),
+              GetTensorShape(output), GetTensorData<int8_t>(output));
+        } else {
+          reference_ops::Pow<int8_t>(
+              GetTensorShape(input1), GetTensorData<int8_t>(input1),
+              GetTensorShape(input2), GetTensorData<int8_t>(input2),
+              GetTensorShape(output), GetTensorData<int8_t>(output));
+        }
+      }
       break;
     }
     case kTfLiteFloat32: {

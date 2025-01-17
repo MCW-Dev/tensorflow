@@ -55,12 +55,34 @@ class PowOpModel : public SingleOpModel {
   int output_;
 };
 
-TEST(PowOpModel, Simple) {
+TEST(PowOpModel, SimpleInt32) {
   PowOpModel<int32_t> model({TensorType_INT32, {1, 2, 2, 1}},
                             {TensorType_INT32, {1, 2, 2, 1}},
                             {TensorType_INT32, {}});
   model.PopulateTensor<int32_t>(model.input1(), {12, 2, 7, 8});
   model.PopulateTensor<int32_t>(model.input2(), {1, 2, 3, 1});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+  EXPECT_THAT(model.GetOutput(), ElementsAre(12, 4, 343, 8));
+}
+
+TEST(PowOpModel, SimpleInt16) {
+  PowOpModel<int16_t> model({TensorType_INT16, {1, 2, 2, 1}},
+                            {TensorType_INT16, {1, 2, 2, 1}},
+                            {TensorType_INT16, {}});
+  model.PopulateTensor<int16_t>(model.input1(), {12, 2, 7, 8});
+  model.PopulateTensor<int16_t>(model.input2(), {1, 2, 3, 1});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+  EXPECT_THAT(model.GetOutput(), ElementsAre(12, 4, 343, 8));
+}
+
+TEST(PowOpModel, SimpleInt8) {
+  PowOpModel<int8_t> model({TensorType_INT8, {1, 2, 2, 1}},
+                            {TensorType_INT8, {1, 2, 2, 1}},
+                            {TensorType_INT8, {}});
+  model.PopulateTensor<int8_t>(model.input1(), {12, 2, 7, 8});
+  model.PopulateTensor<int8_t>(model.input2(), {1, 2, 3, 1});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
   EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
   EXPECT_THAT(model.GetOutput(), ElementsAre(12, 4, 343, 8));
@@ -79,12 +101,34 @@ inline float GetTolerance(float min, float max) {
   return kQuantizedTolerance;
 }
 
-TEST(PowOpModel, NegativeAndZeroValue) {
+TEST(PowOpModel, NegativeAndZeroValueInt32) {
   PowOpModel<int32_t> model({TensorType_INT32, {1, 2, 2, 1}},
                             {TensorType_INT32, {1, 2, 2, 1}},
                             {TensorType_INT32, {}});
   model.PopulateTensor<int32_t>(model.input1(), {0, 2, -7, 8});
   model.PopulateTensor<int32_t>(model.input2(), {1, 2, 3, 0});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+  EXPECT_THAT(model.GetOutput(), ElementsAre(0, 4, -343, 1));
+}
+
+TEST(PowOpModel, NegativeAndZeroValueInt16) {
+  PowOpModel<int16_t> model({TensorType_INT16, {1, 2, 2, 1}},
+                            {TensorType_INT16, {1, 2, 2, 1}},
+                            {TensorType_INT16, {}});
+  model.PopulateTensor<int16_t>(model.input1(), {0, 2, -7, 8});
+  model.PopulateTensor<int16_t>(model.input2(), {1, 2, 3, 0});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+  EXPECT_THAT(model.GetOutput(), ElementsAre(0, 4, -343, 1));
+}
+
+TEST(PowOpModel, NegativeAndZeroValueInt8) {
+  PowOpModel<int8_t> model({TensorType_INT8, {1, 2, 2, 1}},
+                            {TensorType_INT8, {1, 2, 2, 1}},
+                            {TensorType_INT8, {}});
+  model.PopulateTensor<int8_t>(model.input1(), {0, 2, -7, 8});
+  model.PopulateTensor<int8_t>(model.input2(), {1, 2, 3, 0});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
   EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
   EXPECT_THAT(model.GetOutput(), ElementsAre(0, 4, -343, 1));
@@ -192,11 +236,31 @@ TEST(PowOpModel, NegativeBFloat16Test) {
                   1e-3)));
 }
 
-TEST(PowOpModel, BroadcastTest) {
+TEST(PowOpModel, BroadcastTestInt) {
   PowOpModel<int32_t> model({TensorType_INT32, {1, 2, 2, 1}},
                             {TensorType_INT32, {1}}, {TensorType_INT32, {}});
   model.PopulateTensor<int32_t>(model.input1(), {12, 2, 7, 8});
   model.PopulateTensor<int32_t>(model.input2(), {4});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+  EXPECT_THAT(model.GetOutput(), ElementsAre(20736, 16, 2401, 4096));
+}
+
+TEST(PowOpModel, BroadcastTestInt16) {
+  PowOpModel<int16_t> model({TensorType_INT16, {1, 2, 2, 1}},
+                            {TensorType_INT16, {1}}, {TensorType_INT16, {}});
+  model.PopulateTensor<int16_t>(model.input1(), {12, 2, 7, 8});
+  model.PopulateTensor<int16_t>(model.input2(), {4});
+  ASSERT_EQ(model.Invoke(), kTfLiteOk);
+  EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+  EXPECT_THAT(model.GetOutput(), ElementsAre(20736, 16, 2401, 4096));
+}
+
+TEST(PowOpModel, BroadcastTestInt8) {
+  PowOpModel<int8_t> model({TensorType_INT8, {1, 2, 2, 1}},
+                            {TensorType_INT8, {1}}, {TensorType_INT8, {}});
+  model.PopulateTensor<int8_t>(model.input1(), {12, 2, 7, 8});
+  model.PopulateTensor<int8_t>(model.input2(), {4});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
   EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
   EXPECT_THAT(model.GetOutput(), ElementsAre(20736, 16, 2401, 4096));
@@ -290,6 +354,46 @@ TEST(PowOpModel, IntSingleIntegerExponentTest) {
     ASSERT_EQ(model.Invoke(), kTfLiteOk);
     EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
     std::vector<int32_t> output_data(input_size);
+    CalculateTrueResults(input_data, exponent, input_size, &output_data);
+    EXPECT_THAT(model.GetOutput(), ElementsAreArray(output_data));
+  }
+}
+
+TEST(PowOpModel, Int16SingleIntegerExponentTest) {
+  PowOpModel<int16_t> model({TensorType_INT16, {1, 2, 2, 1}},
+                            {TensorType_INT16, {1}}, {TensorType_INT16, {}});
+  const int input_size = 1 * 2 * 2 * 1;
+  for (int i = 1; i < 20; ++i) {
+    std::vector<int16_t> input_data(input_size);
+    for (int index = 0; index < input_size; ++index) {
+      input_data[index] = UniformRandomInt(-2, -2);
+    }
+    model.PopulateTensor<int16_t>(model.input1(), input_data);
+    int16_t exponent = i;
+    model.PopulateTensor<int16_t>(model.input2(), {exponent});
+    ASSERT_EQ(model.Invoke(), kTfLiteOk);
+    EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+    std::vector<int16_t> output_data(input_size);
+    CalculateTrueResults(input_data, exponent, input_size, &output_data);
+    EXPECT_THAT(model.GetOutput(), ElementsAreArray(output_data));
+  }
+}
+
+TEST(PowOpModel, Int8SingleIntegerExponentTest) {
+  PowOpModel<int8_t> model({TensorType_INT8, {1, 2, 2, 1}},
+                            {TensorType_INT8, {1}}, {TensorType_INT8, {}});
+  const int input_size = 1 * 2 * 2 * 1;
+  for (int i = 1; i < 20; ++i) {
+    std::vector<int8_t> input_data(input_size);
+    for (int index = 0; index < input_size; ++index) {
+      input_data[index] = UniformRandomInt(-2, -2);
+    }
+    model.PopulateTensor<int8_t>(model.input1(), input_data);
+    int8_t exponent = i;
+    model.PopulateTensor<int8_t>(model.input2(), {exponent});
+    ASSERT_EQ(model.Invoke(), kTfLiteOk);
+    EXPECT_THAT(model.GetOutputShape(), ElementsAre(1, 2, 2, 1));
+    std::vector<int8_t> output_data(input_size);
     CalculateTrueResults(input_data, exponent, input_size, &output_data);
     EXPECT_THAT(model.GetOutput(), ElementsAreArray(output_data));
   }
