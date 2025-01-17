@@ -911,8 +911,8 @@ TEST(FloatSubOpModel, Float32MultiDimBroadcastSubshard9) {
 template <typename T>
 class IntegerSubOpTest : public ::testing::Test {};
 
-using Int32Or64Types = ::testing::Types<int32_t, int64_t>;
-TYPED_TEST_SUITE(IntegerSubOpTest, Int32Or64Types);
+using Int8OrInt16OrInt32Or64Types = ::testing::Types<int8_t, int16_t, int32_t, int64_t>;
+TYPED_TEST_SUITE(IntegerSubOpTest, Int8OrInt16OrInt32Or64Types);
 
 // To improve automatic test sharding (via shard_count in the BUILD file),
 // we need to ensure that each individual test case runs in a reasonable time,
