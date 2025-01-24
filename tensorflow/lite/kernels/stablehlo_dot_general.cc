@@ -504,8 +504,9 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
       eigen_dst.noalias() = eigen_lhs * eigen_rhs;
     }
     // per-tensor Quantization
-    if ((lhs->type == kTfLiteInt8 || lhs->type == kTfLiteInt16) &&
-        !dequantize::IsQuantizedPerChannel(rhs)) {
+    if (output->quantization.type != kTfLiteNoQuantization &&
+        ((lhs->type == kTfLiteInt8 || lhs->type == kTfLiteInt16) &&
+         !dequantize::IsQuantizedPerChannel(rhs))) {
       std::vector<int32_t> output_data_flattened(
           eigen_dst.data(), eigen_dst.data() + eigen_dst.size());
       const int stride_output_data = batch * output_batch_size;
@@ -522,8 +523,9 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node,
     }
   }
   // per-channel Quantization
-  if ((lhs->type == kTfLiteInt8 || lhs->type == kTfLiteInt16) &&
-      dequantize::IsQuantizedPerChannel(rhs)) {
+  if (output->quantization.type != kTfLiteNoQuantization &&
+      ((lhs->type == kTfLiteInt8 || lhs->type == kTfLiteInt16) &&
+       dequantize::IsQuantizedPerChannel(rhs))) {
     const auto* affine_quantization =
         reinterpret_cast<TfLiteAffineQuantization*>(
             output->quantization.params);
@@ -591,15 +593,17 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   // Prepare temporary tensors for lhs and rhs transpose
   TF_LITE_ENSURE_OK(
       context, PrepareTemporaries(context, node, params, lhs, rhs, output));
+  
+  bool is_quantized = output->quantization.type != kTfLiteNoQuantization;
 
   // For Int16, Quantization should be symmetric.
-  if (lhs->type == kTfLiteInt16) {
+  if (lhs->type == kTfLiteInt16 && is_quantized) {
     TF_LITE_ENSURE_EQ(context, lhs->params.zero_point, 0);
     TF_LITE_ENSURE_EQ(context, rhs->params.zero_point, 0);
     TF_LITE_ENSURE_EQ(context, output->params.zero_point, 0);
   }
   // Populate Quantization params
-  if ((lhs->type == kTfLiteInt8 || lhs->type == kTfLiteInt16)) {
+  if (is_quantized && (lhs->type == kTfLiteInt8 || lhs->type == kTfLiteInt16)) {
     TF_LITE_ENSURE_EQ(context, rhs->quantization.type,
                       kTfLiteAffineQuantization);
     const auto* rhs_quantization_params =
