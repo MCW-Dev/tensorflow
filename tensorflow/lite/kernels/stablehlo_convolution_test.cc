@@ -234,7 +234,7 @@ TEST(StablehloConvolutionOpTest, kF16TestTypesTensorsWork) {
               Pointwise(FloatNear(1e-5), expected_values));
 }
 
-TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork1) {
+TEST(StablehloConvolutionOpTest, Int64TestTypesTensors) {
   TfLiteStablehloConvolutionParams params = {
       {1},     // window_strides
       1,       // num_window_strides
@@ -273,7 +273,7 @@ TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork1) {
   EXPECT_THAT(model.GetOutput<int64_t>(), ElementsAreArray(expected_values));
 }
 
-TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork2) {
+TEST(StablehloConvolutionOpTest, Int32TestTypesTensorsWork) {
   TfLiteStablehloConvolutionParams params = {
       {1},     // window_strides
       1,       // num_window_strides
@@ -301,18 +301,18 @@ TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork2) {
        tflite::StablehloPrecisionConfig::
            StablehloPrecisionConfig_DEFAULT},  // precision config
   };
-  StablehloConvolutionOpModel model({TensorType_INT64, {1, 10, 1}},
-                                    {TensorType_INT64, {1, 1, 1}},
-                                    {TensorType_INT64, {}}, params);
-  model.SetLhs<int64_t>({1, 2, 3, 4, 5, 6, 7, 9, 4, 2});
-  model.SetRhs<int64_t>({5});
+  StablehloConvolutionOpModel model({TensorType_INT32, {1, 10, 1}},
+                                    {TensorType_INT32, {1, 1, 1}},
+                                    {TensorType_INT32, {}}, params);
+  model.SetLhs<int32_t>({1, 2, 3, 4, 5, 6, 7, 9, 4, 2});
+  model.SetRhs<int32_t>({5});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
-  std::vector<int64_t> expected_values = {5,  10, 15, 20, 25,
+  std::vector<int32_t> expected_values = {5,  10, 15, 20, 25,
                                           30, 35, 45, 20, 10};
-  EXPECT_THAT(model.GetOutput<int64_t>(), ElementsAreArray(expected_values));
+  EXPECT_THAT(model.GetOutput<int32_t>(), ElementsAreArray(expected_values));
 }
 
-TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork3) {
+TEST(StablehloConvolutionOpTest, Int16TestTypesTensorsWork) {
   TfLiteStablehloConvolutionParams params = {
       {3, 4},        // window_strides
       2,             // num_window_strides
@@ -340,18 +340,18 @@ TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork3) {
        tflite::StablehloPrecisionConfig::
            StablehloPrecisionConfig_DEFAULT},  // precision config
   };
-  StablehloConvolutionOpModel model({TensorType_INT64, {1, 1, 4, 5}},
-                                    {TensorType_INT64, {1, 1, 3, 3}},
-                                    {TensorType_INT64, {}}, params);
-  model.SetLhs<int64_t>(
+  StablehloConvolutionOpModel model({TensorType_INT16, {1, 1, 4, 5}},
+                                    {TensorType_INT16, {1, 1, 3, 3}},
+                                    {TensorType_INT16, {}}, params);
+  model.SetLhs<int16_t>(
       {1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5});
-  model.SetRhs<int64_t>({1, 2, 3, 1, 2, 3, 1, 2, 3});
+  model.SetRhs<int16_t>({1, 2, 3, 1, 2, 3, 1, 2, 3});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
-  std::vector<int64_t> expected_values = {16, 28, 16, 28};
-  EXPECT_THAT(model.GetOutput<int64_t>(), ElementsAreArray(expected_values));
+  std::vector<int16_t> expected_values = {16, 28, 16, 28};
+  EXPECT_THAT(model.GetOutput<int16_t>(), ElementsAreArray(expected_values));
 }
 
-TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork4) {
+TEST(StablehloConvolutionOpTest, Int8TestTypesTensorsWork) {
   TfLiteStablehloConvolutionParams params = {
       {4, 4},        // window_strides
       2,             // num_window_strides
@@ -379,15 +379,15 @@ TEST(StablehloConvolutionOpTest, IntTestTypesTensorsWork4) {
        tflite::StablehloPrecisionConfig::
            StablehloPrecisionConfig_DEFAULT},  // precision config
   };
-  StablehloConvolutionOpModel model({TensorType_INT64, {1, 4, 4, 1}},
-                                    {TensorType_INT64, {4, 2, 1, 1}},
-                                    {TensorType_INT64, {}}, params);
-  model.SetLhs<int64_t>(
+  StablehloConvolutionOpModel model({TensorType_INT8, {1, 4, 4, 1}},
+                                    {TensorType_INT8, {4, 2, 1, 1}},
+                                    {TensorType_INT8, {}}, params);
+  model.SetLhs<int8_t>(
       {1, 3, 10, 12, 2, 4, 11, 13, 5, 7, 14, 16, 6, 8, 15, 17});
-  model.SetRhs<int64_t>({1, 1, 1, 1, 1, 1, 1, 1});
+  model.SetRhs<int8_t>({1, 1, 1, 1, 1, 1, 1, 1});
   ASSERT_EQ(model.Invoke(), kTfLiteOk);
-  std::vector<int64_t> expected_values = {3, 21, 3, 21, 11, 29, 11, 29};
-  EXPECT_THAT(model.GetOutput<int64_t>(), ElementsAreArray(expected_values));
+  std::vector<int8_t> expected_values = {3, 21, 3, 21, 11, 29, 11, 29};
+  EXPECT_THAT(model.GetOutput<int8_t>(), ElementsAreArray(expected_values));
 }
 
 TEST(StablehloConvolutionOpTest, QuantizedTestTypesTensorsWork1) {

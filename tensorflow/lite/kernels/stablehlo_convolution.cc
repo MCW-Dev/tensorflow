@@ -945,9 +945,17 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   TfLiteType data_type = lhs_tensor->type;
 
   if (data_type == kTfLiteInt8) {
-    EvalQuantize<int8_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
+    if (output_tensor->quantization.type == kTfLiteNoQuantization) {
+      EvalWithType<int8_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
+    } else {
+      EvalQuantize<int8_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
+    }
   } else if (data_type == kTfLiteInt16) {
-    EvalQuantize<int16_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
+    if (output_tensor->quantization.type == kTfLiteNoQuantization) {
+      EvalWithType<int16_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
+    } else {
+      EvalQuantize<int16_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
+    }
   } else if (data_type == kTfLiteInt32) {
     EvalWithType<int32_t>(context, node, lhs_tensor, rhs_tensor, output_tensor);
   } else if (data_type == kTfLiteInt64) {
