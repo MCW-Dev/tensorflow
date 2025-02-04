@@ -430,6 +430,20 @@ inline void SetActivationMinMax(const ArithmeticParams& params,
 }
 
 inline void SetActivationMinMax(const ArithmeticParams& params,
+                                int8_t* activation_min,
+                                int8_t* activation_max) {
+  *activation_min = params.int8_activation_min;
+  *activation_max = params.int8_activation_max;
+}
+
+inline void SetActivationMinMax(const ArithmeticParams& params,
+                                int16_t* activation_min,
+                                int16_t* activation_max) {
+  *activation_min = params.int16_activation_min;
+  *activation_max = params.int16_activation_max;
+}
+
+inline void SetActivationMinMax(const ArithmeticParams& params,
                                 float* activation_min, float* activation_max) {
   *activation_min = params.float_activation_min;
   *activation_max = params.float_activation_max;
@@ -470,7 +484,7 @@ inline void SubWithActivation(
   SetActivationMinMax(params, &activation_min, &activation_max);
 
   for (int i = 0; i < flat_size; ++i) {
-    output_data[i] = ActivationFunctionWithMinMax(
+    output_data[i] = ActivationFunctionWithMinMax<T>(
         input1_data[i] - input2_data[i], activation_min, activation_max);
   }
 }

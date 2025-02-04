@@ -271,7 +271,8 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   int input1_scale_log2_rounded{0};
   int input2_scale_log2_rounded{0};
   int output_scale_log2_rounded{0};
-
+  
+  // As we ensured input1->type == input2->type
   bool input_quantized = input1->quantization.type != kTfLiteNoQuantization; 
 
   if (input1->type == kTfLiteInt16 && input2->type == kTfLiteInt16 &&
@@ -367,26 +368,12 @@ void EvalSub(TfLiteContext* context, TfLiteNode* node, TfLiteSubParams* params,
                                         input2, requires_broadcast, output);
       break;
     case kTfLiteInt16:
-      int16_t int16_output_activation_min, int16_output_activation_max;
-      CalculateActivationRange(params->activation, &int16_output_activation_min,
-                             &int16_output_activation_max);
-      SetActivationParams(int16_output_activation_min, int16_output_activation_max,
-                        &op_params);
-      reference_ops::BroadcastSubSlow<int16_t>(
-        op_params, GetTensorShape(input1), GetTensorData<int16_t>(input1),
-        GetTensorShape(input2), GetTensorData<int16_t>(input2),
-        GetTensorShape(output), GetTensorData<int16_t>(output));
+      EvalSubImpl<kernel_type, int16_t>(context, node, params, data, input1,
+                                        input2, requires_broadcast, output);
       break;
     case kTfLiteInt8:
-      int8_t int8_output_activation_min, int8_output_activation_max;
-      CalculateActivationRange(params->activation, &int8_output_activation_min,
-                             &int8_output_activation_max);
-      SetActivationParams(int8_output_activation_min, int8_output_activation_max,
-                        &op_params);
-      reference_ops::BroadcastSubSlow<int8_t>(
-        op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
-        GetTensorShape(input2), GetTensorData<int8_t>(input2),
-        GetTensorShape(output), GetTensorData<int8_t>(output));
+      EvalSubImpl<kernel_type, int8_t>(context, node, params, data, input1,
+                                        input2, requires_broadcast, output);
       break;
     case kTfLiteFloat32:
       EvalSubImpl<kernel_type, float>(context, node, params, data, input1,
