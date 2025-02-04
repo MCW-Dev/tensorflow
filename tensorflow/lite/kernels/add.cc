@@ -329,20 +329,34 @@ void EvalAdd(TfLiteContext* context, TfLiteNode* node, TfLiteAddParams* params,
                              &output_activation_max);
     SetActivationParams(output_activation_min, output_activation_max,
                         &op_params);
-    reference_ops::BroadcastAdd6DSlow<int16_t, true>(
-        op_params, GetTensorShape(input1), GetTensorData<int16_t>(input1),
-        GetTensorShape(input2), GetTensorData<int16_t>(input2),
-        GetTensorShape(output), GetTensorData<int16_t>(output));
+    if (need_broadcast) {
+      reference_ops::BroadcastAdd6DSlow<int16_t, true>(
+          op_params, GetTensorShape(input1), GetTensorData<int16_t>(input1),
+          GetTensorShape(input2), GetTensorData<int16_t>(input2),
+          GetTensorShape(output), GetTensorData<int16_t>(output));
+    } else {
+      reference_ops::Add<int16_t>(
+          op_params, GetTensorShape(input1), GetTensorData<int16_t>(input1),
+          GetTensorShape(input2), GetTensorData<int16_t>(input2),
+          GetTensorShape(output), GetTensorData<int16_t>(output));
+    }
   } else if (output->type == kTfLiteInt8) {
     int8_t output_activation_min, output_activation_max;
     CalculateActivationRange(params->activation, &output_activation_min,
                              &output_activation_max);
     SetActivationParams(output_activation_min, output_activation_max,
                         &op_params);
-    reference_ops::BroadcastAdd6DSlow<int8_t, true>(
-        op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
-        GetTensorShape(input2), GetTensorData<int8_t>(input2),
-        GetTensorShape(output), GetTensorData<int8_t>(output));
+    if (need_broadcast) {
+      reference_ops::BroadcastAdd6DSlow<int8_t, true>(
+          op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
+          GetTensorShape(input2), GetTensorData<int8_t>(input2),
+          GetTensorShape(output), GetTensorData<int8_t>(output));
+    } else {
+      reference_ops::Add<int8_t>(
+          op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
+          GetTensorShape(input2), GetTensorData<int8_t>(input2),
+          GetTensorShape(output), GetTensorData<int8_t>(output));
+    }
   }
 #undef TF_LITE_ADD
 }
