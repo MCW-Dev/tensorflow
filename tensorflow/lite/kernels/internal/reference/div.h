@@ -91,24 +91,52 @@ inline void Div(const ArithmeticParams& params,
                 const RuntimeShape& input1_shape, const int8_t* input1_data,
                 const RuntimeShape& input2_shape, const int8_t* input2_data,
                 const RuntimeShape& output_shape, int8_t* output_data) {
-  TFLITE_DCHECK_LE(params.quantized_activation_min,
-                   params.quantized_activation_max);
-  const int flat_size =
-      MatchingElementsSize(input1_shape, input2_shape, output_shape);
+  if (!params.is_quantized) {
+    int8_t output_activation_min;
+    int8_t output_activation_max;
+    GetActivationParams(params, &output_activation_min, &output_activation_max);
 
-  DivElementwise(flat_size, params, input1_data, input2_data, output_data);
+    const int flat_size =
+        MatchingElementsSize(input1_shape, input2_shape, output_shape);
+    for (int i = 0; i < flat_size; ++i) {
+      output_data[i] = ActivationFunctionWithMinMax<int8_t>(
+          input1_data[i] / input2_data[i], output_activation_min,
+          output_activation_max);
+    }
+  } else {
+    TFLITE_DCHECK_LE(params.quantized_activation_min,
+                     params.quantized_activation_max);
+    const int flat_size =
+        MatchingElementsSize(input1_shape, input2_shape, output_shape);
+
+    DivElementwise(flat_size, params, input1_data, input2_data, output_data);
+  }
 }
 
 inline void Div(const ArithmeticParams& params,
                 const RuntimeShape& input1_shape, const int16_t* input1_data,
                 const RuntimeShape& input2_shape, const int16_t* input2_data,
                 const RuntimeShape& output_shape, int16_t* output_data) {
-  TFLITE_DCHECK_LE(params.quantized_activation_min,
-                   params.quantized_activation_max);
-  const int flat_size =
-      MatchingElementsSize(input1_shape, input2_shape, output_shape);
+  if (!params.is_quantized) {
+    int16_t output_activation_min;
+    int16_t output_activation_max;
+    GetActivationParams(params, &output_activation_min, &output_activation_max);
 
-  DivElementwise(flat_size, params, input1_data, input2_data, output_data);
+    const int flat_size =
+        MatchingElementsSize(input1_shape, input2_shape, output_shape);
+    for (int i = 0; i < flat_size; ++i) {
+      output_data[i] = ActivationFunctionWithMinMax<int16_t>(
+          input1_data[i] / input2_data[i], output_activation_min,
+          output_activation_max);
+    }
+  } else {
+    TFLITE_DCHECK_LE(params.quantized_activation_min,
+                     params.quantized_activation_max);
+    const int flat_size =
+        MatchingElementsSize(input1_shape, input2_shape, output_shape);
+
+    DivElementwise(flat_size, params, input1_data, input2_data, output_data);
+  }
 }
 
 template <typename T, int N = 5>
@@ -184,9 +212,44 @@ inline void BroadcastDivSlow(const ArithmeticParams& params,
                              const int8_t* input2_data,
                              const RuntimeShape& unextended_output_shape,
                              int8_t* output_data) {
-  BroadcastDivSlowQuantized<int8_t, N>(
-      params, unextended_input1_shape, input1_data, unextended_input2_shape,
-      input2_data, unextended_output_shape, output_data);
+  if (!params.is_quantized) {
+    int8_t output_activation_min;
+    int8_t output_activation_max;
+    GetActivationParams(params, &output_activation_min, &output_activation_max);
+
+    TFLITE_DCHECK_LE(unextended_input1_shape.DimensionsCount(), N);
+    TFLITE_DCHECK_LE(unextended_input2_shape.DimensionsCount(), N);
+    TFLITE_DCHECK_LE(unextended_output_shape.DimensionsCount(), N);
+
+    NdArrayDesc<N> desc1;
+    NdArrayDesc<N> desc2;
+    NdArrayDesc<N> output_desc;
+    NdArrayDescsForElementwiseBroadcast(
+        unextended_input1_shape, unextended_input2_shape, &desc1, &desc2);
+    CopyDimsToDesc(RuntimeShape::ExtendedShape(N, unextended_output_shape),
+                   &output_desc);
+
+    // In Tensorflow, the dimensions are canonically named (batch_number, row,
+    // col, channel), with extents (batches, height, width, depth), with the
+    // trailing dimension changing most rapidly (channels has the smallest
+    // stride, typically 1 element).
+    //
+    // In generated C code, we store arrays with the dimensions reversed. The
+    // first dimension has smallest stride.
+
+    auto div_func = [&](int indexes[N]) {
+      output_data[SubscriptToIndex(output_desc, indexes)] =
+          ActivationFunctionWithMinMax<int8_t>(
+              input1_data[SubscriptToIndex(desc1, indexes)] /
+                  input2_data[SubscriptToIndex(desc2, indexes)],
+              output_activation_min, output_activation_max);
+    };
+    NDOpsHelper<N>(output_desc, div_func);
+  } else {
+    BroadcastDivSlowQuantized<int8_t, N>(
+        params, unextended_input1_shape, input1_data, unextended_input2_shape,
+        input2_data, unextended_output_shape, output_data);
+  }
 }
 template <int N = 5>
 inline void BroadcastDivSlow(const ArithmeticParams& params,
@@ -196,9 +259,44 @@ inline void BroadcastDivSlow(const ArithmeticParams& params,
                              const int16_t* input2_data,
                              const RuntimeShape& unextended_output_shape,
                              int16_t* output_data) {
-  BroadcastDivSlowQuantized<int16_t, N>(
-      params, unextended_input1_shape, input1_data, unextended_input2_shape,
-      input2_data, unextended_output_shape, output_data);
+  if (!params.is_quantized) {
+    int16_t output_activation_min;
+    int16_t output_activation_max;
+    GetActivationParams(params, &output_activation_min, &output_activation_max);
+
+    TFLITE_DCHECK_LE(unextended_input1_shape.DimensionsCount(), N);
+    TFLITE_DCHECK_LE(unextended_input2_shape.DimensionsCount(), N);
+    TFLITE_DCHECK_LE(unextended_output_shape.DimensionsCount(), N);
+
+    NdArrayDesc<N> desc1;
+    NdArrayDesc<N> desc2;
+    NdArrayDesc<N> output_desc;
+    NdArrayDescsForElementwiseBroadcast(
+        unextended_input1_shape, unextended_input2_shape, &desc1, &desc2);
+    CopyDimsToDesc(RuntimeShape::ExtendedShape(N, unextended_output_shape),
+                   &output_desc);
+
+    // In Tensorflow, the dimensions are canonically named (batch_number, row,
+    // col, channel), with extents (batches, height, width, depth), with the
+    // trailing dimension changing most rapidly (channels has the smallest
+    // stride, typically 1 element).
+    //
+    // In generated C code, we store arrays with the dimensions reversed. The
+    // first dimension has smallest stride.
+
+    auto div_func = [&](int indexes[N]) {
+      output_data[SubscriptToIndex(output_desc, indexes)] =
+          ActivationFunctionWithMinMax<int16_t>(
+              input1_data[SubscriptToIndex(desc1, indexes)] /
+                  input2_data[SubscriptToIndex(desc2, indexes)],
+              output_activation_min, output_activation_max);
+    };
+    NDOpsHelper<N>(output_desc, div_func);
+  } else {
+    BroadcastDivSlowQuantized<int16_t, N>(
+        params, unextended_input1_shape, input1_data, unextended_input2_shape,
+        input2_data, unextended_output_shape, output_data);
+  }
 }
 // TODO(jiawen): We can implement BroadcastDiv on buffers of arbitrary
 // dimensionality if the runtime code does a single loop over one dimension

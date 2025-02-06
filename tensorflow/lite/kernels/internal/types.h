@@ -642,6 +642,7 @@ enum class ResizingCategory : uint8_t {
 struct ArithmeticParams {
   // Shape dependent / common to data / op types.
   BroadcastableOpCategory broadcast_category;
+  bool is_quantized = true;
   // uint8_t inference params.
   int32_t input1_offset;
   int32_t input2_offset;
