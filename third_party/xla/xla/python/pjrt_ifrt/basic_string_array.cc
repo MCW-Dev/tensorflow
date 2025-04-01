@@ -39,9 +39,9 @@ limitations under the License.
 #include "xla/python/ifrt/shape.h"
 #include "xla/python/ifrt/sharding.h"
 #include "xla/tsl/concurrency/ref_count.h"
+#include "xla/tsl/platform/statusor.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/platform/statusor.h"
 
 // TODO(jmudigonda): Several BasicStringArray operations such as
 // DisassembleIntoSingleDeviceArrays, Reshard, FullyReplicatedShard,
@@ -153,14 +153,6 @@ Future<> BasicStringArray::GetReadyFuture() const {
         absl::FailedPreconditionError("Array has already been deleted"));
   }
   return ready_future_;
-}
-
-absl::StatusOr<std::vector<tsl::RCReference<Array>>>
-BasicStringArray::DisassembleIntoSingleDeviceArrays(
-    ArrayCopySemantics semantics) {
-  DCHECK(this);
-  return DisassembleIntoSingleDeviceArrays(
-      semantics, SingleDeviceShardSemantics::kAllShards);
 }
 
 absl::StatusOr<std::vector<tsl::RCReference<Array>>>
@@ -303,7 +295,7 @@ Future<> BasicStringArray::CopyToHostBuffer(
 }
 
 absl::StatusOr<tsl::RCReference<Array>> BasicStringArray::Copy(
-    std::optional<tsl::RCReference<xla::ifrt::DeviceList>> devices,
+    std::optional<xla::ifrt::DeviceListRef> devices,
     std::optional<xla::ifrt::MemoryKind> memory_kind,
     ArrayCopySemantics semantics) {
   DCHECK(this);
@@ -367,14 +359,12 @@ absl::StatusOr<tsl::RCReference<Array>> BasicStringArray::FullyReplicatedShard(
     return absl::FailedPreconditionError("Array has already been deleted");
   }
 
-  // Some user code paths (e.g.: through JAX) may not correctly set the
-  // `is_fully_replicated` flag when they are using ConcreteEvenSharding. If
-  // and when that causes a problem, we should investigate a way to actually
-  // looking into the sharding to determine if it is a fully replicated
-  // sharding.
-  if (!sharding_->IsFullyReplicated()) {
-    return absl::FailedPreconditionError("This array is not fully replicated");
-  }
+  // Consider a check here to make sure that the first shard contains the full
+  // array - i.e., this indeed is a fully replicated array. Checking the shading
+  // object may not be sufficient since currently IFRT users (e.g., JAX) can
+  // sometimes use ConcreteSharding even for single device arrays, and
+  // ConcreteSharding is currently hardcoded to be non-fully-replicated.
+
   struct StringStore {  // Data (strings) for a single shard.
     void CopyFrom(absl::Span<const absl::Cord> input_buffer) {
       strings.reserve(input_buffer.size());

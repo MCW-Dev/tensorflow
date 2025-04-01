@@ -103,6 +103,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/lite/utils/control_edges.h"
 #include "tensorflow/compiler/mlir/lite/utils/convert_type.h"
 #include "tensorflow/compiler/mlir/lite/utils/low_bit_utils.h"
+#include "tensorflow/compiler/mlir/lite/utils/mlir_module_utils.h"
 #include "tensorflow/compiler/mlir/lite/utils/region_isolation.h"
 #include "tensorflow/compiler/mlir/lite/utils/stateful_ops_utils.h"
 #include "tensorflow/compiler/mlir/lite/utils/string_utils.h"
@@ -113,9 +114,9 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_saved_model.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_types.h"
-#include "tensorflow/compiler/mlir/tensorflow/translate/export_tf_dialect_op.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/convert_tensor.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/dynamic_shape_utils.h"
+#include "tensorflow/compiler/mlir/tensorflow/utils/translate_utils.h"
 #include "tensorflow/core/framework/attr_value.pb.h"
 #include "tensorflow/core/framework/node_def.pb.h"
 #include "tensorflow/core/framework/op.h"
@@ -557,7 +558,8 @@ class Translator {
       OpOrArgNameMapper* op_or_arg_name_mapper,
       const std::map<std::string, std::string>& metadata,
       bool serialize_stablehlo_ops,
-      std::optional<size_t> custom_option_alignment);
+      std::optional<size_t> custom_option_alignment,
+      bool disable_buffer_deduping = false);
 
  private:
   enum class OpType : char { kTfliteBuiltin, kSelectTf, kCustomOp };
@@ -566,7 +568,8 @@ class Translator {
                       const std::unordered_set<std::string>& saved_model_tags,
                       OpOrArgNameMapper* op_or_arg_name_mapper,
                       const std::map<std::string, std::string>& metadata,
-                      std::optional<size_t> custom_option_alignment)
+                      std::optional<size_t> custom_option_alignment,
+                      bool disable_buffer_deduping)
       : module_(module),
         name_mapper_(*op_or_arg_name_mapper),
         builder_(kInitialBufferSize),
@@ -579,7 +582,8 @@ class Translator {
                             converter_flags.supported_backends().end()),
         serialize_debug_metadata_(converter_flags.serialize_debug_metadata()),
         use_buffer_offset_(converter_flags.use_buffer_offset()),
-        custom_option_alignment_(custom_option_alignment) {
+        custom_option_alignment_(custom_option_alignment),
+        disable_buffer_deduping_(disable_buffer_deduping) {
     // The first buffer must be empty according to the schema definition.
     empty_buffer_ = tflite::CreateBuffer(builder_);
     buffers_.push_back(empty_buffer_);
@@ -929,6 +933,8 @@ class Translator {
 
   std::optional<size_t> custom_option_alignment_ = std::nullopt;
 
+  bool disable_buffer_deduping_ = false;
+
   // Map from mlir constant attribute to the buffer index. This is used to
   // deduplicate the buffers in the flatbuffer.
   llvm::DenseMap<mlir::ElementsAttr, int> const_attribute_to_buffer_map_;
@@ -966,6 +972,7 @@ std::string Translator::UniqueName(mlir::Value val) {
 
 std::optional<BufferOffset<tflite::Buffer>> Translator::BuildBuffer(
     mlir::Value value, bool can_be_deduplicated, int& index) {
+  can_be_deduplicated = can_be_deduplicated && !disable_buffer_deduping_;
   auto inst = value.getDefiningOp();
   ElementsAttr attr;
   if (auto cst = dyn_cast<mlir::arith::ConstantOp>(inst)) {
@@ -1094,6 +1101,10 @@ std::optional<BufferOffset<tflite::Buffer>> Translator::BuildBuffer(
     if (IsModelBiggerThan2GB(tensor_data.size())) {
       require_use_buffer_offset_ = true;
       return empty_buffer_;
+    }
+    if (custom_option_alignment_.has_value()) {
+      builder_.ForceVectorAlignment(tensor_data.size(), sizeof(uint8_t),
+                                    custom_option_alignment_.value());
     }
     auto buffer_data = builder_.CreateVector(
         reinterpret_cast<const uint8_t*>(tensor_data.data()),
@@ -2465,6 +2476,14 @@ std::optional<BufferOffset<tflite::Operator>> Translator::BuildOperator(
       return BuildStablehloOperatorwithoutOptions(
           inst, operands, results, tflite::BuiltinOperator_STABLEHLO_ADD);
     }
+    if (auto sub_op = llvm::dyn_cast<mlir::vhlo::SubtractOpV1>(inst)) {
+      return BuildStablehloOperatorwithoutOptions(
+          inst, operands, results, tflite::BuiltinOperator_STABLEHLO_SUBTRACT);
+    }
+    if (auto or_op = llvm::dyn_cast<mlir::vhlo::OrOpV1>(inst)) {
+      return BuildStablehloOperatorwithoutOptions(
+          inst, operands, results, tflite::BuiltinOperator_STABLEHLO_OR);
+    }
     if (auto vhlo_op = llvm::dyn_cast<mlir::vhlo::MulOpV1>(inst)) {
       return BuildStablehloOperatorwithoutOptions(
           inst, operands, results, tflite::BuiltinOperator_STABLEHLO_MULTIPLY);
@@ -3612,11 +3631,17 @@ std::string Translator::SerializeDebugMetadata(mlir::ModuleOp module) {
 
 std::optional<VectorBufferOffset<BufferOffset<tflite::Metadata>>>
 Translator::CreateMetadataVector() {
+  constexpr StringRef kRuntimeVersionMetadataKey = "min_runtime_version";
   auto dict_attr = module_->getAttrOfType<mlir::DictionaryAttr>("tfl.metadata");
   std::vector<BufferOffset<tflite::Metadata>> metadata;
   if (dict_attr) {
     for (const auto& named_attr : dict_attr) {
       StringRef name = named_attr.getName();
+      if (name == kRuntimeVersionMetadataKey) {
+        LOG(WARNING) << "Skipping runtime version metadata in the model. This "
+                        "will be generated by the exporter.";
+        continue;
+      }
       mlir::Attribute attr = named_attr.getValue();
       if (auto content = mlir::dyn_cast<StringAttr>(attr)) {
         metadata.push_back(BuildMetadata(name, content.getValue()));
@@ -3633,8 +3658,8 @@ Translator::CreateMetadataVector() {
   // 16-byte because it's the alignment of buffers in flatbuffer, so it won't
   // cause any waste of space if the actual string is shorter than 16 bytes.
   constexpr std::size_t kByteStringSize = 16;
-  metadata.push_back(
-      BuildMetadata("min_runtime_version", std::string(kByteStringSize, '\0')));
+  metadata.push_back(BuildMetadata(kRuntimeVersionMetadataKey,
+                                   std::string(kByteStringSize, '\0')));
   if (use_buffer_offset_) {
     metadata.push_back(
         BuildMetadata(tflite_metadata_buffer_location, "outside flatbuffers"));
@@ -3857,25 +3882,39 @@ std::optional<std::string> Translator::Translate(
     const std::unordered_set<std::string>& tags,
     OpOrArgNameMapper* op_or_arg_name_mapper,
     const std::map<std::string, std::string>& metadata,
-    bool serialize_stablehlo_ops,
-    std::optional<size_t> custom_option_alignment) {
+    bool serialize_stablehlo_ops, std::optional<size_t> custom_option_alignment,
+    bool disable_buffer_deduping) {
   OpOrArgLocNameMapper default_op_or_arg_name_mapper;
   if (!op_or_arg_name_mapper)
     op_or_arg_name_mapper = &default_op_or_arg_name_mapper;
   if (!UpdateEntryFunction(module)) return std::nullopt;
   if (!IsValidTFLiteMlirModule(module)) return std::nullopt;
-  auto translator = std::unique_ptr<Translator>(
-      new Translator(module, converter_flags, tags, op_or_arg_name_mapper,
-                     metadata, custom_option_alignment));
+
+  auto new_converter_flags = converter_flags;
+  // If the module size is greater than 2GB, we need to use buffer offset. This
+  // will prevent running export twice, if the module size is known to be
+  // greater than 2GB.
+  if (mlir::TFL::GetApproximateModuleSize(module) > flatbuffer_size_max) {
+    llvm::errs() << "Module size is greater than 2GB\n";
+    new_converter_flags.set_use_buffer_offset(true);
+  }
+
+  auto translator = std::unique_ptr<Translator>(new Translator(
+      module, new_converter_flags, tags, op_or_arg_name_mapper, metadata,
+      custom_option_alignment, disable_buffer_deduping));
   translator->convert_stablehlo_ = serialize_stablehlo_ops;
   auto ret = translator->TranslateInternal();
-  if (translator->require_use_buffer_offset_) {
+
+  // Re-run the translator with use_buffer_offset set to true, if
+  // require_use_buffer_offset_ flag is set during the first run.
+  if (translator->require_use_buffer_offset_ &&
+      !new_converter_flags.use_buffer_offset()) {
     ret = std::nullopt;
     auto new_converter_flags = converter_flags;
     new_converter_flags.set_use_buffer_offset(true);
-    translator = std::unique_ptr<Translator>(
-        new Translator(module, new_converter_flags, tags, op_or_arg_name_mapper,
-                       metadata, custom_option_alignment));
+    translator = std::unique_ptr<Translator>(new Translator(
+        module, new_converter_flags, tags, op_or_arg_name_mapper, metadata,
+        custom_option_alignment, disable_buffer_deduping));
     return translator->TranslateInternal();
   }
   return ret;
@@ -4468,7 +4507,7 @@ bool MlirToFlatBufferTranslateFunction(mlir::ModuleOp module,
   auto maybe_translated = Translator::Translate(
       module, options.converter_flags, options.saved_model_tags,
       options.op_or_arg_name_mapper, options.metadata, serialize_stablehlo_ops,
-      options.custom_option_alignment);
+      options.custom_option_alignment, options.disable_buffer_deduping);
   if (!maybe_translated) return false;
   *serialized_flatbuffer = std::move(*maybe_translated);
   return true;

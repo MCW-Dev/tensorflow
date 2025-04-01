@@ -15,8 +15,11 @@
 #ifndef TENSORFLOW_LITE_EXPERIMENTAL_LITERT_VENDORS_EXAMPLES_EXAMPLE_CONVERSION_IMPL_H_
 #define TENSORFLOW_LITE_EXPERIMENTAL_LITERT_VENDORS_EXAMPLES_EXAMPLE_CONVERSION_IMPL_H_
 
+#include <cstdint>
 #include <memory>
+#include <string>
 
+#include "absl/log/absl_check.h"
 #include "absl/strings/string_view.h"
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_op_code.h"
@@ -48,7 +51,7 @@ class ExampleBinOpLegalization : public Legalization<ExampleOp, ExampleTensor> {
   static Ptr Make() { return std::make_unique<Self>(); }
 
   // Return the litert op code to match on.
-  constexpr LiteRtOpCode OpToMatch() const override { return LiteRtOpType; }
+  LiteRtOpCode OpToMatch() const override { return LiteRtOpType; }
 
   // Determines if the given litert op has a fused relu attribute.
   bool HasFusedRelu(const Op& litert_op) const {

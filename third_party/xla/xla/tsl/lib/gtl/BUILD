@@ -32,6 +32,9 @@ package(
         "//xla/tsl/distributed_runtime/rpc:__pkg__",
         "//xla/tsl/profiler/utils:__pkg__",
         "//tensorflow/core/profiler/convert:__pkg__",
+        # xprof /convert and /utils uses map_util and top_n
+        "//third_party/xprof/convert:__pkg__",
+        "//third_party/xprof/utils:__pkg__",
     ]),
     licenses = ["notice"],
 )
@@ -224,8 +227,8 @@ tsl_cc_test(
         ":map_util",
         "//xla/tsl/platform:macros",
         "//xla/tsl/platform:test",
-        "//xla/tsl/platform:test_main",
         "//xla/tsl/platform:types",
+        "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:hash",
     ],
 )

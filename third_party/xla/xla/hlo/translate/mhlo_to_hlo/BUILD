@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library")
-load("//xla:xla.bzl", "xla_cc_test")
+load("//xla:xla.default.bzl", "xla_cc_test")
 load("//xla/tsl:tsl.bzl", "internal_visibility")
 load("//xla/tsl:tsl.default.bzl", "get_compatible_with_portable")
 load("//xla/tsl/platform:rules_cc.bzl", "cc_binary", "cc_library")
@@ -46,10 +46,10 @@ cc_library(
         "//xla:xla_data_proto_cc",
         "//xla/hlo/builder:xla_builder",
         "//xla/hlo/ir:hlo",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@local_tsl//tsl/platform:errors",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -63,13 +63,14 @@ cc_library(
         "//xla:literal",
         "//xla:literal_util",
         "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
+        "//xla/tsl/platform:errors",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
-        "@local_tsl//tsl/platform:errors",
     ],
 )
 
@@ -96,6 +97,7 @@ cc_library(
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_proto_cc",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
@@ -117,17 +119,17 @@ cc_library(
 cc_library(
     name = "mlir_hlo_to_hlo",
     srcs = [
+        "hlo_op_writer.inc",
         "mlir_hlo_to_hlo.cc",
-        "operator_writers.inc",
     ],
     hdrs = ["mlir_hlo_to_hlo.h"],
     deps = [
         ":attribute_exporter",
+        ":hlo_op_writer_inc",
         ":layout_util",
         ":literal_exporter",
         ":location_exporter",
         ":module_attributes_exporter",
-        ":operator_writer_inc",
         ":stack_frame_index_builder",
         ":type_to_shape",
         "//xla:array",
@@ -152,10 +154,14 @@ cc_library(
         "//xla/mlir/utils:type_util",
         "//xla/mlir_hlo",
         "//xla/mlir_hlo:mhlo_passes",
+        "//xla/mlir_hlo:stablehlo_extension_passes",
         "//xla/service:computation_layout",
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_proto_cc",
         "//xla/service/gpu:backend_configs_cc",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
+        "//xla/tsl/platform:types",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -172,25 +178,22 @@ cc_library(
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TensorDialect",
         "@llvm-project//mlir:TransformUtils",
-        "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:ml_dtypes",
-        "@local_tsl//tsl/platform:statusor",
-        "@local_tsl//tsl/platform:types",
         "@stablehlo//:base",
         "@stablehlo//:stablehlo_ops",
     ],
 )
 
 build_test(
-    name = "operator_writer_gen_build_test",
+    name = "gen_hlo_op_writer_build_test",
     targets = [
-        ":operator_writer_gen",
+        ":gen_hlo_op_writer",
     ],
 )
 
 cc_binary(
-    name = "operator_writer_gen",
-    srcs = ["operator_writer_gen.cc"],
+    name = "gen_hlo_op_writer",
+    srcs = ["gen_hlo_op_writer.cc"],
     deps = [
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:TableGen",
@@ -199,11 +202,11 @@ cc_binary(
 )
 
 gentbl_cc_library(
-    name = "operator_writer_inc",
+    name = "hlo_op_writer_inc",
     compatible_with = get_compatible_with_portable(),
-    tbl_outs = [([], "operator_writers.inc")],
-    tblgen = ":operator_writer_gen",
-    td_file = "//xla/mlir_hlo:mhlo/IR/hlo_ops.td",
+    tbl_outs = [([], "hlo_op_writer.inc")],
+    tblgen = ":gen_hlo_op_writer",
+    td_file = "gen_hlo_op_writer.td",
     deps = [
         "//xla/mlir_hlo:hlo_ops_td_files",
         "@llvm-project//mlir:InferTypeOpInterfaceTdFiles",
@@ -219,13 +222,14 @@ xla_cc_test(
         ":mlir_hlo_to_hlo",
         "//xla/mlir/utils:error_util",
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:status_matchers",
+        "//xla/tsl/platform:test",
+        "//xla/tsl/platform:test_main",
+        "@com_google_googletest//:gtest",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:ShapeDialect",
-        "@local_tsl//tsl/platform:status_matchers",
-        "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
         "@stablehlo//:register",
     ],
 )
@@ -246,6 +250,8 @@ cc_library(
         "//xla/service:hlo_module_config",
         "//xla/service:hlo_proto_cc",
         "//xla/service:hlo_proto_util",
+        "//xla/tsl/platform:errors",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -255,8 +261,6 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Support",
-        "@local_tsl//tsl/platform:errors",
-        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -305,14 +309,16 @@ xla_cc_test(
     deps = [
         ":type_to_shape",
         "//xla:shape_util",
-        "//xla:test",
         "//xla:xla_data_proto_cc",
+        "//xla/hlo/testlib:test",
         "//xla/hlo/translate/hlo_to_mhlo:hlo_utils",
         "//xla/mlir_hlo",
+        "//xla/tsl/platform:test_main",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_googletest//:gtest",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@local_tsl//tsl/platform:protobuf",
-        "@local_tsl//tsl/platform:test_main",
+        "@stablehlo//:stablehlo_ops",
     ],
 )

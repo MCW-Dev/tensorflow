@@ -16,40 +16,47 @@ limitations under the License.
 #include "tensorflow/core/profiler/convert/xplane_to_op_stats.h"
 
 #include <optional>
+#include <ostream>
 #include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "xla/tsl/profiler/convert/xla_op_utils.h"
 #include "xla/tsl/profiler/utils/math_utils.h"
 #include "xla/tsl/profiler/utils/tf_xplane_visitor.h"
+#include "xla/tsl/profiler/utils/timespan.h"
 #include "xla/tsl/profiler/utils/tpu_xplane_utils.h"
-#include "xla/tsl/profiler/utils/xplane_schema.h"
 #include "xla/tsl/profiler/utils/xplane_utils.h"
+#include "tensorflow/core/profiler/convert/duty_cycle_combiner.h"
+#include "tensorflow/core/profiler/convert/duty_cycle_tracker.h"
 #include "tensorflow/core/profiler/convert/op_metrics_db_combiner.h"
 #include "tensorflow/core/profiler/convert/step_events_to_steps_db.h"
 #include "tensorflow/core/profiler/convert/xplane_to_kernel_stats_db.h"
 #include "tensorflow/core/profiler/convert/xplane_to_op_metrics_db.h"
 #include "tensorflow/core/profiler/convert/xplane_to_step_events.h"
+#include "tensorflow/core/profiler/convert/xplane_to_tf_functions.h"
 #include "tensorflow/core/profiler/protobuf/diagnostics.pb.h"
 #include "tensorflow/core/profiler/protobuf/hardware_types.pb.h"
 #include "tensorflow/core/profiler/protobuf/op_metrics.pb.h"
 #include "tensorflow/core/profiler/protobuf/op_stats.pb.h"
 #include "tensorflow/core/profiler/protobuf/steps_db.pb.h"
 #include "tensorflow/core/profiler/protobuf/tf_function.pb.h"
-#include "tensorflow/core/profiler/utils/device_caps_utils.h"
-#include "tensorflow/core/profiler/utils/event_span.h"
-#include "tensorflow/core/profiler/utils/hardware_type_utils.h"
-#include "tensorflow/core/profiler/utils/hlo_module_map.h"
 #include "tensorflow/core/profiler/utils/hlo_proto_map.h"
-#include "tensorflow/core/profiler/utils/kernel_stats_utils.h"
-#include "tensorflow/core/profiler/utils/op_utils.h"
 #include "tensorflow/core/profiler/utils/xplane_schema.h"
 #include "tensorflow/core/profiler/utils/xplane_utils.h"
 #include "tensorflow/core/profiler/utils/xplane_visitor.h"
 #include "tsl/profiler/protobuf/xplane.pb.h"
+#include "xprof/utils/device_caps_utils.h"  // from @org_xprof
+#include "xprof/utils/event_span.h"  // from @org_xprof
+#include "xprof/utils/gpu_event_stats.h"  // from @org_xprof
+#include "xprof/utils/hardware_type_utils.h"  // from @org_xprof
+#include "xprof/utils/hlo_module_map.h"  // from @org_xprof
+#include "xprof/utils/kernel_stats_utils.h"  // from @org_xprof
+#include "xprof/utils/op_utils.h"  // from @org_xprof
 
 namespace tensorflow {
 namespace profiler {
@@ -57,6 +64,7 @@ namespace {
 
 using tsl::profiler::FindPlanesWithPrefix;
 using tsl::profiler::FindTensorCorePlanes;
+using tsl::profiler::Timespan;
 
 std::string Hostname(const XSpace& space) {
   if (space.hostnames().empty()) return "localhost";
@@ -252,6 +260,29 @@ void UpdateOpMetricsDbFromHloModuleMap(OpMetricsDb& op_metrics_db,
   }
 }
 
+DutyCycleTracker ConstructDutyCycleTracker(XPlaneVisitor& visitor) {
+  DutyCycleTracker duty_cycle_tracker;
+  visitor.ForEachLine([&](const XLineVisitor& line) {
+    if (line.Name() == kXlaOpLineName) {
+      line.ForEachEvent([&](const XEventVisitor& event) {
+        auto hlo_category_stat = event.GetStat(StatType::kHloCategory);
+        duty_cycle_tracker.AddInterval(
+            Timespan(event.OffsetPs(), event.DurationPs()),
+            !(hlo_category_stat &&
+              tsl::profiler::IsOffDutyOp(hlo_category_stat->StrOrRefValue())));
+      });
+    } else if (line.Name() == kSparseCoreOpLineName ||
+               line.Name() == kSparseCoreModuleLineName) {
+      line.ForEachEvent([&](const XEventVisitor& event) {
+        duty_cycle_tracker.AddInterval(
+            Timespan(event.OffsetPs(), event.DurationPs()),
+            /*is_active=*/line.Name() == kSparseCoreOpLineName);
+      });
+    }
+  });
+  return duty_cycle_tracker;
+}
+
 OpStats ConvertXSpaceToOpStats(const XSpace& space,
                                const OpStatsOptions& options) {
   OpStats op_stats;
@@ -272,32 +303,42 @@ OpStats ConvertXSpaceToOpStats(const XSpace& space,
     device_planes = FindPlanesWithPrefix(space, kGpuPlanePrefix);
   }
   const bool is_tpu = !is_gpu;
+  std::string hostname = Hostname(space);
+  auto& core_id_to_details_map = *op_stats.mutable_core_id_to_details();
+  if (is_gpu) {
+    core_id_to_details_map[kDefaultGpuLocalCoreId].set_hostname(hostname);
+  }
+  DutyCycleCombiner duty_cycle_combiner;
   // TODO(b/161942993) parallelize XPlane processing per thread.
+  HloModuleMap hlo_module_map;
+  if (options.generate_kernel_stats_db ||
+      (is_tpu && options.generate_op_metrics_db)) {
+    ProcessHloModuleMapFromXSpace(hlo_module_map, &space);
+  }
   for (const XPlane* device_trace : device_planes) {
-    XPlane aggregated_xplane;
-    bool use_aggregated_xplane = false;
     if (options.generate_op_metrics_db) {
       if (!op_stats.has_perf_env()) {
         *op_stats.mutable_perf_env() = GetPerfEnvFromXPlane(*device_trace);
       }
-      HloModuleMap hlo_module_map;
-      ProcessHloModuleMapFromXSpace(hlo_module_map, &space);
       if (!is_tpu) {
         OpMetricsDb device_op_metrics_db =
             ConvertDeviceTraceXPlaneToOpMetricsDb(*device_trace);
         op_metrics_db_combiner.Combine(device_op_metrics_db);
       } else {
-        AggregateXPlane(*device_trace, aggregated_xplane);
-        use_aggregated_xplane = true;
-        OpMetricsDb device_op_metrics_db =
-            ConvertTpuDeviceTraceXPlaneToOpMetricsDb(aggregated_xplane);
-        UpdateOpMetricsDbFromHloModuleMap(device_op_metrics_db, hlo_module_map);
-        op_metrics_db_combiner.Combine(device_op_metrics_db);
+        // TODO(b/397774568): Remove this once the SparseCore OpMetricsDb is
+        // implemented.
+        if (!tsl::profiler::GetSparseCoreId(device_trace->name()).has_value()) {
+          OpMetricsDb device_op_metrics_db =
+              ConvertTpuDeviceTraceXPlaneToOpMetricsDb(*device_trace);
+          UpdateOpMetricsDbFromHloModuleMap(device_op_metrics_db,
+                                            hlo_module_map);
+          op_metrics_db_combiner.Combine(device_op_metrics_db);
+        }
       }
     }
     if (options.generate_step_db) {
-      StepEvents device_step_events = ConvertDeviceTraceXPlaneToStepEvents(
-          use_aggregated_xplane ? aggregated_xplane : *device_trace);
+      StepEvents device_step_events =
+          ConvertDeviceTraceXPlaneToStepEvents(*device_trace);
       if (is_tpu) {
         // In TPU, we take the intersection of step events across cores as well
         // as hosts.see b/158249775 and cl/331842545.
@@ -307,9 +348,58 @@ OpStats ConvertXSpaceToOpStats(const XSpace& space,
       }
     }
     if (options.generate_kernel_stats_db) {
-      ConvertDeviceTraceXPlaneToKernelReports(*device_trace,
-                                              /*on_kernel_fn=*/{}, &reports);
+      ConvertDeviceTraceXPlaneToKernelReports(
+          *device_trace,
+          // TODO(cleanup): Move this to xplane_to_kernel_stats_db.cc
+          [&](const GpuEventStats& stats, KernelReport* kernel) {
+            if (!stats.IsXlaOp()) return;
+            const HloInstructionWrapper* hlo_instruction = GetHloInstruction(
+                hlo_module_map, stats.program_id, stats.hlo_op_names.back());
+            if (hlo_instruction != nullptr) {
+              kernel->set_op_name(std::string(hlo_instruction->TfOpName()));
+              bool tc_eligible = IsOpTensorCoreEligible(kernel->op_name());
+              if (VLOG_IS_ON(1) && !tc_eligible &&
+                  kernel->is_kernel_using_tensor_core()) {
+                VLOG(1) << "Detected new Op using TensorCores: "
+                        << kernel->op_name() << std::endl;
+              }
+              kernel->set_is_op_tensor_core_eligible(
+                  tc_eligible || kernel->is_op_tensor_core_eligible());
+            }
+          },
+          &reports);
     }
+    XPlaneVisitor visitor = tsl::profiler::CreateTfXPlaneVisitor(device_trace);
+    DutyCycleTracker duty_cycle_tracker = ConstructDutyCycleTracker(visitor);
+    if (std::optional<XStatVisitor> core_details_stat =
+            visitor.GetStat(StatType::kCoreDetails)) {
+      CoreDetails core_details;
+      absl::string_view core_details_bytes = core_details_stat->BytesValue();
+      if (core_details.ParseFromArray(core_details_bytes.data(),
+                                      core_details_bytes.size())) {
+        core_details.set_hostname(hostname);
+        // This is a backfill for XPlanes that were create before this field was
+        // added.
+        core_details.set_is_sparse_core(
+            tsl::profiler::GetSparseCoreId(device_trace->name()).has_value());
+        core_id_to_details_map[device_trace->id()] = core_details;
+      }
+    }
+    if (core_id_to_details_map.contains(device_trace->id())) {
+      CoreDetails& core_details = core_id_to_details_map[device_trace->id()];
+      duty_cycle_combiner.CombineCore(duty_cycle_tracker,
+                                      core_details.local_chip_id());
+    } else {
+      LOG(WARNING) << "No CoreDetails found for TPU device plane: "
+                   << device_trace->name();
+      duty_cycle_combiner.CombineChip(duty_cycle_tracker);
+    }
+  }
+
+  if (is_tpu) {
+    OpMetricsDb& op_metrics_db = *op_stats.mutable_device_op_metrics_db();
+    op_metrics_db.set_idle_time_ps(duty_cycle_combiner.GetTotalIdleTimePs());
+    op_metrics_db.set_busy_time_ps(duty_cycle_combiner.GetTotalActiveTimePs());
   }
 
   // Combine into reports.
@@ -337,6 +427,11 @@ OpStats ConvertXSpaceToOpStats(const XSpace& space,
       op_stats.mutable_performance_counter_result()
           ->set_matrix_unit_utilization_percent(stat->DoubleValue());
     }
+    TfFunctionDb* tf_function_db = op_stats.mutable_tf_function_db();
+    visitor.ForEachLine([&](const XLineVisitor& line) {
+      CombineTfFunctionDb(ConvertHostThreadsXLineToTfFunctionDb(line),
+                          tf_function_db);
+    });
   }
   if (options.generate_step_db) {
     if (is_tpu) {
@@ -346,6 +441,11 @@ OpStats ConvertXSpaceToOpStats(const XSpace& space,
           has_device, /*maybe_drop_incomplete_steps=*/false, step_events);
       *op_stats.mutable_device_op_metrics_db()->mutable_precision_stats() =
           ComputePrecisionStats(step_events);
+      OpMetricsDbCombiner combiner(
+          op_stats.mutable_hlo_metrics_db_complete_steps_only());
+      for (const auto& step_info : op_stats.step_db().step_sequence()) {
+        combiner.Combine(step_info.hlo_metrics_db());
+      }
     } else {
       StepEvents nonoverlapped_step_events =
           ToNonOverlappedStepEvents(step_events);
@@ -354,29 +454,6 @@ OpStats ConvertXSpaceToOpStats(const XSpace& space,
           nonoverlapped_step_events);
       *op_stats.mutable_device_op_metrics_db()->mutable_precision_stats() =
           ComputePrecisionStats(nonoverlapped_step_events);
-    }
-  }
-
-  if (!is_tpu) {
-    CoreDetails& details =
-        (*op_stats.mutable_core_id_to_details())[kDefaultGpuLocalCoreId];
-    details.set_hostname(Hostname(space));
-  } else {
-    std::string hostname = Hostname(space);
-    auto& core_id_to_details = *op_stats.mutable_core_id_to_details();
-    for (const XPlane* device_plane : device_planes) {
-      XPlaneVisitor visitor =
-          tsl::profiler::CreateTfXPlaneVisitor(device_plane);
-      auto stat = visitor.GetStat(StatType::kCoreDetails);
-      if (stat.has_value()) {
-        CoreDetails core_details;
-        absl::string_view core_details_bytes = stat->BytesValue();
-        if (core_details.ParseFromArray(core_details_bytes.data(),
-                                        core_details_bytes.size())) {
-          core_details.set_hostname(hostname);
-          core_id_to_details[device_plane->id()] = core_details;
-        }
-      }
     }
   }
 

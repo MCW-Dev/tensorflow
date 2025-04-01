@@ -15,32 +15,37 @@
 #ifndef TENSORFLOW_LITE_EXPERIMENTAL_LITERT_C_LITERT_ENVIRONMENT_H_
 #define TENSORFLOW_LITE_EXPERIMENTAL_LITERT_C_LITERT_ENVIRONMENT_H_
 
-#include "tensorflow/lite/experimental/litert/c/litert_any.h"
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
+#include "tensorflow/lite/experimental/litert/c/litert_environment_options.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
 
-typedef enum {
-  kLiteRtEnvOptionTagCompilerPluginLibraryPath = 0,
-  kLiteRtEnvOptionTagDispatchLibraryPath = 1,
-} LiteRtEnvOptionTag;
+LITERT_DEFINE_HANDLE(LiteRtEnvironment);
 
-typedef struct {
-  LiteRtEnvOptionTag tag;
-  LiteRtAny value;
-} LiteRtEnvOption;
-
-// Create a singleton LiteRT environment with options. Returns an error if the
-// instance already exists, in which case the specified options have no
-// effect. If not created explicitly with options, the environment instance will
-// be created (with no options) when needed.
+// Create a LiteRT environment with options.
+// Used to set the path of the compiler plugin library and dispatch library.
+//
+// Note: options of kLiteRtEnvOptionTagOpenCl* shouldn't be set with this API.
 LiteRtStatus LiteRtEnvironmentCreate(int num_options,
-                                     const LiteRtEnvOption* options);
+                                     const LiteRtEnvOption* options,
+                                     LiteRtEnvironment* environment);
 
-// Destroy the LiteRT environment instance.
-void LiteRtEnvironmentDestroy();
+// Destroy a created LiteRT environment.
+void LiteRtDestroyEnvironment(LiteRtEnvironment environment);
+
+// Get the options that the environment was created with.
+LiteRtStatus LiteRtGetEnvironmentOptions(LiteRtEnvironment environment,
+                                         LiteRtEnvironmentOptions* options);
+
+// Create a LiteRT GPU global environment with options.
+// This API is usually called by the GPU accelerator implementation to set GPU
+// environment options which affect the entire LiteRT runtime.
+//
+// Note: In most cases, users should not call this API directly.
+LiteRtStatus LiteRtGpuGlobalEnvironmentCreate(int num_options,
+                                              const LiteRtEnvOption* options);
 
 #ifdef __cplusplus
 }

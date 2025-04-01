@@ -15,48 +15,44 @@
 #ifndef TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_ENVIRONMENT_H_
 #define TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_ENVIRONMENT_H_
 
-#include <any>
-#include <map>
+#include <memory>
 #include <optional>
 
 #include "absl/types/span.h"
-#include "tensorflow/lite/experimental/litert/c/litert_common.h"
-#include "tensorflow/lite/experimental/litert/c/litert_environment.h"
+#include "tensorflow/lite/experimental/litert/c/litert_any.h"
+#include "tensorflow/lite/experimental/litert/c/litert_environment_options.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
-
-namespace litert::internal {
+#include "tensorflow/lite/experimental/litert/core/environment_options.h"
+#include "tensorflow/lite/experimental/litert/runtime/accelerator_registry.h"
 
 // A singleton class that contains global LiteRT environment options.
-class Environment {
+class LiteRtEnvironmentT {
  public:
-  // Create the singleton environment instance with options. Returns an error if
-  // the instance already exists, in which case the specified options have no
-  // effect.
-  static Expected<void> CreateWithOptions(
+  using Ptr = std::unique_ptr<LiteRtEnvironmentT>;
+
+  LiteRtEnvironmentT() = default;
+  // Create an environment instance with options.
+  static litert::Expected<Ptr> CreateWithOptions(
       absl::Span<const LiteRtEnvOption> options);
 
-  // Return the envirnment instance and, if not yet created, creates one with no
-  // options.
-  static Expected<Environment*> Instance();
-
-  // Destroy the environment instance.
-  static void Destroy();
+  ~LiteRtEnvironmentT() = default;
 
   std::optional<LiteRtAny> GetOption(LiteRtEnvOptionTag tag) const {
-    auto i = options_.find(tag);
-    if (i != options_.end()) {
-      return i->second;
-    } else {
-      return std::nullopt;
-    }
+    auto opt = options_.GetOption(tag);
+    return opt.HasValue() ? std::optional<LiteRtAny>(opt.Value())
+                          : std::nullopt;
+  }
+
+  LiteRtEnvironmentOptionsT& GetOptions() { return options_; }
+  const LiteRtEnvironmentOptionsT& GetOptions() const { return options_; }
+
+  litert::internal::AcceleratorRegistry& GetAcceleratorRegistry() {
+    return accelerators_;
   }
 
  private:
-  std::map<LiteRtEnvOptionTag, LiteRtAny> options_;
-
-  static Environment* the_instance_;
+  litert::internal::AcceleratorRegistry accelerators_;
+  LiteRtEnvironmentOptionsT options_;
 };
-
-}  // namespace litert::internal
 
 #endif  // TENSORFLOW_LITE_EXPERIMENTAL_LITERT_CORE_ENVIRONMENT_H_

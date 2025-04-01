@@ -28,6 +28,7 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "xla/tsl/distributed_runtime/coordination/coordination_client.h"
 #include "xla/tsl/platform/macros.h"
@@ -101,14 +102,7 @@ class CoordinationServiceInterface {
       return nullptr;
     }
     auto service = factories_iter->second(env, config, std::move(cache));
-    if (service != nullptr) {
-      *GetCoordinationServiceInstancePtr() = service.get();
-    }
     return service;
-  }
-
-  static CoordinationServiceInterface* GetCoordinationServiceInstance() {
-    return *GetCoordinationServiceInstancePtr();
   }
 
   // This function is invoked after each task's local devices are appended in a
@@ -170,6 +164,10 @@ class CoordinationServiceInterface {
   // Get the state and the error status of the tasks.
   virtual std::vector<tensorflow::CoordinatedTaskStateInfo> GetTaskState(
       const std::vector<tensorflow::CoordinatedTask>& task) = 0;
+
+  // Gets the state and the error status of the job.
+  virtual std::vector<tensorflow::CoordinatedTaskStateInfo> GetJobState(
+      absl::string_view job) = 0;
 
   // Insert a configuration key-value in the coordination service.
   // For now, a key-value can only be inserted once and cannot be updated.
@@ -313,11 +311,6 @@ class CoordinationServiceInterface {
     static auto* coordination_service_factories =
         new std::unordered_map<std::string, CoordinationServiceFactory>();
     return coordination_service_factories;
-  }
-
-  static CoordinationServiceInterface** GetCoordinationServiceInstancePtr() {
-    static CoordinationServiceInterface* instance = nullptr;
-    return &instance;
   }
 };
 

@@ -16,6 +16,7 @@
 
 #include <any>
 #include <array>
+#include <utility>
 
 #include <gtest/gtest.h>
 #include "tensorflow/lite/experimental/litert/c/litert_any.h"
@@ -25,45 +26,42 @@
 namespace litert::internal {
 namespace {
 
-TEST(Environment, CreateWithNoOption) {
-  ASSERT_TRUE(Environment::Instance());
-  Environment::Destroy();
-}
-
-TEST(Environment, CreateWithOptions) {
+TEST(LiteRtEnvironmentT, CreateWithOptions) {
   const std::array<LiteRtEnvOption, 1> environment_options = {
       LiteRtEnvOption{
-          kLiteRtEnvOptionTagCompilerPluginLibraryPath,
+          kLiteRtEnvOptionTagCompilerPluginLibraryDir,
           *ToLiteRtAny(std::any("sample path")),
       },
   };
-  ASSERT_TRUE(Environment::CreateWithOptions(environment_options));
-
-  auto env = Environment::Instance();
+  auto env = LiteRtEnvironmentT::CreateWithOptions(environment_options);
   ASSERT_TRUE(env);
 
-  auto option = (*env)->GetOption(kLiteRtEnvOptionTagCompilerPluginLibraryPath);
+  auto option = (*env)->GetOption(kLiteRtEnvOptionTagCompilerPluginLibraryDir);
   ASSERT_TRUE(option.has_value());
   ASSERT_EQ(option->type, kLiteRtAnyTypeString);
   ASSERT_STREQ(option->str_value, "sample path");
-
-  Environment::Destroy();
 }
 
-TEST(Environment, CreateWithOptionsFailure) {
-  // This will create an environment without options.
-  auto env = Environment::Instance();
-  ASSERT_TRUE(env);
+TEST(LiteRtEnvironmentT, CheckStringCopy) {
+  LiteRtEnvironmentT::Ptr env;
 
-  const std::array<LiteRtEnvOption, 1> environment_options = {
-      LiteRtEnvOption{
-          kLiteRtEnvOptionTagCompilerPluginLibraryPath,
-          *ToLiteRtAny(std::any("sample path")),
-      },
-  };
-  ASSERT_FALSE(Environment::CreateWithOptions(environment_options));
+  // The passed string becomes obsolete after the scope.
+  {
+    const std::array<LiteRtEnvOption, 1> environment_options = {
+        LiteRtEnvOption{
+            kLiteRtEnvOptionTagCompilerPluginLibraryDir,
+            *ToLiteRtAny(std::any("sample path")),
+        },
+    };
+    auto res = LiteRtEnvironmentT::CreateWithOptions(environment_options);
+    ASSERT_TRUE(res);
+    env = std::move(*res);
+  }
 
-  Environment::Destroy();
+  auto option = env->GetOption(kLiteRtEnvOptionTagCompilerPluginLibraryDir);
+  ASSERT_TRUE(option.has_value());
+  ASSERT_EQ(option->type, kLiteRtAnyTypeString);
+  ASSERT_STREQ(option->str_value, "sample path");
 }
 
 }  // namespace

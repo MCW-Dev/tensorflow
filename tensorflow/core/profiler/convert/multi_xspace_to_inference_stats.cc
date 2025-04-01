@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
+#include "xla/tsl/platform/statusor.h"
 #include "xla/tsl/profiler/utils/device_utils.h"
 #include "xla/tsl/profiler/utils/group_events.h"
 #include "xla/tsl/profiler/utils/tf_xplane_visitor.h"
@@ -32,11 +33,11 @@ limitations under the License.
 #include "tensorflow/core/profiler/convert/repository.h"
 #include "tensorflow/core/profiler/convert/xplane_to_step_events.h"
 #include "tensorflow/core/profiler/protobuf/inference_stats.pb.h"
-#include "tensorflow/core/profiler/protobuf/xplane.pb.h"
-#include "tensorflow/core/profiler/utils/event_span.h"
 #include "tensorflow/core/profiler/utils/xplane_schema.h"
 #include "tensorflow/core/profiler/utils/xplane_visitor.h"
-#include "tsl/platform/statusor.h"
+#include "tsl/profiler/protobuf/xplane.pb.h"
+#include "plugin/tensorboard_plugin_profile/protobuf/inference_stats.pb.h"  // from @org_xprof
+#include "xprof/utils/event_span.h"  // from @org_xprof
 
 namespace tensorflow::profiler {
 
@@ -67,6 +68,7 @@ SampledInferenceStatsProto GetSampledInferenceStatsProto(
   }
   return result;
 }
+}  // namespace
 
 StepEvents GetNonOverlappedStepEvents(XSpace* xspace) {
   StepEvents non_overlapped_step_events;
@@ -97,7 +99,6 @@ StepEvents GetNonOverlappedStepEvents(XSpace* xspace) {
       ToNonOverlappedStepEvents(overlapped_step_events);
   return non_overlapped_step_events;
 }
-}  // namespace
 
 absl::Status ConvertMultiXSpaceToInferenceStats(
     const SessionSnapshot& session_snapshot, absl::string_view request_column,

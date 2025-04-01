@@ -1,4 +1,5 @@
-load("//xla:xla.bzl", "xla_cc_test")
+load("//xla:xla.default.bzl", "xla_cc_test")
+load("//xla/tsl:tsl.bzl", "if_oss", "internal_visibility")
 load("//xla/tsl:tsl.default.bzl", "tsl_grpc_cc_dependencies")
 load("//xla/tsl/platform:build_config.bzl", "tf_proto_library")
 load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
@@ -7,7 +8,7 @@ licenses(["notice"])
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
-    default_visibility = ["//xla:internal"],
+    default_visibility = internal_visibility(["//xla/pjrt:friends"]),
 )
 
 tf_proto_library(
@@ -49,14 +50,16 @@ xla_cc_test(
         ":in_memory_key_value_store",
         ":protocol_proto_cc",
         ":topology_util",
+        "//xla:test_helpers",
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:status_matchers",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
     ],
 )
 
@@ -102,8 +105,8 @@ cc_library(
     deps = [
         ":client",
         ":service",
+        "//xla/tsl/platform:grpc_credentials",
         "@com_google_absl//absl/status:statusor",
-        "@local_tsl//tsl/platform:grpc_credentials",
     ] + tsl_grpc_cc_dependencies(),
 )
 
@@ -115,6 +118,7 @@ cc_library(
         ":key_value_store_interface",
         ":protocol_proto_cc",
         "//xla:util",
+        "//xla/pjrt:pjrt_client",
         "//xla/pjrt:utils",
         "//xla/pjrt/gpu:gpu_topology_proto_cc",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -135,27 +139,29 @@ xla_cc_test(
     name = "client_server_test",
     size = "medium",
     srcs = ["client_server_test.cc"],
+    tags = if_oss(["not_run:arm"]),
     deps = [
         ":client",
         ":distributed",
         ":protocol_proto_cc",
         ":service",
         ":topology_util",
-        "//xla:protobuf_util",
         "//xla:status_macros",
         "//xla/tsl/distributed_runtime/coordination:coordination_service_agent",
         "//xla/tsl/lib/core:status_test_util",
+        "//xla/tsl/platform:env",
+        "//xla/tsl/util/proto:proto_matchers",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_main",
     ] + tsl_grpc_cc_dependencies(),
 )
 

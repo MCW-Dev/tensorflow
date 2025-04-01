@@ -126,6 +126,9 @@ std::vector<std::string> DumpHloModuleIfEnabled(
     const HloModule& module, const BufferAssignment& buffer_assn,
     absl::string_view name);
 
+std::vector<std::string> DumpHloModuleProtoIfEnabled(
+    const HloModuleProto& module_proto, absl::string_view name);
+
 // Dumps the given HLO module after running one HLO pass and before running
 // another, if that's enabled. Returns the full file paths of all dumps of the
 // module, or an empty vector if nothing was dumped.
@@ -193,6 +196,8 @@ absl::Status DumpProtoToDirectory(const tsl::protobuf::Message& message,
                                   const std::string& directory,
                                   const std::string& file_name,
                                   std::string* full_path = nullptr);
+
+void DumpHloConfigIfEnabled(const HloModule& module);
 
 }  // namespace xla
 

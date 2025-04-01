@@ -52,6 +52,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_dialect.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_executor.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/mlir_roundtrip_flags.h"
+#include "tensorflow/compiler/mlir/tensorflow/translate/tools/parsers.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/serialize_mlir_module_utils.h"
 #include "tensorflow/compiler/mlir/tf2xla/api/v1/compile_mlir_util.h"
 #include "tensorflow/compiler/mlir/utils/string_container_utils.h"
@@ -113,7 +114,9 @@ mlir::LogicalResult PrintHloModuleText(
 
   xla::HloModule* hlo_module = status_or_hlo_module.value().get();
 
-  output << hlo_module->ToString();
+  output << hlo_module->ToString(xla::HloPrintOptions()
+                                     .set_print_large_constants(false)
+                                     .set_print_operand_shape(true));
 
   if (!compilation_result.input_mapping.empty())
     output << "// InputMapping {"

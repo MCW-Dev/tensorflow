@@ -17,11 +17,9 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
-#include <string>
 #include <vector>
 
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
-#include "tensorflow/lite/experimental/litert/c/litert_model.h"
 #include "tensorflow/lite/experimental/litert/vendors/c/litert_compiler_plugin.h"
 
 //
@@ -36,6 +34,14 @@ constexpr char kPluginSocModel[] = "ExampleSocModel";
 
 }  // namespace
 }  // namespace litert::example
+
+LiteRtStatus LiteRtCompilerPluginSetFlags(LiteRtCompilerPlugin compiler_plugin,
+                                          LiteRtParamIndex num_flags,
+                                          const char** keys,
+                                          const char** values) {
+  // IMPLEMENT ME
+  return kLiteRtStatusOk;
+}
 
 LiteRtStatus LiteRtGetCompilerPluginVersion(LiteRtApiVersion* api_version) {
   if (!api_version) {
@@ -53,7 +59,7 @@ LiteRtStatus LiteRtGetCompilerPluginSupportedHardware(
   if (!compiler_plugin || !supported_hardware) {
     return kLiteRtStatusErrorInvalidArgument;
   }
-  *supported_hardware = kLiteRtHwAccelatorCpu;
+  *supported_hardware = kLiteRtHwAcceleratorCpu;
   return kLiteRtStatusOk;
 }
 
@@ -88,24 +94,26 @@ LiteRtStatus LiteRtGetCompilerPluginSupportedSocModel(
 //
 
 LiteRtStatus LiteRtGetCompiledResultByteCode(
-    LiteRtCompiledResult compiled_result, const void** byte_code,
-    size_t* byte_code_size) {
+    LiteRtCompiledResult compiled_result, LiteRtParamIndex byte_code_idx,
+    const void** byte_code, size_t* byte_code_size) {
   if (!compiled_result) {
     return kLiteRtStatusErrorInvalidArgument;
   }
-  *byte_code = compiled_result->byte_code.data();
-  *byte_code_size = compiled_result->byte_code.size();
+  *byte_code = compiled_result->byte_code[byte_code_idx].data();
+  *byte_code_size = compiled_result->byte_code[byte_code_idx].size();
   return kLiteRtStatusOk;
 }
 
 LiteRtStatus LiteRtGetCompiledResultCallInfo(
     LiteRtCompiledResult compiled_result, LiteRtParamIndex call_idx,
-    const void** call_info, size_t* call_info_size) {
+    const void** call_info, size_t* call_info_size,
+    LiteRtParamIndex* byte_code_idx) {
   if (call_idx >= compiled_result->per_op_data.size()) {
     return kLiteRtStatusErrorIndexOOB;
   }
   *call_info = compiled_result->per_op_data.at(call_idx).data();
   *call_info_size = compiled_result->per_op_data.at(call_idx).size();
+  *byte_code_idx = 0;
   return kLiteRtStatusOk;
 }
 
@@ -115,6 +123,12 @@ LiteRtStatus LiteRtGetNumCompiledResultCalls(
     return kLiteRtStatusErrorInvalidArgument;
   }
   *num_calls = compiled_result->per_op_data.size();
+  return kLiteRtStatusOk;
+}
+
+LiteRtStatus LiteRtCompiledResultNumByteCodeModules(
+    LiteRtCompiledResult compiled_result, LiteRtParamIndex* num_byte_code) {
+  *num_byte_code = compiled_result->byte_code.size();
   return kLiteRtStatusOk;
 }
 

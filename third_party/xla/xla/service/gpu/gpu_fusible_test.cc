@@ -16,8 +16,8 @@ limitations under the License.
 #include "xla/service/gpu/gpu_fusible.h"
 
 #include <memory>
+#include <vector>
 
-#include <gtest/gtest.h>
 #include "absl/strings/str_cat.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
@@ -27,13 +27,15 @@ limitations under the License.
 #include "xla/service/platform_util.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/tests/hlo_runner_agnostic_test_base.h"
-#include "tsl/platform/statusor.h"
+#include "xla/tsl/platform/statusor.h"
+#include "xla/tsl/platform/test.h"
 
 namespace xla {
 namespace gpu {
 namespace {
 
 using ::testing::ElementsAre;
+using ::testing::UnorderedElementsAre;
 
 auto MakeDeviceDescription() {
   stream_executor::DeviceDescription device_description{
@@ -45,11 +47,8 @@ auto MakeDeviceDescription() {
 class GpuFusibleTest : public HloRunnerAgnosticTestBase {
  public:
   GpuFusibleTest()
-      : HloRunnerAgnosticTestBase(
-            std::make_unique<HloRunner>(
-                PlatformUtil::GetDefaultPlatform().value()),
-            std::make_unique<HloRunner>(
-                PlatformUtil::GetDefaultPlatform().value())),
+      : HloRunnerAgnosticTestBase(std::make_unique<HloRunner>(
+            PlatformUtil::GetDefaultPlatform().value())),
         device_description_(MakeDeviceDescription()) {}
 
   bool IsReduceInputFusion(const HloInstruction& instr) const {
@@ -406,7 +405,6 @@ TEST_F(GpuFusibleTest, IsReduceInputFusion_ElementalReduction) {
     ENTRY entry {
       c0 = f32[] parameter(0)
       p1 = f32[8,512,5,16,1,1]{5,4,3,2,1,0} parameter(1)
-      // Reduction lowered by GpuElementalIrEmitter.
       ROOT reduce = f32[512,5,1,1]{3,2,1,0} reduce(p1, c0), dimensions={3,0},
         to_apply=scalar_add
     })"))
@@ -1512,9 +1510,16 @@ TEST_F(GpuFusibleTest, GetFusibleComputations) {
       c0 = f32[] constant(0)
       ROOT bc = f32[128] broadcast(c0), dimensions={}
     }
+    body_c {
+      p0 = f32[128,1024] parameter(0)
+      c0 = f32[] constant(0)
+      ROOT bc = f32[128] broadcast(c0), dimensions={}
+    }
     ENTRY main {
       p0 = s32[] parameter(0)
       p1 = f32[128,1024] parameter(1)
+      called = f32[128] call(p1), to_apply=body_c,
+        frontend_attributes={_xla_stream_annotation="1"}
       ROOT conditional = f32[128] conditional(p0, p1, p1),
         branch_computations={body_a, body_b}
     })"))
@@ -1522,7 +1527,10 @@ TEST_F(GpuFusibleTest, GetFusibleComputations) {
 
   // fused_reduce is already fused, scalar_add is not fusible.
   auto fusible = GetFusibleComputations(*module, {});
-  EXPECT_THAT(fusible, ElementsAre(module->GetComputationWithName("body_a"),
+  EXPECT_THAT(fusible,
+              UnorderedElementsAre(module->GetComputationWithName("body_c"),
+                                   // From the conditional
+                                   module->GetComputationWithName("body_a"),
                                    module->GetComputationWithName("body_b"),
                                    module->entry_computation()));
 }

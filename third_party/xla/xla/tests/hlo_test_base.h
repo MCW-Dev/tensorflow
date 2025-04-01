@@ -18,22 +18,17 @@ limitations under the License.
 
 #include <cstdint>
 #include <functional>
-#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "absl/base/attributes.h"
 #include "absl/log/log.h"
-#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "xla/error_spec.h"
 #include "xla/hlo/ir/hlo_module.h"
-#include "xla/hlo/pass/hlo_pass_interface.h"
-#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/literal.h"
 #include "xla/service/backend.h"
 #include "xla/service/computation_placer.h"
@@ -42,10 +37,11 @@ limitations under the License.
 #include "xla/service/hlo_runner_interface.h"
 #include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/platform.h"
+#include "xla/tests/hlo_runner_agnostic_reference_mixin.h"
 #include "xla/tests/hlo_runner_agnostic_test_base.h"
+#include "xla/tsl/platform/test.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/platform/test.h"
 
 namespace xla {
 
@@ -76,14 +72,21 @@ namespace xla {
 //  )
 //
 // For a more detailed example, see "../tests/sample_text_test.cc".
-//
-// ** NOTE **
-// This class will soon be deprecated in favor of HloRunnerAgnosticTestBase. We
-// are in the process of incrementally migrating tests to use this new base
-// class.  HloTestBase remains as a shim on tests during this migration process.
-// While we would prefer if you can avoid introducing new tests that use this
-// class, we are still working on documenting the exact migration procedure.
-class HloTestBase : public HloRunnerAgnosticTestBase {
+class ABSL_DEPRECATED(
+    "Please avoid introducing new tests that use this class. Tests that use "
+    "this base class are being incrementally migrated to use HloPjRtTestBase "
+    "or HloRunnerAgnosticTestBase directly. For Googlers, the migration "
+    "process is documented at go/xla-test-migration. For external users, "
+    "please use existing support channels if you run into any issues. In most "
+    "cases we anticipate that migrating a single test suite should be a matter "
+    "of replacing HloTestBase with HloPjRtTestBase (or another "
+    "HloRunnerAgnosticTestBase subclass). You can use the "
+    "HloPjRtInterpreterReferenceMixin<T> class to add a PjRt-based "
+    "interpreter reference backend to your test. Once a test target is "
+    "migrated, if using one of the xla_test macros, you should add the "
+    "test_migrated_to_hlo_runner_pjrt tag to include the correct "
+    "backend-specific dependencies.") HloTestBase
+    : public HloRunnerAgnosticReferenceMixin<HloRunnerAgnosticTestBase> {
  public:
   // Compiles the given `hlo` with optimizations, and verifies that optimized
   // HLO matches the given FileCheck pattern.
@@ -129,7 +132,7 @@ class HloTestBase : public HloRunnerAgnosticTestBase {
       "This is a temporary method to help migrate existing tests away from "
       "directly depending on HloRunner. Please do not introduce new uses.")]]
   absl::StatusOr<std::vector<Literal>> ExecuteReplicatedWithHloRunner(
-      Executable* executable,
+      OpaqueExecutable* executable,
       const HloRunnerInterface::ReplicatedExecuteOptions& options,
       DeviceAssignment* device_assignment,
       ExecutionProfile* profile = nullptr) {

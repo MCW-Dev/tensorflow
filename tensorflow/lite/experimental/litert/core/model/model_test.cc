@@ -15,6 +15,7 @@
 #include "tensorflow/lite/experimental/litert/core/model/model.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -27,8 +28,10 @@
 #include "tensorflow/lite/experimental/litert/c/litert_model.h"
 #include "tensorflow/lite/experimental/litert/c/litert_op_code.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_buffer_ref.h"
+#include "tensorflow/lite/experimental/litert/core/build_stamp.h"
+#include "tensorflow/lite/experimental/litert/core/model/buffer_manager.h"
 #include "tensorflow/lite/experimental/litert/core/util/flatbuffer_tools.h"
-#include "tensorflow/lite/experimental/litert/test/test_macros.h"
+#include "tensorflow/lite/experimental/litert/test/matchers.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
 namespace litert::internal {
@@ -45,7 +48,7 @@ TEST(ModelTest, GetMetadata) {
   static constexpr absl::string_view kKey = "KEY";
 
   LiteRtModelT model;
-  LITERT_ASSERT_STATUS_OK(model.PushMetadata(kKey, kMetadata));
+  LITERT_ASSERT_OK(model.PushMetadata(kKey, kMetadata));
   auto found_metadata = model.FindMetadata(kKey);
   ASSERT_TRUE(found_metadata);
   EXPECT_EQ(found_metadata->StrView(), kMetadata);
@@ -57,24 +60,27 @@ TEST(ModelTest, MetadataDNE) {
   ASSERT_FALSE(res.HasValue());
 }
 
-TEST(ModelTest, PopMetadata) {
-  static constexpr absl::string_view kMetadata = "VALUE";
-  static constexpr absl::string_view kKey = "KEY";
+TEST(ModelTest, GetBuildStamp) {
+  static constexpr absl::string_view kSocManufacturer = "honda";
+  static constexpr absl::string_view kSocModel = "accord";
 
   LiteRtModelT model;
-  LITERT_ASSERT_STATUS_OK(model.PushMetadata(kKey, kMetadata));
 
-  auto popped_metadata = model.PopMetadata(kKey);
-  ASSERT_TRUE(popped_metadata);
-  EXPECT_EQ(popped_metadata->StrView(), kMetadata);
-
-  EXPECT_FALSE(model.FindMetadata(kKey));
+  LITERT_ASSERT_OK(model.PushMetadata(
+      kLiteRtBuildStampKey, *MakeBuildStamp(kSocManufacturer, kSocModel)));
+  auto build_stamp = GetBuildStamp(model);
+  ASSERT_TRUE(build_stamp);
+  EXPECT_TRUE(IsCompiled(model));
+  EXPECT_EQ(build_stamp->soc_manufacturer, kSocManufacturer);
+  EXPECT_EQ(build_stamp->soc_model, kSocModel);
 }
 
 TEST(ModelTest, EmplaceSubgraph) {
   LiteRtModelT model;
-  model.EmplaceSubgraph();
+  auto& sg = model.EmplaceSubgraph();
   EXPECT_EQ(model.Subgraphs().size(), 1);
+  auto& tensor = sg.EmplaceTensor();
+  EXPECT_EQ(tensor.Weights().GetBufferManager(), model.Buffers());
 }
 
 TEST(ModelTest, Signature) {
@@ -99,6 +105,40 @@ TEST(ModelTest, SignatureDNE) {
   LiteRtModelT model;
   auto found_signature = model.FindSignature(kSignatureName);
   EXPECT_FALSE(found_signature);
+}
+
+TEST(ModelTest, AttachExternalBufferToOp) {
+  static constexpr absl::string_view kBufferData = "BUFFER_DATA";
+  static constexpr absl::string_view kOpName = "OP1";
+  static constexpr absl::string_view kOp2Name = "OP2";
+
+  LiteRtModelT model;
+  auto& subgraph = model.EmplaceSubgraph();
+  auto& op = subgraph.EmplaceOp();
+  auto& op2 = subgraph.EmplaceOp();
+
+  OwningBufferRef<uint8_t> external_buf(kBufferData);
+
+  auto buf1_id = model.Buffers()->RegisterOwnedBuffer(std::move(external_buf));
+
+  model.AttachAssetToOp(&op, buf1_id, std::string(kOpName));
+  model.AttachAssetToOp(&op2, buf1_id, std::string(kOp2Name));
+
+  auto op_1_res = model.FindOpAsset(&op);
+  ASSERT_TRUE(op_1_res);
+  EXPECT_EQ(op_1_res->second, kOpName);
+  EXPECT_EQ(op_1_res->first, buf1_id);
+
+  auto op_2_res = model.FindOpAsset(&op2);
+  ASSERT_TRUE(op_2_res);
+  EXPECT_EQ(op_2_res->second, kOp2Name);
+  EXPECT_EQ(op_2_res->first, buf1_id);
+}
+
+TEST(ModelTest, ExternalBufferNotFound) {
+  LiteRtModelT model;
+  LiteRtOpT op;
+  ASSERT_FALSE(model.FindOpAsset(&op));
 }
 
 //
@@ -167,9 +207,9 @@ TEST(ModelOpTest, Options) {
   options.Set(::tflite::AddOptionsT());
 
   LiteRtOpT op;
-  detail::SetTflOptions(op, std::move(options));
+  litert::internal::SetTflOptions(op, std::move(options));
 
-  ASSERT_EQ(detail::GetTflOptions(op).type, kOptsType);
+  ASSERT_EQ(litert::internal::GetTflOptions(op).type, kOptsType);
 }
 
 TEST(ModelOpTest, OpCode) {
@@ -215,7 +255,7 @@ TEST(ModelQuantizationTypeTest, MakePerChannel) {
   LiteRtTensorT tensor;
   const auto quant = MakePerChannelQuantization(
       kScale, kZero, kQdim,
-      [&tensor](auto s) { return tensor.RequestBuffer(s); });
+      [&tensor](auto s) { return tensor.RequestScratchBuffer(s); });
 
   ASSERT_EQ(quant.first, kLiteRtQuantizationPerChannel);
   const auto& per_channel = quant.second.per_channel;
@@ -231,12 +271,63 @@ TEST(ModelQuantizationTypeTest, MakePerChannel) {
   EXPECT_THAT(zeros, ElementsAreArray(kZero));
 }
 
-TEST(ModelWeightsTest, WeightsFromBuf) {
+TEST(ModelWeightsTest, EmptyWeights) {
+  LiteRtWeightsT weights;
+  EXPECT_EQ(weights.Buffer().Size(), 0);
+}
+
+TEST(ModelWeightsTest, WeightsWithExternalBufferManager) {
+  static constexpr absl::string_view kData = "some_data";
+  BufferManager manager;
+
+  LiteRtWeightsT weights;
+  weights.SetBufferManager(&manager);
+
+  BufferRef<uint8_t> buf(kData.data(), kData.size());
+  SetWeightsFromUnownedBuffer(weights, buf);
+
+  EXPECT_EQ(manager.GetBuffer(weights.GetBufferId())->StrView(), kData);
+  EXPECT_EQ(weights.Buffer().StrView(), kData);
+}
+
+TEST(ModelWeightsTest, WeightsFromUnownedBuffer) {
   static constexpr absl::string_view kData = "some_data";
 
   LiteRtWeightsT weights;
-  weights.SetFromBuf(BufferRef<uint8_t>(kData.data(), kData.size()));
-  EXPECT_EQ(weights.Buf().StrView(), kData);
+  BufferRef<uint8_t> buf(kData.data(), kData.size());
+  SetWeightsFromUnownedBuffer(weights, buf);
+
+  EXPECT_EQ(weights.Buffer().StrView(), kData);
+}
+
+TEST(ModelWeightsTest, WeightsFromOwnedBuffer) {
+  static constexpr absl::string_view kData = "some_data";
+
+  LiteRtWeightsT weights;
+
+  OwningBufferRef<uint8_t> buf(kData);
+  SetWeightsFromUnownedBuffer(weights, std::move(buf));
+
+  EXPECT_EQ(weights.Buffer().StrView(), kData);
+}
+
+TEST(ModelWeightsTest, OverwriteBuffer) {
+  static constexpr absl::string_view kData = "some_data";
+  static constexpr absl::string_view kData2 = "some_data2";
+
+  LiteRtWeightsT weights;
+
+  {
+    OwningBufferRef<uint8_t> buf(kData);
+    SetWeightsFromOwnedBuffer(weights, std::move(buf));
+  }
+
+  {
+    OwningBufferRef<uint8_t> buf(kData2);
+    SetWeightsFromOwnedBuffer(weights, std::move(buf));
+  }
+
+  EXPECT_EQ(weights.Buffer().StrView(), kData2);
 }
 
 TEST(ModelTensorTest, Name) {
@@ -264,16 +355,176 @@ TEST(ModelTensorTest, DefiningOp) {
   EXPECT_EQ(tensor.DefiningOpOutInd(), 0);
 }
 
+TEST(ModelTest, TransferSubgraphToReindexComposite) {
+  LiteRtModelT model;
+
+  auto& subgraph = model.EmplaceSubgraph();
+  auto& other_subgraph = model.EmplaceSubgraph();
+  auto& decomp_subgraph = model.EmplaceSubgraph();
+
+  auto& composite = subgraph.EmplaceOp();
+  composite.SetOpCode(kLiteRtOpCodeShloComposite);
+  ::tflite::StableHLOCompositeOptionsT opts;
+  opts.name = "composite";
+  opts.decomposition_subgraph_index = 2;
+  TflOptions2 options;
+  options.type = tflite::BuiltinOptions2_StableHLOCompositeOptions;
+  options.Set(std::move(opts));
+  litert::internal::SetTflOptions2(composite, std::move(options));
+
+  LiteRtSubgraphT::Alloc dest;
+  std::vector<size_t> indices = {1};
+  model.TransferSubgraphTo(dest, std::move(indices));
+
+  EXPECT_THAT(model.Subgraphs(),
+              ElementsAreArray({&subgraph, &decomp_subgraph}));
+  EXPECT_THAT(dest.Elements(), ElementsAreArray({&other_subgraph}));
+
+  const auto& new_opts = litert::internal::GetTflOptions2(composite);
+  const auto new_decomp_ind =
+      new_opts.AsStableHLOCompositeOptions()->decomposition_subgraph_index;
+  EXPECT_EQ(new_decomp_ind, 1);
+}
+
+TEST(ModelTest, TransferSubgraphToReindexCompositeNoChange) {
+  LiteRtModelT model;
+
+  auto& subgraph = model.EmplaceSubgraph();
+  auto& decomp_subgraph = model.EmplaceSubgraph();
+  auto& other_subgraph = model.EmplaceSubgraph();
+
+  auto& composite = subgraph.EmplaceOp();
+  composite.SetOpCode(kLiteRtOpCodeShloComposite);
+  ::tflite::StableHLOCompositeOptionsT opts;
+  opts.name = "composite";
+  opts.decomposition_subgraph_index = 1;
+  TflOptions2 options;
+  options.type = tflite::BuiltinOptions2_StableHLOCompositeOptions;
+  ;
+  options.Set(std::move(opts));
+  litert::internal::SetTflOptions2(composite, std::move(options));
+
+  LiteRtSubgraphT::Alloc dest;
+  std::vector<size_t> indices = {2};
+  model.TransferSubgraphTo(dest, std::move(indices));
+
+  EXPECT_THAT(model.Subgraphs(),
+              ElementsAreArray({&subgraph, &decomp_subgraph}));
+  EXPECT_THAT(dest.Elements(), ElementsAreArray({&other_subgraph}));
+
+  const auto& new_opts = litert::internal::GetTflOptions2(composite);
+  const auto new_decomp_ind =
+      new_opts.AsStableHLOCompositeOptions()->decomposition_subgraph_index;
+  EXPECT_EQ(new_decomp_ind, 1);
+}
+
+TEST(ModelTest, TransferSubgraphToReindexCompositeMultiple) {
+  LiteRtModelT model;
+
+  auto& subgraph = model.EmplaceSubgraph();
+  auto& other_subgraph = model.EmplaceSubgraph();
+  auto& other_subgraph2 = model.EmplaceSubgraph();
+  auto& other_subgraph3 = model.EmplaceSubgraph();
+  auto& decomp_subgraph = model.EmplaceSubgraph();
+  auto& other_subgraph4 = model.EmplaceSubgraph();
+
+  auto& composite = subgraph.EmplaceOp();
+  composite.SetOpCode(kLiteRtOpCodeShloComposite);
+  ::tflite::StableHLOCompositeOptionsT opts;
+  opts.name = "composite";
+  opts.decomposition_subgraph_index = 4;
+  TflOptions2 options;
+  options.type = tflite::BuiltinOptions2_StableHLOCompositeOptions;
+  ;
+  options.Set(std::move(opts));
+  litert::internal::SetTflOptions2(composite, std::move(options));
+
+  LiteRtSubgraphT::Alloc dest;
+  std::vector<size_t> indices = {1, 3, 5};
+  model.TransferSubgraphTo(dest, std::move(indices));
+
+  EXPECT_THAT(model.Subgraphs(), ElementsAreArray({&subgraph, &other_subgraph2,
+                                                   &decomp_subgraph}));
+  EXPECT_THAT(
+      dest.Elements(),
+      ElementsAreArray({&other_subgraph, &other_subgraph3, &other_subgraph4}));
+
+  const auto& new_opts = litert::internal::GetTflOptions2(composite);
+  const auto new_decomp_ind =
+      new_opts.AsStableHLOCompositeOptions()->decomposition_subgraph_index;
+  EXPECT_EQ(new_decomp_ind, 2);
+}
+
 //
-// Util
+// Misc Ir Containers
 //
 
 TEST(ModelOpListTest, Push) {
   LiteRtOpListT op_list;
   LiteRtOpT op;
   op_list.Push(&op);
-  auto vec = op_list.Vec();
-  EXPECT_EQ(vec.front(), &op);
+  auto vec = op_list.Values();
+  EXPECT_EQ(vec.front().first, &op);
+}
+
+TEST(ModelOpListTest, PushWithIndex) {
+  LiteRtOpListT op_list;
+  LiteRtOpT op;
+  op_list.Push(&op, 1);
+  auto vec = op_list.Values();
+  EXPECT_EQ(vec.front().first, &op);
+  EXPECT_EQ(vec.front().second, 1);
+}
+
+//
+// Traversal Utils
+//
+
+TEST(CcForEachIrTest, OpF3) {
+  LiteRtModelT model;
+  model.EmplaceSubgraph().EmplaceOp();
+
+  int count = 0;
+  ForEachIr(&model, [&](LiteRtSubgraph subgraph, int32_t subgraph_index,
+                        LiteRtOp op) { count++; });
+  EXPECT_EQ(count, 1);
+}
+
+TEST(CcForEachIrTest, OpF1) {
+  LiteRtModelT model;
+  model.EmplaceSubgraph().EmplaceOp();
+
+  int count = 0;
+  ForEachIr(&model, [&](LiteRtOp op) { count++; });
+  EXPECT_EQ(count, 1);
+}
+
+TEST(CcForEachIrTest, OpF2) {
+  LiteRtModelT model;
+  model.EmplaceSubgraph().EmplaceOp();
+
+  int count = 0;
+  ForEachIr(&model, [&](LiteRtSubgraph subgraph, LiteRtOp op) { count++; });
+  EXPECT_EQ(count, 1);
+}
+
+TEST(CcForEachIrTest, SgF1) {
+  LiteRtModelT model;
+  model.EmplaceSubgraph().EmplaceOp();
+
+  int count = 0;
+  ForEachIr(&model, [&](LiteRtSubgraph subgraph) { count++; });
+  EXPECT_EQ(count, 1);
+}
+
+TEST(CcForEachIrTest, SgF2) {
+  LiteRtModelT model;
+  model.EmplaceSubgraph().EmplaceOp();
+
+  int count = 0;
+  ForEachIr(&model,
+            [&](LiteRtSubgraph subgraph, int32_t subgraph_index) { count++; });
+  EXPECT_EQ(count, 1);
 }
 
 }  // namespace

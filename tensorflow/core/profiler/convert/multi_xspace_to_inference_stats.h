@@ -15,13 +15,20 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_PROFILER_CONVERT_MULTI_XSPACE_TO_INFERENCE_STATS_H_
 #define TENSORFLOW_CORE_PROFILER_CONVERT_MULTI_XSPACE_TO_INFERENCE_STATS_H_
 
+#include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "tensorflow/core/profiler/convert/repository.h"
 #include "tensorflow/core/profiler/protobuf/inference_stats.pb.h"
+#include "plugin/tensorboard_plugin_profile/protobuf/inference_stats.pb.h"  // from @org_xprof
+#include "xprof/utils/event_span.h"  // from @org_xprof
+
 namespace tensorflow::profiler {
+// Get non overlapped step events from xspace for GPU.
+StepEvents GetNonOverlappedStepEvents(XSpace* xspace);
+
 absl::Status ConvertMultiXSpaceToInferenceStats(
     const SessionSnapshot& session_snapshot, absl::string_view request_column,
     absl::string_view batch_column, InferenceStats* inference_stats);
-}
+}  // namespace tensorflow::profiler
 
 #endif  // TENSORFLOW_CORE_PROFILER_CONVERT_MULTI_XSPACE_TO_INFERENCE_STATS_H_

@@ -143,11 +143,6 @@ def MergeAssumingOpsPass : Pass<"mhlo-merge-assuming-ops", "func::FuncOp"> {
   let constructor = "createMergeAssumingOpsPass()";
 }
 
-def SymbolicShapeOptimization : Pass<"symbolic-shape-optimization", "func::FuncOp"> {
-  let summary = "Analyzes shapes and performs shape-related optimizations";
-  let constructor = "createSymbolicShapeOptimizationPass()";
-}
-
 def ShapeSimplification
     : Pass<"shape-simplification", "mlir::func::FuncOp"> {
   let summary = "Simplify shape ops";
@@ -191,13 +186,16 @@ def CollapseElementwiseMapPass
 
 def HloLegalizeToStablehloPass : Pass<"hlo-legalize-to-stablehlo", "ModuleOp"> {
   let summary = "Legalize HLO to StableHLO.";
-  let constructor = "createHloLegalizeToStablehloPass()";
   let dependentDialects = ["stablehlo::StablehloDialect"];
   let options = [
     Option<"allow_experimental_features_", "allow-experimental-features",
            "bool", /*default=*/"false",
            "Allow legalization of experimental MHLO features via StableHLO "
-           "custom_call">
+           "custom_call">,
+    Option<"allow_xla_features_", "allow-xla-features", "bool",
+           /*default=*/"false",
+           "Allow XLA's MHLO ops not in StableHLO to remain present after "
+           "legalization (copy, add_dependency, fusion, etc.)">
   ];
 }
 

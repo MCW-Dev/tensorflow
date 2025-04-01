@@ -38,6 +38,7 @@ limitations under the License.
 #include "stablehlo/dialect/StablehloOps.h"
 #include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
 #include "xla/service/spmd/shardy/constants.h"
+#include "xla/service/spmd/shardy/extensions/mhlo_extensions.h"
 
 namespace xla {
 namespace sdy {
@@ -184,6 +185,7 @@ void loadAllRequiredDialects(mlir::MLIRContext* context) {
   mlir::DialectRegistry registry;
   mlir::func::registerAllExtensions(registry);
   registry.insert<mlir::mhlo::MhloDialect>();
+  registerMhloExtensions(registry);
   mlir::sdy::registerAllDialects(registry);
   context->appendDialectRegistry(registry);
   context->loadAllAvailableDialects();
@@ -206,7 +208,9 @@ CustomCallOp cloneCustomCallWithNewResultTypes(CustomCallOp op,
 bool isPythonCallbackCustomCall(mlir::stablehlo::CustomCallOp op) {
   mlir::StringRef targetName = op.getCallTargetName();
   return targetName == kPythonCpuCallbackCustomCallTargetName ||
-         targetName == kPythonGpuCallbackCustomCallTargetName;
+         targetName == kPythonGpuCallbackCustomCallTargetName ||
+         targetName == kFFIPythonCpuCallbackCustomCallTargetName ||
+         targetName == kFFIPythonGpuCallbackCustomCallTargetName;
 }
 
 }  // namespace sdy

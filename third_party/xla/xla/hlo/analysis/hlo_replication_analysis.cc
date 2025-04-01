@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -28,6 +29,9 @@ limitations under the License.
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
+#include "absl/memory/memory.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
@@ -37,7 +41,9 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/ir/hlo_sharding.h"
 #include "xla/map_util.h"
+#include "xla/shape_tree.h"
 #include "xla/shape_util.h"
 #include "xla/xla_data.pb.h"
 
@@ -234,7 +240,7 @@ HloReplicationAnalysis::DetermineHloInstructionIsReplicated(
       if (hlo->dynamic_slice_sizes().size() == 1 &&
           hlo->dynamic_slice_sizes()[0] == 1 &&
           ds_buffer->opcode() == HloOpcode::kConstant &&
-          ds_buffer->shape().rank() == 1 &&
+          ds_buffer->shape().dimensions_size() == 1 &&
           ds_buffer->shape().element_type() == PrimitiveType::S32 &&
           ((cross_partition_spmd &&
             hlo->operand(1)->opcode() == HloOpcode::kPartitionId) ||
@@ -464,6 +470,15 @@ absl::Status HloReplicationAnalysis::ComputeHloReplication() {
     auto param = entry->parameter_instruction(i);
     ShapeTree<HloReplication> shape_tree(param->shape(),
                                          HloReplication::UniqueOnAllDevices());
+
+    std::unique_ptr<ShapeTree<HloSharding>> sharding_tree = nullptr;
+    if (cross_partition_spmd_ && param->has_sharding()) {
+      TF_ASSIGN_OR_RETURN(auto result,
+                          param->sharding().AsShapeTree(param->shape()));
+      sharding_tree =
+          std::make_unique<ShapeTree<HloSharding>>(std::move(result));
+    }
+
     const auto& replication = param->parameter_replicated_at_leaf_buffers();
     int leaf_index = 0;
     absl::Status status = ShapeUtil::ForEachSubshapeWithStatus(
@@ -474,10 +489,8 @@ absl::Status HloReplicationAnalysis::ComputeHloReplication() {
           if (cross_partition_spmd_ && param->has_sharding()) {
             // In cross-partition spmd mode, set parameter replication status
             // based on the parameter's sharding.
-            TF_ASSIGN_OR_RETURN(auto sharding_tree,
-                                param->sharding().AsShapeTree(param->shape()));
             *shape_tree.mutable_element(index) =
-                sharding_tree.element(index).IsReplicated()
+                sharding_tree->element(index).IsReplicated()
                     ? HloReplication::ReplicatedOnAllDevices()
                     : HloReplication::UniqueOnAllDevices();
           }
