@@ -525,7 +525,7 @@ ENTRY e {
   }
   DebugOptions debug_options = verified_module->config().debug_options();
   debug_options.set_xla_dump_to(output_directory);
-  debug_options.set_xla_gpu_dump_llvmir(true);
+  debug_options.set_xla_dump_hlo_pass_re("triton-fusion-emitter");
   verified_module->mutable_config().set_debug_options(debug_options);
 
   EXPECT_TRUE(RunAndCompare(std::move(verified_module),
@@ -4190,6 +4190,36 @@ triton_dot {
 
 ENTRY main {
   parameter_0 = bf16[32,32]{1,0} parameter(0)
+  parameter_1 = f8e4m3fn[32,32]{1,0} parameter(1)
+  ROOT gemm_fusion_dot = f32[32,32]{1,0} fusion(parameter_0, parameter_1),
+       kind=kCustom, calls=triton_dot,
+       backend_config={
+       "fusion_backend_config":{"kind":"__triton_gemm","triton_gemm_config":
+         {"block_m":"32","block_n":"32","block_k":"32","split_k":"1",
+          "num_stages":"1","num_warps":"4","num_ctas":"1"}}}
+})";
+
+  EXPECT_TRUE(RunAndCompare(hlo_text, ErrorSpec{/*aabs=*/1.0, /*arel=*/1e-3}));
+}
+
+TEST_F(TritonTest, FP8ToFP8EndToEnd) {
+  if (!GetCudaComputeCapability().IsAtLeastHopper()) {
+    GTEST_SKIP() << "Doesn't pass on pre-Hopper GPUs.";
+  }
+
+  const std::string hlo_text = R"(
+HloModule t
+
+triton_dot {
+  parameter_0 = f8e5m2[32,32]{1,0} parameter(0)
+  parameter_1 = f8e4m3fn[32,32]{1,0} parameter(1)
+  convert = f8e4m3fn[32,32]{1,0} convert(parameter_0)
+  ROOT dot = f32[32,32]{1,0} dot(convert, parameter_1),
+                lhs_contracting_dims={1}, rhs_contracting_dims={1}
+}
+
+ENTRY main {
+  parameter_0 = f8e5m2[32,32]{1,0} parameter(0)
   parameter_1 = f8e4m3fn[32,32]{1,0} parameter(1)
   ROOT gemm_fusion_dot = f32[32,32]{1,0} fusion(parameter_0, parameter_1),
        kind=kCustom, calls=triton_dot,

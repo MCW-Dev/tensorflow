@@ -824,21 +824,6 @@ bool IsPermutationNCHW(Value perm) {
 
 #include "tensorflow/compiler/mlir/lite/transforms/generated_optimize.inc"
 
-// Returns 1D 32-bit dense elements attribute with the given values.
-static DenseIntElementsAttr GetI32ElementsAttr(ArrayRef<int32_t> values,
-                                               Builder *builder) {
-  RankedTensorType ty = mlir::RankedTensorType::get(
-      {static_cast<int32_t>(values.size())}, builder->getIntegerType(32));
-  return DenseIntElementsAttr::get(ty, values);
-}
-
-DenseIntElementsAttr GetI64ElementsAttr(ArrayRef<int64_t> values,
-                                        Builder *builder) {
-  RankedTensorType ty = RankedTensorType::get(
-      {static_cast<int64_t>(values.size())}, builder->getIntegerType(64));
-  return DenseIntElementsAttr::get(ty, values);
-}
-
 // Get the number of leading 1s in the shape of the given input.
 // Ex. input_shape = [1 x 1 x 1 x 1 x 2 x 1] => 4
 // returns 0 if the input shape is not static.
@@ -988,6 +973,80 @@ struct SqueezeReshapesAroundBroadcastOp
     // Create a new broadcast_op to replace the old broadcast_op.
     rewriter.replaceOp(tfl_broadcast_to_op, new_broadcast_to_op.getResult());
 
+    return success();
+  }
+};
+
+// This pattern matches TFL::BroadcastToOp WITH TENSOR RANK <= 4 and replaces
+// it with a MulOp that multiplies the tensor by a splat constant with 1s.
+struct ConvertTFLBroadcastToMulOp
+    : public OpRewritePattern<TFL::BroadcastToOp> {
+  using OpRewritePattern<TFL::BroadcastToOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(TFL::BroadcastToOp tfl_broadcast_to_op,
+                                PatternRewriter &rewriter) const override {
+    auto input_type =
+        mlir::cast<ShapedType>(tfl_broadcast_to_op.getInput().getType());
+    auto output_type =
+        mlir::cast<ShapedType>(tfl_broadcast_to_op.getOutput().getType());
+    auto shape_type =
+        mlir::cast<ShapedType>(tfl_broadcast_to_op.getShape().getType());
+    Type element_type = input_type.getElementType();
+
+    auto loc = tfl_broadcast_to_op->getLoc();
+
+    // Check that the output type is not dynamic and is less-than-equal to 4D or
+    // the shape type is static, 1D and has less-than-equal to 4 elements.
+    bool is_output_shape_dynamic =
+        (!output_type.hasRank() || (output_type.getRank() > 4) ||
+         (output_type.getNumDynamicDims() > 0));
+    bool is_broadcast_shape_dynamic =
+        (!shape_type.hasStaticShape() || (shape_type.getRank() != 1) ||
+         (shape_type.getDimSize(0) > 4));
+    if (is_output_shape_dynamic && is_broadcast_shape_dynamic)
+      return rewriter.notifyMatchFailure(
+          loc, "output_rank or broadcast_to shape not supported");
+
+    // Allow lowering when the input's elements type is F32, BFloat16, I32 or
+    // I16.
+    if (!(mlir::isa<BFloat16Type, Float32Type>(element_type) ||
+          element_type.isInteger(32) || element_type.isInteger(16)))
+      return rewriter.notifyMatchFailure(loc, "element_type_not_supported");
+
+    // TFL_FillOp is created only if is_output_shape_dynamic is true, otherwise
+    // a Arith.ConstOp is created.
+    if (is_output_shape_dynamic &&
+        output_type.getElementType().isUnsignedInteger()) {
+      return rewriter.notifyMatchFailure(
+          loc,
+          "Unsigned broadcast_to output with dynamic shape is not supported");
+    }
+
+    Value mul_rhs_value;
+    if (!output_type.hasRank() || (output_type.getNumDynamicDims() > 0)) {
+      auto status_or_const_op =
+          CreateConstOpWithSingleValue(&rewriter, loc, input_type, 1);
+      if (!status_or_const_op.ok()) {
+        return failure();
+      }
+
+      mul_rhs_value = rewriter.create<TFL::FillOp>(
+          loc, output_type, tfl_broadcast_to_op.getShape(),
+          status_or_const_op.value());
+    } else {
+      auto status_or_const_op =
+          CreateConstOpWithVectorValue(&rewriter, loc, output_type, 1);
+      if (!status_or_const_op.ok()) {
+        return failure();
+      }
+
+      mul_rhs_value = status_or_const_op.value();
+    }
+
+    auto mul_op = rewriter.create<TFL::MulOp>(
+        loc, output_type, tfl_broadcast_to_op.getInput(), mul_rhs_value,
+        rewriter.getStringAttr("NONE"));
+    rewriter.replaceOp(tfl_broadcast_to_op, mul_op.getResult());
     return success();
   }
 };
@@ -2799,7 +2858,8 @@ void OptimizePass::runOnOperation() {
       OptimizeTopK, FuseAddAndStridedSlice,
       FuseReshapeAndTransposeAroundBatchMatmul,
       FuseTransposeReshapeIntoBatchMatmul, MoveReshapeAfterFullyConnected,
-      EnableFullyConnectedKeepNumDimsBeforeReshape>(ctx);
+      EnableFullyConnectedKeepNumDimsBeforeReshape, ConvertTFLBroadcastToMulOp>(
+      ctx);
   if (!GetOptions().disable_fuse_mul_and_fc) {
     phase_2_patterns.add<FuseMulAndFullyConnected>(ctx);
   }

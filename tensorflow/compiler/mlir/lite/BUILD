@@ -395,6 +395,8 @@ cc_library(
     name = "utils",
     hdrs = ["utils/utils.h"],
     deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Dialect",
         "@llvm-project//mlir:IR",
@@ -642,6 +644,8 @@ cc_library(
         "//tensorflow/core:framework",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@eigen_archive//:eigen3",
         "@llvm-project//llvm:Support",
@@ -1214,6 +1218,29 @@ cc_library(
 )
 
 cc_library(
+    name = "optimize_batch_matmul_utils",
+    srcs = ["transforms/tflite_passes/optimize_batch_matmul_utils.cc"],
+    hdrs = ["transforms/tflite_passes/optimize_batch_matmul_utils.h"],
+    deps = [
+        ":utils",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+tf_cc_test(
+    name = "optimize_batch_matmul_utils_test",
+    srcs = ["transforms/tflite_passes/optimize_batch_matmul_utils_test.cc"],
+    deps = [
+        ":optimize_batch_matmul_utils",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+    ],
+)
+
+cc_library(
     name = "tensorflow_lite_optimize_batch_matmul",
     srcs = [
         "transforms/generated_optimize_batch_matmul.inc",
@@ -1224,6 +1251,7 @@ cc_library(
     ],
     deps = [
         ":convert_type",
+        ":optimize_batch_matmul_utils",
         ":pass",
         ":pass_options",
         ":tensorflow_lite_ops",
@@ -1902,13 +1930,13 @@ cc_library(
         "//tensorflow/compiler/mlir/lite/stablehlo:legalize_tf_xla_call_module_to_stablehlo_pass",
         "//tensorflow/compiler/mlir/lite/stablehlo:lift_callsite_loc_caller",
         "//tensorflow/compiler/mlir/lite/stablehlo:prepare_hlo",  # buildcleaner: keep
-        "//tensorflow/compiler/mlir/lite/stablehlo:rename_entrypoint_to_main",
         "//tensorflow/compiler/mlir/lite/stablehlo:tf_legalize_hlo",  # buildcleaner: keep
         "//tensorflow/compiler/mlir/lite/stablehlo:tfl_legalize_chlo",  # buildcleaner: keep
         "//tensorflow/compiler/mlir/lite/stablehlo:tfl_legalize_hlo",  # buildcleaner: keep
         "//tensorflow/compiler/mlir/lite/stablehlo:transforms",
         "//tensorflow/compiler/mlir/lite/stablehlo:uniform_quantized_stablehlo_to_tfl_pass",
         "//tensorflow/compiler/mlir/quantization/common/quantization_lib:quantization_config",
+        "//tensorflow/compiler/mlir/stablehlo:rename_entrypoint_to_main",
         "//tensorflow/compiler/mlir/tensorflow/transforms:tensorflow_passes",
         "//tensorflow/compiler/mlir/tensorflow/transforms:tf_saved_model_passes",
         "//tensorflow/core:core_cpu_base",

@@ -13,11 +13,11 @@
 # limitations under the License.
 
 load("//xla/python/ifrt_proxy/common:ifrt_proxy.bzl", "default_ifrt_proxy_visibility", "ifrt_proxy_cc_test")
-load("//xla/tsl:tsl.bzl", "if_google")
+load("//xla/tsl:tsl.bzl", "if_google", "internal_visibility")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
-    default_visibility = default_ifrt_proxy_visibility,
+    default_visibility = internal_visibility(default_ifrt_proxy_visibility),
 )
 
 cc_library(
@@ -157,11 +157,11 @@ cc_library(
         ":memory",
         ":rpc_helper",
         "//xla:xla_data_proto_cc",
-        "//xla/pjrt:pjrt_compiler",
         "//xla/pjrt:pjrt_device_description",
         "//xla/python/ifrt",
         "//xla/python/ifrt:attribute_map",
         "//xla/python/ifrt:basic_device_list",
+        "//xla/python/ifrt:user_context",
         "//xla/python/ifrt_proxy/common:common_serdes",
         "//xla/python/ifrt_proxy/common:ifrt_service_proto_cc",
         "//xla/python/ifrt_proxy/common:types",
@@ -169,6 +169,7 @@ cc_library(
         "//xla/python/pjrt_ifrt:pjrt_attribute_map_util",
         "//xla/tsl/concurrency:ref_count",
         "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:inlined_vector",
@@ -241,6 +242,7 @@ cc_library(
         "//xla/python/ifrt",
         "//xla/python/ifrt:client_impl_util",
         "//xla/python/ifrt:sharding_serdes",
+        "//xla/python/ifrt:user_context",
         "//xla/python/ifrt_proxy/common:array_util",
         "//xla/python/ifrt_proxy/common:ifrt_service_proto_cc",
         "//xla/python/ifrt_proxy/common:types",
@@ -281,11 +283,12 @@ ifrt_proxy_cc_test(
         "//xla/python/ifrt:basic_device_list",
         "//xla/python/ifrt:mock",
         "//xla/python/ifrt_proxy/common:ifrt_service_proto_cc",
+        "//xla/python/ifrt_proxy/common:test_utils",
         "//xla/python/ifrt_proxy/common:types",
         "//xla/python/ifrt_proxy/common:types_proto_cc",
         "//xla/tsl/concurrency:ref_count",
+        "//xla/tsl/platform:status_matchers",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
@@ -315,7 +318,7 @@ cc_library(
         "//xla/python/ifrt_proxy/common:ifrt_service_proto_cc",
         "//xla/python/ifrt_proxy/common:test_utils",
         "@com_google_absl//absl/status",
-        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_for_library",
     ],
 )
 
@@ -359,10 +362,13 @@ ifrt_proxy_cc_test(
         "//xla/python/ifrt:mock",
         "//xla/python/ifrt:serdes",
         "//xla/python/ifrt_proxy/common:ifrt_service_proto_cc",
+        "//xla/python/ifrt_proxy/common:test_utils",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
         "@local_tsl//tsl/platform:protobuf",
@@ -439,7 +445,7 @@ cc_library(
         "//xla/python/ifrt",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:cord",
-        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_for_library",
     ],
 )
 
@@ -503,9 +509,9 @@ cc_library(
     name = "registry",
     srcs = ["registry.cc"],
     hdrs = ["registry.h"],
-    visibility = default_ifrt_proxy_visibility + if_google([
+    visibility = internal_visibility(default_ifrt_proxy_visibility + if_google([
         "//xla/python/ifrt_proxy/common/google:cc_client_users",
-    ]),
+    ])),
     deps = [
         ":global_flags",
         "//xla/python/ifrt",
@@ -554,7 +560,6 @@ ifrt_proxy_cc_test(
         ":rpc_helper",
         ":version",
         "//xla:shape_util",
-        "//xla/pjrt:pjrt_layout",
         "//xla/python/ifrt",
         "//xla/python/ifrt:basic_device_list",
         "//xla/python/ifrt:mock",
@@ -563,48 +568,16 @@ ifrt_proxy_cc_test(
         "//xla/python/ifrt_proxy/common:test_utils",
         "//xla/python/ifrt_proxy/common:types",
         "//xla/tsl/concurrency:ref_count",
+        "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
-        "@local_tsl//tsl/platform:casts",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
-    ],
-)
-
-cc_library(
-    name = "py_module",
-    srcs = ["py_module.cc"],
-    hdrs = ["py_module.h"],
-    compatible_with = [],
-    copts = [
-        "-fexceptions",
-        "-fno-strict-aliasing",
-    ],
-    features = ["-use_header_modules"],
-    visibility = ["//xla/python:__pkg__"],
-    deps = [
-        ":grpc_client",
-        ":registry",
-        "//xla/pjrt:status_casters",
-        "//xla/python:nb_class_ptr",
-        "//xla/python:py_client",
-        "//xla/python/ifrt",
-        "//xla/python/ifrt:attribute_map",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/log:log_entry",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/time",
-        "@local_tsl//tsl/platform:env",
-        "@local_tsl//tsl/platform:statusor",
-        "@nanobind",
     ],
 )
 

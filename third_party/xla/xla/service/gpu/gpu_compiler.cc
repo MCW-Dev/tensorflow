@@ -174,6 +174,7 @@ limitations under the License.
 #include "xla/service/gpu/model/collective_ptable_stats_collection.h"
 #include "xla/service/gpu/model/gpu_cost_model_stats_collection.h"
 #include "xla/service/gpu/model/gpu_hlo_cost_analysis.h"
+#include "xla/service/gpu/model/matmul_ptable_stats_collection.h"
 #include "xla/service/gpu/model/sol_gpu_cost_model_stats_collection.h"
 #include "xla/service/gpu/pre_scheduling_copy_insertion_pipeline.h"
 #include "xla/service/gpu/reduction_utils.h"
@@ -205,6 +206,7 @@ limitations under the License.
 #include "xla/service/gpu/transforms/dot_operand_converter.h"
 #include "xla/service/gpu/transforms/double_buffer_loop_unrolling.h"
 #include "xla/service/gpu/transforms/dynamic_slice_fusion_rewriter.h"
+#include "xla/service/gpu/transforms/explicit_collectives_group_async_wrapper.h"
 #include "xla/service/gpu/transforms/explicit_stream_annotation_async_wrapper.h"
 #include "xla/service/gpu/transforms/fusion_wrapper.h"
 #include "xla/service/gpu/transforms/gemm_broadcast_folding_rewriter.h"
@@ -1211,6 +1213,7 @@ absl::Status RunPostFusionSimplificationPasses(
           .xla_gpu_experimental_stream_annotation()) {
     pipeline.AddPass<ExplicitStreamAnnotationAsyncWrapper>();
   }
+  pipeline.AddPass<ExplicitCollectivesGroupAsyncWrapper>();
   return pipeline.Run(hlo_module).status();
 }
 
@@ -1804,7 +1807,7 @@ absl::StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
   const std::optional<std::string> unoptimized_fingerprint =
       MaybeUploadUnoptimizedGpuSymbols(module.get(),
                                        gpu_target_config.ToProto());
-
+  DumpHloConfigIfEnabled(*module);
   // We dump the post-optimization HLO in RunBackend so no need to dump it here.
   XLA_SCOPED_LOGGING_TIMER_IF(
       absl::StrCat("GpuCompiler::RunHloPasses for ", module->name()),
@@ -2608,6 +2611,16 @@ absl::Status GpuCompiler::RunPreSchedulingPasses(
         !collective_perf_table_path.empty()) {
       pipeline.AddPass<CollectivePerfTableStatsCollection>(
           collective_perf_table_path, gpu_device_info);
+    }
+
+    // Perf tables model analysis for matmuls.
+    if (std::string matmul_perf_table_path =
+            module->config()
+                .debug_options()
+                .xla_gpu_experimental_matmul_perf_table_path();
+        !matmul_perf_table_path.empty()) {
+      pipeline.AddPass<MatmulPerfTableStatsCollection>(matmul_perf_table_path,
+                                                       gpu_device_info);
     }
   }
   return pipeline.Run(module).status();

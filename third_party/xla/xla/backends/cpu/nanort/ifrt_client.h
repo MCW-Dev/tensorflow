@@ -43,6 +43,7 @@ limitations under the License.
 #include "xla/python/ifrt/sharding.h"
 #include "xla/python/ifrt/topology.h"
 #include "xla/python/ifrt/tuple.h"
+#include "xla/python/ifrt/user_context.h"
 #include "xla/python/ifrt/value.h"
 #include "xla/tsl/concurrency/ref_count.h"
 
@@ -93,11 +94,14 @@ class NanoIfrtClient : public llvm::RTTIExtends<NanoIfrtClient, ifrt::Client> {
       std::optional<absl::Span<const int64_t>> byte_strides,
       absl::Nonnull<std::shared_ptr<const ifrt::Sharding>> sharding,
       HostBufferSemantics semantics,
-      std::function<void()> on_done_with_host_buffer) override;
+      std::function<void()> on_done_with_host_buffer,
+      tsl::RCReference<xla::ifrt::UserContext> user_context) override;
+
   absl::StatusOr<std::vector<tsl::RCReference<ifrt::Array>>>
   MakeArraysFromHostBufferShards(
       absl::Span<MakeArraysFromHostBufferShardsSpec> specs,
-      HostBufferSemantics semantics) override;
+      HostBufferSemantics semantics,
+      tsl::RCReference<xla::ifrt::UserContext> user_context) override;
 
   // Assembles a sharded array from a list of single device arrays. If the
   // provided sharding is specific enough to assemble a dense array, this method
@@ -164,6 +168,10 @@ class NanoIfrtClient : public llvm::RTTIExtends<NanoIfrtClient, ifrt::Client> {
   absl::StatusOr<std::shared_ptr<const PjRtLayout>> GetDefaultLayout(
       ifrt::DType dtype, absl::Span<const int64_t> dims, ifrt::Device* device,
       xla::ifrt::MemoryKind memory_kind) const override;
+
+  tsl::RCReference<xla::ifrt::UserContext> CreateUserContext() override {
+    return tsl::RCReference<xla::ifrt::UserContext>();
+  }
 
   static char ID;  // NOLINT
 

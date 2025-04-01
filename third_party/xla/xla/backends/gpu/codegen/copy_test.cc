@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #include "xla/backends/gpu/codegen/copy.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
@@ -148,9 +149,8 @@ TEST_F(CopyFusionTest, BuildSliceDescriptor) {
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kSliceMemcpyModule));
 
-  auto call_graph = CallGraph::Build(module.get(), /*execution_threads=*/{});
   auto descriptor = DynamicMemcpyFusion::GetMemcpyDescriptorForFusion(
-      GetFusion(module.get()), *call_graph);
+      GetFusion(module.get()));
 
   ASSERT_TRUE(descriptor.has_value());
   ASSERT_THAT(descriptor->src_dynamic_offsets, ::testing::SizeIs(1));
@@ -214,9 +214,8 @@ TEST_F(CopyFusionTest, BuildUpdateSliceDescriptor) {
   TF_ASSERT_OK_AND_ASSIGN(
       auto module, ParseAndReturnVerifiedModule(kUpdateSliceMemcpyModule));
 
-  auto call_graph = CallGraph::Build(module.get(), /*execution_threads=*/{});
   auto descriptor = DynamicMemcpyFusion::GetMemcpyDescriptorForFusion(
-      GetFusion(module.get()), *call_graph);
+      GetFusion(module.get()));
 
   ASSERT_TRUE(descriptor.has_value());
   EXPECT_THAT(descriptor->src_dynamic_offsets, ::testing::IsEmpty());

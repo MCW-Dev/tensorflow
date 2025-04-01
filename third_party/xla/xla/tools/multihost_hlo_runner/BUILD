@@ -1,7 +1,7 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
 load("@local_config_rocm//rocm:build_defs.bzl", "if_rocm")
-load("//xla:xla.bzl", "xla_cc_binary")
+load("//xla:xla.default.bzl", "xla_cc_binary")
 load("//xla/tests:build_defs.bzl", "xla_test")
 load("//xla/tsl:tsl.bzl", "if_cuda_or_rocm", "if_google")
 load("//xla/tsl/platform:build_config_root.bzl", "tf_gpu_tests_tags")
@@ -183,6 +183,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@llvm-project//mlir:FuncExtensions",
         "@local_tsl//tsl/platform:protobuf",
