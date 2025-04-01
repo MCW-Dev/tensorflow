@@ -140,16 +140,6 @@ class StreamExecutorGpuClient : public xla::PjRtStreamExecutorClient {
     return &topology_;
   }
 
-  absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Load(
-      std::unique_ptr<PjRtExecutable> executable,
-      const LoadOptions& load_options) override {
-    return absl::WrapUnique<PjRtLoadedExecutable>(
-        tensorflow::down_cast<PjRtLoadedExecutable*>(executable.release()));
-  }
-
-  absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> Load(
-      std::unique_ptr<PjRtExecutable> executable);
-
   absl::StatusOr<std::unique_ptr<PjRtLoadedExecutable>> LoadSerialized(
       absl::string_view serialized, std::optional<CompileOptions> options,
       const LoadOptions& load_options);
@@ -185,6 +175,10 @@ absl::StatusOr<DeviceTopologyPair> BuildDistributedDevices(
 
 absl::StatusOr<std::unique_ptr<PjRtClient>> GetStreamExecutorGpuClient(
     const GpuClientOptions& options);
+
+// Get the fabric info of a local device ordinal in the format of
+// "clusterUuid/cliqueId". Empty on SM90 or lower.
+absl::StatusOr<std::string> GetDeviceFabricInfo(int device_ordinal);
 
 }  // namespace xla
 

@@ -96,6 +96,24 @@ bool IsTypeSupportedBy(PrimitiveType element_type, Thunk::Kind reduction_op) {
   }
 }
 
+absl::StatusOr<int64_t> GetNumLocalParticipants(
+    const Thunk::CollectiveExecuteParams& params,
+    const std::vector<GlobalDeviceId>& participants) {
+  if (!params.global_device_id_map) {
+    return participants.size();
+  }
+
+  std::vector<GlobalDeviceId> local_devices;
+  local_devices.reserve(params.global_device_id_map->size());
+  for (const auto& entry : *params.global_device_id_map) {
+    local_devices.push_back(entry.second);
+  }
+
+  return absl::c_count_if(participants, [&](const GlobalDeviceId& device_id) {
+    return absl::c_linear_search(local_devices, device_id);
+  });
+}
+
 }  // namespace
 
 // This file runs collective ops (i.e. ops that communicate between multiple
@@ -243,8 +261,12 @@ absl::StatusOr<GpuCliqueKey> GetGpuCliqueKey(
         "Partial replica groups are not allowed when using NCCL_COMM_ID "
         "environment configuration.");
   }
-  return GpuCliqueKey(std::move(participants), kNoStreamId, stream_kind,
-                      std::move(participant_groups));
+
+  TF_ASSIGN_OR_RETURN(int64_t num_local_participants,
+                      GetNumLocalParticipants(params, participants));
+
+  return GpuCliqueKey(std::move(participants), num_local_participants,
+                      kNoStreamId, stream_kind, std::move(participant_groups));
 }
 
 absl::StatusOr<CommunicatorHandle> GetComm(
@@ -257,12 +279,10 @@ absl::StatusOr<CommunicatorHandle> GetComm(
                                       group_mode, stream_kind));
 
   std::optional<RankId> rank = clique_key.rank(params.global_device_id);
-  TF_ASSIGN_OR_RETURN(bool is_local,
-                      collective_cliques.is_local_clique(clique_key));
   TF_ASSIGN_OR_RETURN(Communicator * comm,
-                      collective_cliques.GetComm(std::move(clique_key), *rank));
+                      collective_cliques.GetComm(clique_key, *rank));
 
-  return CommunicatorHandle(comm, is_local);
+  return CommunicatorHandle(comm, std::move(clique_key));
 }
 
 absl::StatusOr<std::vector<DeviceBufferPair>> ConvertToDeviceBuffers(
@@ -377,11 +397,7 @@ absl::Status CollectiveThunk::Prepare(
       GetGpuCliqueKey(collectives, *params.collective_params,
                       config().replica_groups, config().group_mode,
                       GetAsyncStreamKind()));
-  TF_ASSIGN_OR_RETURN(
-      size_t num_local_participants,
-      GetNumLocalParticipants(*params.collective_params,
-                              config().replica_groups, config().group_mode));
-  return resource_requests.AddClique(clique_key, num_local_participants);
+  return resource_requests.AddClique(clique_key);
 }
 
 absl::Status CollectiveThunk::Initialize(const InitializeParams& params) {
@@ -446,16 +462,8 @@ absl::Status CollectiveThunk::ExecuteOnStream(const ExecuteParams& params) {
   // required state (internal to NCCL) and ready to continue. Going too far
   // ahead on one rank leads to deadlocks in NCCL.
   if (NeedFirstCallRendzevous() && !first_call_rendezvous_flag_.IsCompleted()) {
-    TF_ASSIGN_OR_RETURN(GpuCollectives * collectives,
-                        GetGpuCollectives(params));
-    TF_ASSIGN_OR_RETURN(GpuCliqueKey clique_key,
-                        GetGpuCliqueKey(collectives, *params.collective_params,
-                                        config().replica_groups,
-                                        config().group_mode, stream_kind));
-
-    TF_ASSIGN_OR_RETURN(
-        size_t num_local_participants,
-        params.collective_cliques->num_communicators(clique_key));
+    GpuCliqueKey clique_key = comm_handle.clique_key;
+    size_t num_local_participants = clique_key.num_local_participants();
 
     auto global_device_id = params.collective_params->global_device_id;
     RankId rank = clique_key.rank(global_device_id).value_or(RankId(-1));
@@ -519,29 +527,6 @@ absl::Status IsValidOperand(Shape shape, Thunk::Kind reduction_op) {
         primitive_util::LowercasePrimitiveTypeName(shape.element_type())));
   }
   return absl::OkStatus();
-}
-
-absl::StatusOr<size_t> GetNumLocalParticipants(
-    const Thunk::CollectiveExecuteParams& params,
-    const std::vector<ReplicaGroup>& replica_groups,
-    CollectiveOpGroupMode group_mode) {
-  TF_ASSIGN_OR_RETURN(
-      std::vector<GlobalDeviceId> participants,
-      GetParticipatingDevices(params.global_device_id, *params.device_assn,
-                              replica_groups, group_mode));
-  if (!params.global_device_id_map) {
-    return participants.size();
-  }
-
-  std::vector<GlobalDeviceId> local_devices;
-  local_devices.reserve(params.global_device_id_map->size());
-  for (const auto& entry : *params.global_device_id_map) {
-    local_devices.push_back(entry.second);
-  }
-
-  return absl::c_count_if(participants, [&](const GlobalDeviceId& device_id) {
-    return absl::c_linear_search(local_devices, device_id);
-  });
 }
 
 }  // namespace xla::gpu

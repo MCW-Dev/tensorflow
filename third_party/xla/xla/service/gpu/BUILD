@@ -8,7 +8,7 @@ load(
     "if_rocm_is_configured",
     "rocm_copts",
 )
-load("//xla:xla.bzl", "xla_cc_test", "xla_internal")
+load("//xla:xla.default.bzl", "xla_cc_test", "xla_internal")
 load(
     "//xla/service/gpu:build_defs.bzl",
     "build_cub_sort_kernels",
@@ -1500,6 +1500,7 @@ cc_library(
         "//xla/service/gpu/model:collective_ptable_stats_collection",
         "//xla/service/gpu/model:gpu_cost_model_stats_collection",
         "//xla/service/gpu/model:gpu_hlo_cost_analysis",
+        "//xla/service/gpu/model:matmul_ptable_stats_collection",
         "//xla/service/gpu/model:sol_gpu_cost_model_stats_collection",
         "//xla/service/gpu/transforms/collectives:convert_async_collectives_to_sync",
         "//xla/service/gpu/transforms/collectives:gpu_all_gather_combiner",
@@ -1528,6 +1529,7 @@ cc_library(
         "//xla/service/gpu/transforms:dot_operand_converter",
         "//xla/service/gpu/transforms:double_buffer_loop_unrolling",
         "//xla/service/gpu/transforms:dynamic_slice_fusion_rewriter",
+        "//xla/service/gpu/transforms:explicit_collectives_group_async_wrapper",
         "//xla/service/gpu/transforms:explicit_stream_annotation_async_wrapper",
         "//xla/service/gpu/transforms:fusion_block_level_rewriter",
         "//xla/service/gpu/transforms:fusion_wrapper",
@@ -2488,12 +2490,12 @@ xla_cc_test(
         ":gpu_device_info_for_tests",
         ":hlo_fusion_analysis",
         ":ir_emission_utils",
-        "//xla:protobuf_util",
         "//xla/hlo/utils:hlo_traversal",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:device_description_proto_cc",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
+        "//xla/tsl/util/proto:proto_matchers",
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:statusor",
     ],
