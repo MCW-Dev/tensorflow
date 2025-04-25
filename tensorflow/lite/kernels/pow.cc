@@ -70,6 +70,7 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_OK(context,
                     GetOutputSafe(context, node, kOutputTensor, &output));
 
+  // Check types.
   TF_LITE_ENSURE_TYPES_EQ(context, input1->type, input2->type);
 
   const TfLiteType type = input1->type;
@@ -82,9 +83,20 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   }
   output->type = type;
 
+  // Check shapes of exponent and base tensors
   data->requires_broadcast = !HaveSameShapes(input1, input2);
 
-  // quantize prepare
+  // For quantized inference, create and allocate temporary float32 tensors to
+  // store the dequantized values of the two input tensors and the output. These
+  // temporary tensors are used internally during evaluation to perform
+  // computations in floating-point precision even though the original tensors
+  // are quantized (int8 or int16). Specifically:
+  // - `base_dequantize` stores the dequantized version of input1,
+  // - `exponent_dequantize` stores the dequantized version of input2,
+  // - `output_dequantize` stores the intermediate float32 result before
+  // re-quantization (if applicable). These tensors are added to the node's
+  // temporaries and resized to match the shape of the corresponding
+  // inputs/outputs.
   if (input1->type == kTfLiteInt8 || input1->type == kTfLiteInt16) {
     context->AddTensors(context, kNumTempTensorsForQuantization,
                         &data->scratch_tensor_index);
