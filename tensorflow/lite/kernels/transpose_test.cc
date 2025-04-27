@@ -205,33 +205,6 @@ TEST(TransposeTest, TestInt43DInputConstTensor) {
                                 2, 6, 3, 3, 3, 2, 3, 0, 4, 0, 4, 3}));
 }
 
-TEST(TransposeTest, TestInt41DInputConstTensor) {
-  TransposeOpInt4Model m({3}, {1}, {0});
-  m.SetInput({1, 2, 3});
-  ASSERT_EQ(m.Invoke(), kTfLiteOk);
-  EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({3}));
-  EXPECT_THAT(m.GetOutput(), ElementsAre(1, 2, 3));
-}
-
-TEST(TransposeTest, TestInt42DInputConstTensor) {
-  TransposeOpInt4Model m({3, 2}, {2}, {1, 0});
-  m.SetInput({0, 1, 2, 3, 4, 5});
-  ASSERT_EQ(m.Invoke(), kTfLiteOk);
-  EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({2, 3}));
-  EXPECT_THAT(m.GetOutput(), ElementsAreArray({0, 2, 4, 1, 3, 5}));
-}
-
-TEST(TransposeTest, TestInt43DInputConstTensor) {
-  TransposeOpInt4Model m({2, 3, 4}, {3}, {2, 0, 1});
-  m.SetInput(
-      {0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3});
-  ASSERT_EQ(m.Invoke(), kTfLiteOk);
-  EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({4, 2, 3}));
-  EXPECT_THAT(m.GetOutput(),
-              ElementsAreArray({0, 4, 1, 1, 1, 0, 1, 5, 2, 2, 2, 1,
-                                2, 6, 3, 3, 3, 2, 3, 0, 4, 0, 4, 3}));
-}
-
 TYPED_TEST(TransposeTest, Test1DInputConstTensor) {
   TransposeOpConstModel<TypeParam> m({3}, {1}, {0});
   std::vector<TypeParam> input_data = CastVector<TypeParam>({1, 2, 3});
