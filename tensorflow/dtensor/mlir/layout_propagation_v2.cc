@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <algorithm>
+#include <cassert>
 #include <deque>
 #include <iterator>
 #include <memory>
@@ -23,13 +23,19 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "absl/container/flat_hash_set.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/types/optional.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/Attributes.h"  // from @llvm-project
@@ -43,13 +49,15 @@ limitations under the License.
 #include "mlir/IR/TypeUtilities.h"  // from @llvm-project
 #include "mlir/IR/Types.h"  // from @llvm-project
 #include "mlir/IR/Value.h"  // from @llvm-project
+#include "mlir/IR/ValueRange.h"  // from @llvm-project
 #include "mlir/IR/Visitors.h"  // from @llvm-project
-#include "mlir/Support/DebugStringHelper.h"  // from @llvm-project
+#include "mlir/Pass/Pass.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_attributes.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_device.h"
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_dialect.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
-#include "tensorflow/compiler/mlir/tensorflow/ir/tf_types.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/dump_mlir_util.h"
 #include "tensorflow/compiler/mlir/utils/name_utils.h"
 #include "tensorflow/core/platform/errors.h"
@@ -57,11 +65,11 @@ limitations under the License.
 #include "tensorflow/core/platform/status.h"
 #include "tensorflow/core/util/debug_data_dumper.h"
 #include "tensorflow/dtensor/cc/constants.h"
+#include "tensorflow/dtensor/cc/dstatus.h"
 #include "tensorflow/dtensor/cc/dtensor_utils.h"
 #include "tensorflow/dtensor/cc/tensor_layout.h"
 #include "tensorflow/dtensor/mlir/dtensor_dialect/ir/dialect.h"
 #include "tensorflow/dtensor/mlir/dtensor_dialect/ir/dtensor_attributes.h"
-#include "tensorflow/dtensor/mlir/dtensor_mlir_passes.h"
 #include "tensorflow/dtensor/mlir/dtensor_send_recv.h"
 #include "tensorflow/dtensor/mlir/ir/tf_dtensor.h"
 #include "tensorflow/dtensor/mlir/layout_parsing.h"
@@ -1349,7 +1357,7 @@ void FindRootsAndEmitError(
 // Runs an iteration of layout propagation, where we merge producer and consumer
 // requests and then recompute recommended layouts on all operations that
 // are connected to an updated layout.
-Status RunOneIteration(
+absl::Status RunOneIteration(
     llvm::DenseSet<mlir::Value>& is_locked,
     llvm::DenseSet<mlir::Value>& is_updated,
     llvm::DenseMap<mlir::Value, std::optional<Layout>>& producer_request,
@@ -1389,9 +1397,10 @@ Status RunOneIteration(
 
 // Compares every value's layouts in `merged_a` with the ones in `merged_b`,
 // and store the values that differ in `changed`.
-Status CompareMergedLayouts(const llvm::DenseMap<mlir::Value, Layout>& merged_a,
-                            const llvm::DenseMap<mlir::Value, Layout>& merged_b,
-                            llvm::DenseSet<mlir::Value>& changed) {
+absl::Status CompareMergedLayouts(
+    const llvm::DenseMap<mlir::Value, Layout>& merged_a,
+    const llvm::DenseMap<mlir::Value, Layout>& merged_b,
+    llvm::DenseSet<mlir::Value>& changed) {
   if (merged_a.size() != merged_b.size())
     return errors::Internal(
         "Both merged_layouts did not have the same number of set layouts.");
@@ -1484,16 +1493,16 @@ struct DLayoutPropagationPassV2
     int stage = 0;
 
     llvm::DenseMap<mlir::Value, Layout> merged_layouts;
-    Status status;
+    absl::Status status;
 
     while (!is_updated.empty() && stage < kLayoutPropagationMaxStages) {
       ++stage;
       int steps = 0;
       // Step 1. Run the layout propagation v2 until convergence or max steps.
       while (!is_updated.empty() && steps < LayoutPropagationMaxSteps()) {
-        Status status = RunOneIteration(is_locked, is_updated, producer_request,
-                                        consumer_requests, producers, consumers,
-                                        merged_layouts, module, stage, &steps);
+        absl::Status status = RunOneIteration(
+            is_locked, is_updated, producer_request, consumer_requests,
+            producers, consumers, merged_layouts, module, stage, &steps);
         if (!status.ok()) {
           module.emitOpError() << "Failure running iteration.";
           return signalPassFailure();

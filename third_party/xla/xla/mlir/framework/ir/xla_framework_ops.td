@@ -27,7 +27,7 @@ def XLAFramework_Dialect : Dialect {
   let summary = "Types and operations for xla_framework dialect";
   let description = [{
     This dialect contains operations and types that correspond to XLA compiled C
-    functions in tensorflow/compiler/xla/service/cpu/ir_function.cc.
+    functions in xla/service/cpu/ir_function.cc.
   }];
   let cppNamespace = "::mlir::xla_framework";
 
@@ -81,7 +81,7 @@ def XLAFramework_XLABufferToMemOp : XLAFramework_Op<"buffer_to_mem",
     }]>];
 
   let extraClassDeclaration = [{
-    MemRefType getType() { return getResult().getType().cast<MemRefType>(); }
+    MemRefType getType() { return llvm::cast<MemRefType>(getResult().getType()); }
   }];
   let assemblyFormat = [{
     $buffer attr-dict `:` type($result)

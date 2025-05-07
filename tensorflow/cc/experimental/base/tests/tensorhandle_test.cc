@@ -19,13 +19,16 @@ limitations under the License.
 #include <stdint.h>
 
 #include <memory>
+#include <vector>
 
+#include <gtest/gtest.h>
+#include "absl/types/span.h"
 #include "tensorflow/c/tf_datatype.h"
 #include "tensorflow/cc/experimental/base/public/runtime.h"
 #include "tensorflow/cc/experimental/base/public/runtime_builder.h"
+#include "tensorflow/cc/experimental/base/public/status.h"
 #include "tensorflow/cc/experimental/base/public/tensor.h"
 #include "tensorflow/cc/experimental/base/tests/tensor_types_test_util.h"
-#include "tensorflow/core/lib/gtl/array_slice.h"
 #include "tensorflow/core/platform/test.h"
 
 namespace tensorflow {

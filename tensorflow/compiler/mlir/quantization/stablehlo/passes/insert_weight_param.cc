@@ -18,8 +18,8 @@ limitations under the License.
 
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/Quant/QuantOps.h"  // from @llvm-project  // IWYU pragma: keep
-#include "mlir/Dialect/Quant/QuantTypes.h"  // from @llvm-project
+#include "mlir/Dialect/Quant/IR/Quant.h"  // from @llvm-project  // IWYU pragma: keep
+#include "mlir/Dialect/Quant/IR/QuantTypes.h"  // from @llvm-project
 #include "mlir/Dialect/Shape/IR/Shape.h"  // from @llvm-project  // IWYU pragma: keep
 #include "mlir/IR/Builders.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
@@ -48,6 +48,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/quantization/common/lift_as_function_call.h"
 #include "tensorflow/compiler/mlir/quantization/common/quantization_lib/quantization_utils.h"
 #include "tensorflow/compiler/mlir/quantization/stablehlo/passes/passes.h"  // IWYU pragma: keep
+#include "tensorflow/compiler/mlir/quantization/stablehlo/quantization_config.pb.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 
 namespace mlir::quant::stablehlo {
@@ -81,12 +82,11 @@ class InsertWeightParamPass
 class InsertWeightParamPattern
     : public OpTraitRewritePattern<OpTrait::ConstantLike> {
  public:
-  using OpTraitRewritePattern<OpTrait::ConstantLike>::OpTraitRewritePattern;
-
   explicit InsertWeightParamPattern(MLIRContext* context)
-      : OpTraitRewritePattern<OpTrait::ConstantLike>(context) {}
+      : OpTraitRewritePattern(context) {}
 
-  LogicalResult match(Operation* op) const override {
+  LogicalResult matchAndRewrite(Operation* op,
+                                PatternRewriter& rewriter) const override {
     if (op->getNumResults() != 1) {
       return failure();
     }
@@ -94,27 +94,11 @@ class InsertWeightParamPattern
     if (!type || !type.getElementType().isF32()) {
       return failure();
     }
-    return success(
-        op->hasOneUse() &&
-        IsWeightQuantizableFunction(*op->getUses().begin(), type.getRank()));
-  }
-
-  // Checks if the operand is second operand of `tf.XlaCallModule` op for
-  // `stablehlo.convolution` or `stablehlo.dot_general` with fully_quantizable
-  // trait.
-  static bool IsWeightQuantizableFunction(OpOperand& operand, int64_t rank) {
-    if (operand.getOperandNumber() != 1) {
-      return false;
+    if (!op->hasOneUse() ||
+        !IsWeightQuantizableFunction(*op->getUses().begin(), type.getRank())) {
+      return failure();
     }
-    Operation* user = operand.getOwner();
-    if (!IsWeightOnlyQuantizableOp(*user)) {
-      return false;
-    }
-    Method method = GetQuantizationMethodOrDefault(user);
-    return HasValidWeightOnlyPtqMethod(method.weight_only_ptq(), rank);
-  }
 
-  void rewrite(Operation* op, PatternRewriter& rewriter) const override {
     Operation* quantizable_op = *op->getUsers().begin();
     DenseFPElementsAttr attr;
     matchPattern(op->getResult(0), m_Constant(&attr));
@@ -142,7 +126,7 @@ class InsertWeightParamPattern
       op->emitError(
           "Failed to get weight quantization parameters for weight-only "
           "quantization.");
-      return;
+      return failure();
     }
 
     const Type expressed_type = op->getResult(0).getType();
@@ -155,6 +139,22 @@ class InsertWeightParamPattern
     auto dq = rewriter.create<quantfork::DequantizeCastOp>(op->getLoc(),
                                                            expressed_type, q);
     quantizable_op->setOperand(1, dq.getResult());
+    return success();
+  }
+
+  // Checks if the operand is second operand of `tf.XlaCallModule` op for
+  // `stablehlo.convolution` or `stablehlo.dot_general` with fully_quantizable
+  // trait.
+  static bool IsWeightQuantizableFunction(OpOperand& operand, int64_t rank) {
+    if (operand.getOperandNumber() != 1) {
+      return false;
+    }
+    Operation* user = operand.getOwner();
+    if (!IsWeightOnlyQuantizableOp(*user)) {
+      return false;
+    }
+    Method method = GetQuantizationMethodOrDefault(user);
+    return HasValidWeightOnlyPtqMethod(method.weight_only_ptq(), rank);
   }
 
  private:
@@ -219,7 +219,7 @@ class InsertWeightParamPattern
           dimension_numbers.getRhsContractingDimensions();
       ArrayRef<int64_t> rhs_batching_dims =
           dimension_numbers.getRhsBatchingDimensions();
-      int64_t rank = dot.getRhs().getType().cast<TensorType>().getRank();
+      int64_t rank = mlir::cast<TensorType>(dot.getRhs().getType()).getRank();
       for (int i = 0; i < rank; ++i) {
         // Return the first non-contracting, non-batching dimension of rhs.
         if (llvm::find(rhs_contracting_dims, i) == rhs_contracting_dims.end() &&
@@ -228,7 +228,7 @@ class InsertWeightParamPattern
         }
       }
     }
-    return op.getOperand(1).getType().cast<TensorType>().getRank() - 1;
+    return mlir::cast<TensorType>(op.getOperand(1).getType()).getRank() - 1;
   }
 };
 
@@ -239,7 +239,7 @@ void InsertWeightParamPass::runOnOperation() {
 
   patterns.add<InsertWeightParamPattern>(context);
 
-  if (failed(applyPatternsAndFoldGreedily(func, std::move(patterns)))) {
+  if (failed(applyPatternsGreedily(func, std::move(patterns)))) {
     signalPassFailure();
   }
 }

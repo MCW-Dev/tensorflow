@@ -17,10 +17,11 @@ limitations under the License.
 
 #include <cstdlib>
 #include <cstring>
-#include <map>
 #include <memory>
 
+#include "tensorflow/lite/c/common.h"
 #include "tensorflow/lite/core/c/c_api_types.h"
+#include "tensorflow/lite/experimental/resource/resource_base.h"
 
 namespace tflite {
 namespace resource {
@@ -76,7 +77,9 @@ TfLiteStatus ResourceVariable::AssignFrom(const TfLiteTensor* tensor) {
     tensor_.bytes = old_bytes;
   }
 
-  memcpy(tensor_.data.raw, tensor->data.raw, tensor_.bytes);
+  if (tensor->data.raw) {
+    memcpy(tensor_.data.raw, tensor->data.raw, tensor_.bytes);
+  }
   is_initialized_ = true;
 
   return kTfLiteOk;

@@ -33,32 +33,19 @@ namespace tensorflow {
 namespace tf2xla {
 namespace v2 {
 
-// Given an MLIR module, returns a GraphDef.
-absl::StatusOr<std::unique_ptr<GraphDef>> ConvertMlirToGraphdef(
-    mlir::ModuleOp module, const GraphExportConfig& configs);
-
 // Converts an MLIR module to TensorFlow graph and FunctionLibraryDefinition.
 // The "main" function of the module is stored in the graph and the rest of
 // functions are stored in the library. Control ret nodes are stored separately
 // in `control_ret_nodes`.
-Status ConvertMlirToGraph(mlir::ModuleOp module,
-                          const GraphExportConfig& configs,
-                          std::unique_ptr<Graph>* graph,
-                          FunctionLibraryDefinition* flib_def,
-                          absl::flat_hash_set<Node*>* control_ret_nodes);
-
-// Converts an MLIR module to TensorFlow graph and FunctionLibraryDefinition.
-// The "main" function of the module is stored in the graph and the rest of
-// functions are stored in the library.
-Status ConvertMlirToGraph(mlir::ModuleOp module,
-                          const GraphExportConfig& configs,
-                          std::unique_ptr<Graph>* graph,
-                          FunctionLibraryDefinition* flib_def);
+absl::Status ConvertTfExecutorToGraph(
+    mlir::ModuleOp module, const GraphExportConfig& configs,
+    std::unique_ptr<Graph>* graph, FunctionLibraryDefinition* flib_def,
+    absl::flat_hash_set<Node*>* control_ret_nodes);
 
 // Converts an MLIR function and adds it to a FunctionLibraryDefinition.
-Status ConvertMlirFunctionToFunctionLibraryDef(mlir::func::FuncOp func,
-                                               const GraphExportConfig& configs,
-                                               FunctionDef* function_def);
+absl::Status ConvertMlirFunctionToFunctionLibraryDef(
+    mlir::func::FuncOp func, const GraphExportConfig& configs,
+    FunctionDef* function_def);
 
 }  // namespace v2
 }  // namespace tf2xla

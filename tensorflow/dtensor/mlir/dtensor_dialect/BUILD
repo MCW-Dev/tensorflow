@@ -33,24 +33,12 @@ td_library(
 gentbl_cc_library(
     name = "DialectIncGen",
     compatible_with = get_compatible_with_portable(),
-    tbl_outs = [
-        (
-            ["-gen-op-decls"],
-            "ir/ops.h.inc",
-        ),
-        (
-            ["-gen-op-defs"],
-            "ir/ops.cc.inc",
-        ),
-        (
-            ["-gen-dialect-decls"],
-            "ir/dialect.h.inc",
-        ),
-        (
-            ["-gen-dialect-defs"],
-            "ir/dialect.cc.inc",
-        ),
-    ],
+    tbl_outs = {
+        "ir/ops.h.inc": ["-gen-op-decls"],
+        "ir/ops.cc.inc": ["-gen-op-defs"],
+        "ir/dialect.h.inc": ["-gen-dialect-decls"],
+        "ir/dialect.cc.inc": ["-gen-dialect-defs"],
+    },
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "ir/dtensor_ops.td",
     deps = [":dtensor_td_files"],
@@ -66,9 +54,8 @@ cc_library(
     deps = [
         ":DialectIncGen",
         ":ir/dtensor_attributes",
-        "//tensorflow/compiler/mlir/utils:string_container_utils",
+        "//tensorflow/dtensor/cc:dstatus",
         "//tensorflow/dtensor/cc:tensor_layout",
-        "@com_google_absl//absl/strings",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:InferTypeOpInterface",
         "@llvm-project//mlir:Support",
@@ -88,5 +75,6 @@ cc_library(
         "//tensorflow/dtensor/proto:layout_proto_cc",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
     ],
 )

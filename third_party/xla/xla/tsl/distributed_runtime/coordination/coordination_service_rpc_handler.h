@@ -20,9 +20,9 @@ limitations under the License.
 #include "absl/synchronization/mutex.h"
 #include "xla/tsl/distributed_runtime/coordination/coordination_service.h"
 #include "xla/tsl/distributed_runtime/coordination/coordination_service_agent.h"
-#include "tsl/platform/status.h"
+#include "xla/tsl/platform/status.h"
+#include "xla/tsl/protobuf/coordination_service.pb.h"
 #include "tsl/platform/thread_annotations.h"
-#include "tsl/protobuf/coordination_service.pb.h"
 
 namespace tsl {
 class CoordinationServiceRpcHandler {
@@ -31,7 +31,7 @@ class CoordinationServiceRpcHandler {
 
   void SetAgentInstance(CoordinationServiceAgent* agent);
 
-  void SetServiceInstance(CoordinationServiceInterface* service);
+  void SetServiceInstance(CoordinationService* service);
 
   void RegisterTaskAsync(const tensorflow::RegisterTaskRequest* request,
                          tensorflow::RegisterTaskResponse* response,
@@ -65,6 +65,10 @@ class CoordinationServiceRpcHandler {
                          tensorflow::GetTaskStateResponse* response,
                          StatusCallback done);
 
+  void GetJobStateAsync(const tensorflow::GetJobStateRequest* request,
+                        tensorflow::GetJobStateResponse* response,
+                        StatusCallback done);
+
   void InsertKeyValueAsync(const tensorflow::InsertKeyValueRequest* request,
                            tensorflow::InsertKeyValueResponse* response,
                            StatusCallback done);
@@ -92,10 +96,18 @@ class CoordinationServiceRpcHandler {
                           tensorflow::CancelBarrierResponse* response,
                           StatusCallback done);
 
+  void GetAliveTasksAsync(const tensorflow::GetAliveTasksRequest* request,
+                          tensorflow::GetAliveTasksResponse* response,
+                          StatusCallback done);
+
+  void PollForErrorAsync(const tensorflow::PollForErrorRequest* request,
+                         tensorflow::PollForErrorResponse* response,
+                         StatusCallback done);
+
  private:
   absl::Mutex mu_;
   CoordinationServiceAgent* agent_ TF_GUARDED_BY(mu_) = nullptr;
-  CoordinationServiceInterface* service_ TF_GUARDED_BY(mu_) = nullptr;
+  CoordinationService* service_ TF_GUARDED_BY(mu_) = nullptr;
 };
 
 }  // namespace tsl

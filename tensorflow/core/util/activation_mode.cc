@@ -15,13 +15,14 @@ limitations under the License.
 
 #include "tensorflow/core/util/activation_mode.h"
 
+#include "absl/status/status.h"
 #include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/lib/core/errors.h"
 
 namespace tensorflow {
 
-Status GetActivationModeFromString(const string& str_value,
-                                   ActivationMode* value) {
+absl::Status GetActivationModeFromString(const string& str_value,
+                                         ActivationMode* value) {
   if (str_value == "None") {
     *value = NONE;
   } else if (str_value == "Sigmoid") {

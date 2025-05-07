@@ -1,5 +1,10 @@
 # MLIR related utilities.
 
+load(
+    "//xla/tsl/platform:rules_cc.bzl",
+    "cc_library",
+)
+
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [
@@ -15,10 +20,10 @@ cc_library(
         "status_scoped_diagnostic_handler.h",
     ],
     deps = [
+        "//xla/tsl/platform:logging",
         "@com_google_absl//absl/status",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
-        "@local_tsl//tsl/platform:logging",
     ],
 )

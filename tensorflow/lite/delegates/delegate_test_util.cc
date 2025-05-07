@@ -29,11 +29,11 @@ limitations under the License.
 #include "tensorflow/lite/core/c/builtin_op_data.h"
 #include "tensorflow/lite/core/interpreter.h"
 #include "tensorflow/lite/core/kernels/builtin_op_kernels.h"
+#include "tensorflow/lite/core/subgraph.h"
 #include "tensorflow/lite/delegates/utils.h"
 #include "tensorflow/lite/kernels/internal/compatibility.h"
 #include "tensorflow/lite/kernels/kernel_util.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/string_type.h"
 #include "tensorflow/lite/util.h"
 
 namespace tflite {
@@ -158,6 +158,7 @@ SimpleDelegate::SimpleDelegate(const std::vector<int>& nodes,
       automatic_shape_propagation_(automatic_shape_propagation),
       custom_op_(custom_op),
       set_output_tensor_dynamic_(set_output_tensor_dynamic) {
+  delegate_ = TfLiteDelegateCreate();
   delegate_.Prepare = [](TfLiteContext* context,
                          TfLiteDelegate* delegate) -> TfLiteStatus {
     auto* simple = static_cast<SimpleDelegate*>(delegate->data_);

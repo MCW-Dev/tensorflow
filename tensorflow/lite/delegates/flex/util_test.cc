@@ -15,19 +15,30 @@ limitations under the License.
 #include "tensorflow/lite/delegates/flex/util.h"
 
 #include <cstdarg>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/status/status.h"
 #include "tensorflow/c/tf_datatype.h"
 #include "tensorflow/core/framework/resource_handle.h"
+#include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/framework/types.pb.h"
+#include "tensorflow/core/platform/errors.h"
+#include "tensorflow/core/platform/status.h"
+#include "tensorflow/core/platform/tstring.h"
 #include "tensorflow/core/protobuf/error_codes.pb.h"
 #include "tensorflow/lite/core/c/c_api_types.h"
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/string_type.h"
 #include "tensorflow/lite/string_util.h"
-#include "tensorflow/lite/testing/util.h"
 #include "tensorflow/lite/util.h"
 
 namespace tflite {
@@ -77,7 +88,7 @@ TEST(UtilTest, ConvertStatus) {
   EXPECT_EQ(context.error, "Some Error");
 
   context.error.clear();
-  EXPECT_EQ(ConvertStatus(&context, tensorflow::Status()), kTfLiteOk);
+  EXPECT_EQ(ConvertStatus(&context, absl::Status()), kTfLiteOk);
   EXPECT_TRUE(context.error.empty());
 }
 

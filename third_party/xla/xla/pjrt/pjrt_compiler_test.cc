@@ -26,11 +26,11 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "xla/client/xla_computation.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/pjrt/metrics.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_device_description.h"
-#include "tsl/lib/monitoring/cell_reader.h"
+#include "xla/tsl/lib/monitoring/cell_reader.h"
 #include "tsl/platform/status_matchers.h"
 
 namespace xla {
@@ -69,7 +69,7 @@ TEST(PjRtCompilerTest, CompilerNotRegistered) {
   XlaComputation computation;
   auto res = PjRtCompile(options, computation, topology);
 
-  EXPECT_TRUE(tsl::errors::IsNotFound(res.status()));
+  EXPECT_TRUE(absl::IsNotFound(res.status()));
 }
 
 TEST(PjRtCompilerTest, CompilerRegistered) {
@@ -117,7 +117,7 @@ TEST(PjRtCompilerTest, CompilerRegistered) {
   XlaComputation computation;
   auto res = PjRtCompile(options, computation, topology);
 
-  EXPECT_TRUE(tsl::errors::IsUnimplemented(res.status()));
+  EXPECT_TRUE(absl::IsUnimplemented(res.status()));
 }
 
 TEST(PjRtCompilerTest, PjrtCompileComputationMetric) {

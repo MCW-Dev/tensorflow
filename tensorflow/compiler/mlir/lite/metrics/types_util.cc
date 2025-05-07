@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/compiler/mlir/lite/metrics/types_util.h"
 
+#include <cstddef>
 #include <string>
 
 #include "llvm/ADT/STLExtras.h"
@@ -21,7 +22,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/Location.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
-#include "tensorflow/lite/python/metrics/converter_error_data.pb.h"
+#include "tensorflow/compiler/mlir/lite/metrics/converter_error_data.pb.h"
 
 namespace mlir {
 namespace TFL {

@@ -15,16 +15,25 @@ limitations under the License.
 
 #include "tensorflow/core/transforms/func_to_graph/func_to_graph.h"
 
+#include <cstdint>
+
+#include "absl/status/status.h"
+#include "llvm/ADT/STLExtras.h"
+#include "mlir/IR/Builders.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
+#include "mlir/IR/MLIRContext.h"  // from @llvm-project
+#include "mlir/IR/OpDefinition.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
+#include "tensorflow/core/ir/dialect.h"
 #include "tensorflow/core/ir/ops.h"
+#include "tensorflow/core/ir/tf_op_wrapper.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/status.h"
 
 namespace mlir {
 namespace tfg {
 
-tensorflow::Status FuncToGraph(GraphFuncOp func) {
+absl::Status FuncToGraph(GraphFuncOp func) {
   MLIRContext *context = func->getContext();
   auto version = func->getAttrOfType<VersionAttr>("tfg.lifted_graph_version");
   if (!version) {

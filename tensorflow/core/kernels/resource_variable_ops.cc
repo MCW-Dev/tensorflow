@@ -99,10 +99,11 @@ ReadVariableOp::ReadVariableOp(OpKernelConstruction* c) : OpKernel(c) {
 
 namespace {
 
-Status CopyVariable(int output_idx, OpKernelContext* ctx, const Tensor* t) {
+absl::Status CopyVariable(int output_idx, OpKernelContext* ctx,
+                          const Tensor* t) {
   Tensor* output;
   Notification n;
-  Status status;
+  absl::Status status;
   AllocatorAttributes attr;
   if (t->dtype() == DT_VARIANT) {
     attr.set_on_host(true);
@@ -116,7 +117,7 @@ Status CopyVariable(int output_idx, OpKernelContext* ctx, const Tensor* t) {
     // OpKernelContext
     Device* device = down_cast<Device*>(ctx->device());
     ctx->op_device_context()->CopyTensorInSameDevice(
-        t, device, output, [&n, &status](const Status& s) {
+        t, device, output, [&n, &status](const absl::Status& s) {
           status = s;
           n.Notify();
         });
@@ -133,6 +134,8 @@ Status CopyVariable(int output_idx, OpKernelContext* ctx, const Tensor* t) {
       TF_CALL_float8_e4m3fn(HANDLER);
       TF_CALL_int4(HANDLER);
       TF_CALL_uint4(HANDLER);
+      TF_CALL_int2(HANDLER);
+      TF_CALL_uint2(HANDLER);
 #undef HANDLER
       default:
         return errors::Internal("Unsupported dtype", t->dtype());
@@ -302,6 +305,8 @@ TF_CALL_INTEGRAL_TYPES_NO_INT32(REGISTER_GPU_KERNELS);
 TF_CALL_variant(REGISTER_GPU_KERNELS);
 TF_CALL_int4(REGISTER_GPU_KERNELS);
 TF_CALL_uint4(REGISTER_GPU_KERNELS);
+TF_CALL_int2(REGISTER_GPU_KERNELS);
+TF_CALL_uint2(REGISTER_GPU_KERNELS);
 #undef REGISTER_GPU_KERNELS
 
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
@@ -317,6 +322,8 @@ TF_CALL_INTEGRAL_TYPES_NO_INT32(REGISTER_DEFAULT_KERNELS);
 TF_CALL_variant(REGISTER_DEFAULT_KERNELS);
 TF_CALL_int4(REGISTER_DEFAULT_KERNELS);
 TF_CALL_uint4(REGISTER_DEFAULT_KERNELS);
+TF_CALL_int2(REGISTER_DEFAULT_KERNELS);
+TF_CALL_uint2(REGISTER_DEFAULT_KERNELS);
 #undef REGISTER_DEFAULT_KERNELS
 
 REGISTER_KERNEL_BUILDER(
@@ -325,7 +332,7 @@ REGISTER_KERNEL_BUILDER(
         .HostMemory("resources")
         .TypeConstraint("dtypes", {DT_INT64, DT_COMPLEX64, DT_COMPLEX128,
                                    DT_HALF, DT_FLOAT, DT_DOUBLE, DT_BOOL,
-                                   DT_VARIANT, DT_BFLOAT16}),
+                                   DT_VARIANT, DT_BFLOAT16, DT_INT8}),
     ResourceHandlesOp<Var>);
 
 REGISTER_KERNEL_BUILDER(
@@ -357,7 +364,7 @@ DestroyResourceOp::DestroyResourceOp(OpKernelConstruction* ctx)
 
 void DestroyResourceOp::Compute(OpKernelContext* ctx) {
   const ResourceHandle& p = HandleFromInput(ctx, 0);
-  Status status = DeleteResource(ctx, p);
+  absl::Status status = DeleteResource(ctx, p);
   if (ignore_lookup_error_ && errors::IsNotFound(status)) {
     return;
   }
@@ -568,6 +575,8 @@ TF_CALL_float8_e5m2(REGISTER_KERNELS);
 TF_CALL_float8_e4m3fn(REGISTER_KERNELS);
 TF_CALL_int4(REGISTER_KERNELS);
 TF_CALL_uint4(REGISTER_KERNELS);
+TF_CALL_int2(REGISTER_KERNELS);
+TF_CALL_uint2(REGISTER_KERNELS);
 #undef REGISTER_KERNELS
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
@@ -584,6 +593,8 @@ TF_CALL_float8_e5m2(REGISTER_GPU_KERNELS);
 TF_CALL_float8_e4m3fn(REGISTER_GPU_KERNELS);
 TF_CALL_int4(REGISTER_GPU_KERNELS);
 TF_CALL_uint4(REGISTER_GPU_KERNELS);
+TF_CALL_int2(REGISTER_GPU_KERNELS);
+TF_CALL_uint2(REGISTER_GPU_KERNELS);
 #undef REGISTER_GPU_KERNELS
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
@@ -598,6 +609,8 @@ TF_CALL_ALL_TYPES(REGISTER_KERNELS);
 TF_CALL_QUANTIZED_TYPES(REGISTER_KERNELS);
 TF_CALL_int4(REGISTER_KERNELS);
 TF_CALL_uint4(REGISTER_KERNELS);
+TF_CALL_int2(REGISTER_KERNELS);
+TF_CALL_uint2(REGISTER_KERNELS);
 #undef REGISTER_KERNELS
 
 template <typename Device, typename T, DenseUpdateType Op>
@@ -688,7 +701,8 @@ class VarIsInitializedOp : public OpKernel {
                    context->allocate_output(0, TensorShape({}), &output));
     auto output_tensor = output->tensor<bool, 0>();
     core::RefCountPtr<Var> variable;
-    Status s = LookupResource(context, HandleFromInput(context, 0), &variable);
+    absl::Status s =
+        LookupResource(context, HandleFromInput(context, 0), &variable);
     if (!s.ok()) {
       output_tensor() = false;
       return;
@@ -973,12 +987,14 @@ bool ValidateInput<Variant>(const Tensor& updates) {
 }
 
 template <typename Device, typename T, typename Index, scatter_op::UpdateOp op>
-Status DoScatter(OpKernelContext* c, Tensor* params, const Tensor& indices,
-                 const Tensor& updates, Index num_indices);
+absl::Status DoScatter(OpKernelContext* c, Tensor* params,
+                       const Tensor& indices, const Tensor& updates,
+                       Index num_indices);
 
 template <typename T, typename Index, scatter_op::UpdateOp Op>
-Status DoScatterOnCpu(OpKernelContext* c, Tensor* params, const Tensor& indices,
-                      const Tensor& updates, Index num_indices);
+absl::Status DoScatterOnCpu(OpKernelContext* c, Tensor* params,
+                            const Tensor& indices, const Tensor& updates,
+                            Index num_indices);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
@@ -1046,8 +1062,9 @@ Status DoScatterOnCpu(OpKernelContext* c, Tensor* params, const Tensor& indices,
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
 template <typename Device, typename T, typename Index, scatter_op::UpdateOp op>
-Status DoScatter(OpKernelContext* c, Tensor* params, const Tensor& indices,
-                 const Tensor& updates, Index num_indices) {
+absl::Status DoScatter(OpKernelContext* c, Tensor* params,
+                       const Tensor& indices, const Tensor& updates,
+                       Index num_indices) {
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
   if (std::is_same<Device, GPUDevice>::value &&
       tensorflow::OpDeterminismRequired() && !DisableScatterOpDeterminism()) {
@@ -1107,7 +1124,7 @@ class ResourceScatterUpdateOp : public OpKernel {
   explicit ResourceScatterUpdateOp(OpKernelConstruction* c) : OpKernel(c) {
     // We use the same kernel for many operations.
     // Each operation has a different set of attributes defined in its nodes.
-    Status s = c->GetAttr("use_locking", &use_exclusive_lock_);
+    absl::Status s = c->GetAttr("use_locking", &use_exclusive_lock_);
     if (!s.ok()) {
       use_exclusive_lock_ = false;
     }

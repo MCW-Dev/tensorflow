@@ -16,7 +16,6 @@ limitations under the License.
 #include "xla/stream_executor/platform_manager.h"
 
 #include <functional>
-#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -217,7 +216,7 @@ absl::StatusOr<Platform*> PlatformManagerImpl::LookupByIdLocked(
 }
 
 PlatformManagerImpl& Impl() {
-  static PlatformManagerImpl* impl = new PlatformManagerImpl;
+  static PlatformManagerImpl* const impl = new PlatformManagerImpl;
   return *impl;
 }
 

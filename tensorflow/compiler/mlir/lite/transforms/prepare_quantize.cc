@@ -22,6 +22,8 @@ limitations under the License.
 #include <utility>
 
 #include "absl/memory/memory.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_split.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -30,8 +32,8 @@ limitations under the License.
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/Quant/QuantOps.h"  // from @llvm-project
-#include "mlir/Dialect/Quant/QuantTypes.h"  // from @llvm-project
+#include "mlir/Dialect/Quant/IR/Quant.h"  // from @llvm-project
+#include "mlir/Dialect/Quant/IR/QuantTypes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
@@ -43,12 +45,13 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"
+#include "tensorflow/compiler/mlir/lite/quantization/common/quantization_lib/quantization_config.h"
+#include "tensorflow/compiler/mlir/lite/quantization/common/quantization_lib/quantization_utils.h"
+#include "tensorflow/compiler/mlir/lite/quantization/common/quantization_lib/tfl_quantization_driver.h"
 #include "tensorflow/compiler/mlir/lite/quantization/ir/QuantOps.h"
 #include "tensorflow/compiler/mlir/lite/quantization/lite/tfl_to_std.h"
 #include "tensorflow/compiler/mlir/lite/transforms/passes.h"
 #include "tensorflow/compiler/mlir/lite/transforms/prepare_quantize_helper.h"
-#include "tensorflow/compiler/mlir/quantization/common/quantization_lib/quantization_config.h"
-#include "tensorflow/compiler/mlir/quantization/common/quantization_lib/quantization_driver.h"
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/lib/monitoring/counter.h"
 
@@ -81,7 +84,7 @@ class PrepareQuantizePass
   explicit PrepareQuantizePass() : use_quantization_flags_(true) {}
 
   // Constructor used by manually creating the pass.
-  explicit PrepareQuantizePass(const quant::QuantizationSpecs& quant_specs)
+  explicit PrepareQuantizePass(const QuantizationSpecs& quant_specs)
       : use_quantization_flags_(false), quant_specs_(quant_specs) {}
 
   void runOnOperation() override;
@@ -130,7 +133,7 @@ class PrepareQuantizePass
   bool ContainsQuantizeOps(func::FuncOp func);
 
   bool use_quantization_flags_;
-  quant::QuantizationSpecs quant_specs_;
+  QuantizationSpecs quant_specs_;
 };
 
 bool PrepareQuantizePass::SetInputNodesQuantizationParams(func::FuncOp func) {
@@ -191,7 +194,7 @@ bool PrepareQuantizePass::SetInputNodesQuantizationParams(func::FuncOp func) {
         // The input min/max or mean/std are not specified, then skip.
         if (!min_max.first.has_value() || !min_max.second.has_value()) return;
 
-        TypeAttr params = quant::GetQuantizedTypeAttr(
+        TypeAttr params = GetQuantizedTypeAttr(
             builder, input_type, builder.getF64FloatAttr(min_max.first.value()),
             builder.getF64FloatAttr(min_max.second.value()),
             /*quant_dim=*/-1, num_bits, narrow_range, is_signed);
@@ -322,8 +325,7 @@ bool PrepareQuantizePass::ContainsQuantizeOps(func::FuncOp func) {
 }
 
 using PrepareQuantStats =
-    quant::ConvertStatsToQDQs<quantfork::QuantizeCastOp,
-                              quantfork::DequantizeCastOp>;
+    ConvertStatsToQDQs<quantfork::QuantizeCastOp, quantfork::DequantizeCastOp>;
 
 void PrepareQuantizePass::runOnOperation() {
   func::FuncOp func = getOperation();
@@ -342,6 +344,28 @@ void PrepareQuantizePass::runOnOperation() {
     quant_specs_.legacy_float_scale = legacy_float_scale_;
     quant_specs_.disable_set_input_nodes_quantization_params =
         disable_set_input_nodes_quantization_params_;
+    quant_specs_.qdq_conversion_mode =
+        GetQDQQuantModeFromString(qdq_conversion_mode_);
+
+    for (const auto& ir : input_ranges_) {
+      std::pair<std::string, std::string> input_range = absl::StrSplit(ir, '|');
+      std::optional<double> optional_min;
+      std::optional<double> optional_max;
+
+      if (!input_range.first.empty()) {
+        double min;
+        (void)absl::SimpleAtod(input_range.first, &min);
+        optional_min = min;
+      }
+
+      if (!input_range.second.empty()) {
+        double max;
+        (void)absl::SimpleAtod(input_range.second, &max);
+        optional_max = max;
+      }
+
+      quant_specs_.input_ranges.emplace_back(optional_min, optional_max);
+    }
   }
 
   if (quant_specs_.post_training_quantization) {
@@ -379,18 +403,17 @@ void PrepareQuantizePass::runOnOperation() {
     patterns_1.add<PrepareLstmOutputScale<LSTMOp>>(ctx);
     patterns_1.add<PrepareLstmOutputScale<UnidirectionalSequenceLSTMOp>>(ctx);
   }
-  if (is_qdq_conversion_ ||
-      quant_specs_.qdq_conversion_mode != quant::QDQConversionMode::kQDQNone) {
-    patterns_1.add<PropagateTransposedPerAxisQuantDim>(ctx);
+  if (quant_specs_.qdq_conversion_mode != QDQConversionMode::kQDQNone) {
+    patterns_1.add<PropagateReshapedPerAxisQuantDim,
+                   PropagateTransposedPerAxisQuantDim>(ctx);
   }
-  (void)applyPatternsAndFoldGreedily(func, std::move(patterns_1));
+  (void)applyPatternsGreedily(func, std::move(patterns_1));
 
   // During the legalization, unsigned quantized type is used, so we have to
   // convert all of them to signed.
   RewritePatternSet patterns_2(&getContext());
   if (is_signed) {
-    patterns_2.add<quant::ConvertUnsignedToSigned<quantfork::QuantizeCastOp>>(
-        ctx);
+    patterns_2.add<ConvertUnsignedToSigned<quantfork::QuantizeCastOp>>(ctx);
   }
   // Convert quant stats to int8, unit8, int16 quantization parameters.
   // Currently, only activation stats are imported, so narrow_range = false.
@@ -406,32 +429,30 @@ void PrepareQuantizePass::runOnOperation() {
         ctx, quant_specs_);
     patterns_2.add<ConvertSvdfStatsToQDQs>(ctx, quant_specs_);
   }
-  (void)applyPatternsAndFoldGreedily(func, std::move(patterns_2));
+  (void)applyPatternsGreedily(func, std::move(patterns_2));
 
   SanityCheckAndAdjustment(func);
 
   // Bind the getter with the fixed configuration parameter for the correct
   // quantization settings of the ops.
-  std::function<std::unique_ptr<quant::OpQuantSpec>(Operation*)>
-      op_quant_spec_getter =
-          std::bind(GetOpQuantSpec, std::placeholders::_1,
-                    quant_specs_.disable_per_channel_for_dense_layers);
+  std::function<std::unique_ptr<OpQuantSpec>(Operation*)> op_quant_spec_getter =
+      std::bind(GetOpQuantSpec, std::placeholders::_1,
+                quant_specs_.disable_per_channel_for_dense_layers);
 
   // Finally, the quantization parameters can be propagated to the rest of the
   // values (tensors).
-  ApplyQuantizationParamsPropagation(
+  temp::ApplyQuantizationParamsPropagation(
       func, is_signed, bit_width,
       disable_per_channel_ || quant_specs_.disable_per_channel,
       op_quant_spec_getter, infer_tensor_range, quant_specs_.legacy_float_scale,
-      (is_qdq_conversion_ ||
-       quant_specs_.qdq_conversion_mode != quant::QDQConversionMode::kQDQNone));
+      quant_specs_.qdq_conversion_mode);
 }
 
 }  // namespace
 
 // Creates an instance of the TensorFlow Lite dialect PrepareQuantize pass.
 std::unique_ptr<OperationPass<func::FuncOp>> CreatePrepareQuantizePass(
-    const quant::QuantizationSpecs& quant_specs) {
+    const QuantizationSpecs& quant_specs) {
   return std::make_unique<PrepareQuantizePass>(quant_specs);
 }
 

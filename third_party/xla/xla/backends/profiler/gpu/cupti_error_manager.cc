@@ -18,12 +18,11 @@ limitations under the License.
 #include <utility>
 
 #include "absl/debugging/leak_check.h"
+#include "absl/synchronization/mutex.h"
 #include "tsl/platform/logging.h"
 
 namespace xla {
 namespace profiler {
-
-using tsl::mutex_lock;
 
 CuptiErrorManager::CuptiErrorManager(std::unique_ptr<CuptiInterface> interface)
     : interface_(std::move(interface)), disabled_(0), undo_disabled_(false) {}
@@ -51,7 +50,7 @@ CuptiErrorManager::CuptiErrorManager(std::unique_ptr<CuptiInterface> interface)
 
 void CuptiErrorManager::RegisterUndoFunction(
     const CuptiErrorManager::UndoFunction& func) {
-  mutex_lock lock(undo_stack_mu_);
+  absl::MutexLock lock(&undo_stack_mu_);
   undo_stack_.push_back(func);
 }
 
@@ -88,6 +87,7 @@ CUptiResult CuptiErrorManager::ActivityGetNextRecord(
   CUptiResult error = interface_->ActivityGetNextRecord(
       buffer, valid_buffer_size_bytes, record);
   ALLOW_ERROR(error, CUPTI_ERROR_MAX_LIMIT_REACHED);
+  ALLOW_ERROR(error, CUPTI_ERROR_INVALID_KIND);
   LOG_AND_DISABLE_IF_ERROR(error);
   return error;
 }
@@ -131,6 +131,13 @@ CUptiResult CuptiErrorManager::ActivityUsePerThreadBuffer() {
   return error;
 }
 
+CUptiResult CuptiErrorManager::SetActivityFlushPeriod(uint32_t period_ms) {
+  IGNORE_CALL_IF_DISABLED;
+  CUptiResult error = interface_->SetActivityFlushPeriod(period_ms);
+  LOG_AND_DISABLE_IF_ERROR(error);
+  return error;
+};
+
 CUptiResult CuptiErrorManager::GetDeviceId(CUcontext context,
                                            uint32_t* device_id) {
   IGNORE_CALL_IF_DISABLED;
@@ -167,6 +174,10 @@ CUptiResult CuptiErrorManager::EnableCallback(uint32_t enable,
                          0 /* DISABLE */, subscriber, domain, callback_id);
       RegisterUndoFunction(f);
     }
+  } else {
+    LOG(ERROR) << "cupti" << __func__
+               << ": error with domain:" << static_cast<int>(domain)
+               << " and callback_id:" << static_cast<int>(callback_id);
   }
   LOG_AND_DISABLE_IF_ERROR(error);
   return error;
@@ -215,7 +226,7 @@ void CuptiErrorManager::UndoAndDisable() {
     return;
   }
   // Iterates undo log and call undo APIs one by one.
-  mutex_lock lock(undo_stack_mu_);
+  absl::MutexLock lock(&undo_stack_mu_);
   undo_disabled_ = true;
   while (!undo_stack_.empty()) {
     LOG(ERROR) << "CuptiErrorManager is disabling profiling automatically.";
@@ -267,11 +278,19 @@ CUptiResult CuptiErrorManager::GetGraphExecId(CUgraphExec graph_exec,
   return error;
 }
 
+CUptiResult CuptiErrorManager::SetThreadIdType(
+    CUpti_ActivityThreadIdType type) {
+  IGNORE_CALL_IF_DISABLED;
+  CUptiResult error = interface_->SetThreadIdType(type);
+  LOG_AND_DISABLE_IF_ERROR(error);
+  return error;
+}
+
 void CuptiErrorManager::CleanUp() {
   if (undo_disabled_) {  // prevent deadlock
     return;
   }
-  mutex_lock lock(undo_stack_mu_);
+  absl::MutexLock lock(&undo_stack_mu_);
   undo_disabled_ = true;
   while (!undo_stack_.empty()) {
     undo_stack_.pop_back();

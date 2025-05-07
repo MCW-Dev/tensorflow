@@ -22,11 +22,13 @@ limitations under the License.
 #include <string_view>
 #include <utility>
 
-#include "tsl/platform/macros.h"
+#include "absl/strings/string_view.h"
+#include "xla/tsl/platform/macros.h"
+#include "tsl/platform/platform.h"  // IWYU pragma: keep
 #include "tsl/profiler/lib/nvtx_utils.h"
 
 #if !defined(IS_MOBILE_PLATFORM)
-#include "tsl/profiler/backends/cpu/annotation_stack.h"
+#include "xla/tsl/profiler/backends/cpu/annotation_stack.h"
 #endif
 
 namespace tsl::profiler {
@@ -43,7 +45,8 @@ void PushAnnotation(const T& generator) {
 
 #if !defined(IS_MOBILE_PLATFORM)
   if (TF_PREDICT_FALSE(AnnotationStack::IsEnabled())) {
-    AnnotationStack::PushAnnotation(static_cast<std::string_view>(generator()));
+    AnnotationStack::PushAnnotation(
+        static_cast<absl::string_view>(generator()));
   }
 #endif
 }

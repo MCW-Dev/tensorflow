@@ -14,9 +14,10 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/compiler/mlir/lite/stablehlo/transforms/tfl_stablehlo_pass.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "flatbuffers/flatbuffers.h"  // from @flatbuffers
@@ -148,6 +149,7 @@ class TflToStablehloPass
         case flexbuffers::FBT_VECTOR_INT: {
           const auto& vector = value.AsTypedVector();
           std::vector<int64_t> vec;
+          vec.reserve(vector.size());
           for (size_t i = 0; i < vector.size(); i++) {
             vec.push_back(vector[i].AsInt64());
           }

@@ -15,14 +15,23 @@ limitations under the License.
 
 #include "xla/service/spmd/canonicalize_all_gather_for_cse.h"
 
-#include "xla/hlo/ir/hlo_opcode.h"
+#include <cstdint>
+#include <memory>
+#include <utility>
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
+#include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/hlo/ir/hlo_module.h"
+#include "xla/hlo/pass/hlo_pass_pipeline.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/hlo/utils/hlo_matchers.h"
-#include "xla/service/hlo_parser.h"
-#include "xla/service/hlo_pass_pipeline.h"
-#include "xla/service/hlo_verifier.h"
-#include "xla/tests/hlo_test_base.h"
+#include "xla/tsl/platform/errors.h"
+#include "xla/tsl/platform/statusor.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/lib/core/status_test_util.h"
 
 namespace xla {
 namespace spmd {
@@ -32,7 +41,7 @@ using ::testing::_;
 using ::testing::AllOf;
 namespace op = xla::testing::opcode_matchers;
 
-class AllGatherCanonicalizeTest : public HloTestBase {
+class AllGatherCanonicalizeTest : public HloHardwareIndependentTestBase {
  public:
   absl::StatusOr<std::unique_ptr<HloModule>> RunPass(
       absl::string_view hlo_module) {

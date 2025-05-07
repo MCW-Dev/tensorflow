@@ -195,6 +195,7 @@ TfLiteRegistration* Register_STABLEHLO_REDUCE_WINDOW();
 TfLiteRegistration* Register_STABLEHLO_MAXIMUM();
 TfLiteRegistration* Register_STABLEHLO_MINIMUM();
 TfLiteRegistration* Register_STABLEHLO_PAD();
+TfLiteRegistration* Register_STABLEHLO_COMPOSITE();
 
 namespace {
 
@@ -374,10 +375,10 @@ BuiltinRefOpResolver::BuiltinRefOpResolver() {
              /* max_version = */ 2);
   AddBuiltin(BuiltinOperator_CAST, Register_CAST(),
              /* min_version = */ 1,
-             /* max_version = */ 4);
+             /* max_version = */ 7);
   AddBuiltin(BuiltinOperator_DEQUANTIZE, Register_DEQUANTIZE_REF(),
              /* min_version = */ 1,
-             /* max_version = */ 4);
+             /* max_version = */ 6);
   AddBuiltin(BuiltinOperator_PRELU, Register_PRELU_REF());
   AddBuiltin(BuiltinOperator_MAXIMUM, Register_MAXIMUM_REF(),
              /* min_version = */ 1,
@@ -499,7 +500,7 @@ BuiltinRefOpResolver::BuiltinRefOpResolver() {
   AddBuiltin(BuiltinOperator_MATRIX_DIAG, Register_MATRIX_DIAG());
   AddBuiltin(BuiltinOperator_QUANTIZE, Register_QUANTIZE_REF(),
              /* min_version = */ 1,
-             /* max_version = */ 2);
+             /* max_version = */ 3);
   AddBuiltin(BuiltinOperator_MATRIX_SET_DIAG, Register_MATRIX_SET_DIAG());
   AddBuiltin(BuiltinOperator_IF, Register_IF());
   AddBuiltin(BuiltinOperator_WHILE, Register_WHILE());
@@ -560,6 +561,8 @@ BuiltinRefOpResolver::BuiltinRefOpResolver() {
              Register_STABLEHLO_REDUCE_WINDOW());
   AddBuiltin(BuiltinOperator_STABLEHLO_GATHER, Register_STABLEHLO_GATHER());
   AddBuiltin(BuiltinOperator_STABLEHLO_PAD, Register_STABLEHLO_PAD());
+  AddBuiltin(BuiltinOperator_STABLEHLO_COMPOSITE,
+             Register_STABLEHLO_COMPOSITE());
   AddCustom("NumericVerify",
             tflite::ops::custom::Register_NUMERIC_VERIFY_REF());
   // TODO(andrewharp, ahentz): Move these somewhere more appropriate so that

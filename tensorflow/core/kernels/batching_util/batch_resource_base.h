@@ -20,12 +20,16 @@ limitations under the License.
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
 #include "absl/synchronization/blocking_counter.h"
+#include "absl/time/time.h"
+#include "xla/tsl/platform/criticality.h"
 #include "tensorflow/core/common_runtime/cost_measurement_registry.h"
 #include "tensorflow/core/common_runtime/request_cost.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -34,13 +38,13 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/kernels/batching_util/adaptive_shared_batch_scheduler.h"
 #include "tensorflow/core/kernels/batching_util/batch_scheduler.h"
+#include "tensorflow/core/kernels/batching_util/batch_scheduler_utils.h"
 #include "tensorflow/core/kernels/batching_util/shared_batch_scheduler.h"
 #include "tensorflow/core/kernels/batching_util/threadsafe_status.h"
 #include "tensorflow/core/platform/context.h"
 #include "tensorflow/core/platform/status.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/protobuf/config.pb.h"
-#include "tsl/platform/criticality.h"
 
 namespace tensorflow {
 namespace serving {
@@ -52,6 +56,7 @@ struct BatchResourceOptions {
   int32_t batch_timeout_micros;
   int32_t max_enqueued_batches;
   std::vector<int32_t> allowed_batch_sizes;
+  std::string batch_padding_policy{kPadUpPolicy};
   int32_t low_priority_max_batch_size;
   int32_t low_priority_batch_timeout_micros;
   int32_t low_priority_max_enqueued_batches;
@@ -64,7 +69,7 @@ struct BatchResourceOptions {
 class BatchResourceBase : public ResourceBase {
  public:
   // Given a BatchTask (from one op invocation) with 'num_outputs'== M and
-  // splitted into N sub tasks, TensorMatrix is a N X M matrix.
+  // split into N sub tasks, TensorMatrix is a N X M matrix.
   // Namely, TensorMatrix[i][j] indicates the i-th split tensor of j-th output;
   // concatenating tensors along the 2nd dimension gives a output tensor.
   typedef std::vector<std::vector<Tensor>> TensorMatrix;
@@ -79,7 +84,7 @@ class BatchResourceBase : public ResourceBase {
   // Note input from one batch-op invocation is valid and considered a
   // specialized `slice`.
   struct BatchTask : public tensorflow::serving::BatchTask {
-    BatchTask() : criticality_val(tsl::criticality::GetCriticality()){};
+    BatchTask() : criticality_val(tsl::criticality::GetCriticality()) {};
 
     // A unique ID to identify this invocation of Batch.
     int64_t guid;
@@ -213,6 +218,7 @@ class BatchResourceBase : public ResourceBase {
       int32_t batch_timeout_micros, int32_t max_enqueued_batches,
       const std::vector<int32>& allowed_batch_sizes,
       bool enable_large_batch_splitting, bool disable_padding,
+      absl::string_view batch_padding_policy,
       int32_t low_priority_max_batch_size,
       int32_t low_priority_batch_timeout_micros,
       int32_t low_priority_max_enqueued_batches,
@@ -269,6 +275,14 @@ class BatchResourceBase : public ResourceBase {
       const std::vector<std::unique_ptr<CostMeasurement>>&
           batch_cost_measurements,
       int64_t processed_size, BatchT& batch);
+
+  // Records information about the delay between a task being registered and
+  // that task being scheduled into a batch.
+  static void RecordBatchDelayMetrics(
+      const BatchResourceBase::BatchT& batch, const std::string& model_name,
+      const std::string& op_name, int64_t processed_size,
+      absl::Time batch_schedule_time,
+      std::optional<absl::Duration> batch_timeout);
 
  private:
   // Implementation of calling the process batch function.
@@ -332,10 +346,19 @@ class BatchResourceBase : public ResourceBase {
   static Status EmitIndexTensor(OpKernelContext* context, const BatchT& batch,
                                 int output_index);
 
-  // Looks up the batcher queue for 'queue_name'. If it did't previously exist,
+  // Looks up the batcher queue for 'queue_name'. If it didn't previously exist,
   // creates it.
+  //
+  // The model_name and op_name are the names of the current model and
+  // operation, respectively.
   Status LookupOrCreateBatcherQueue(const string& queue_name,
+                                    const string& model_name,
+                                    const string& op_name,
                                     BatcherQueueT** queue);
+
+  // Returns the batch timeout for the configured scheduler, or nullopt if the
+  // scheduler does not have such a parameter.
+  std::optional<absl::Duration> GetBatchTimeout() const;
 
   SessionMetadata session_metadata_;
 

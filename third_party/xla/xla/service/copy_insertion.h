@@ -16,11 +16,19 @@ limitations under the License.
 #ifndef XLA_SERVICE_COPY_INSERTION_H_
 #define XLA_SERVICE_COPY_INSERTION_H_
 
+#include <cstdint>
+
+#include "absl/container/flat_hash_set.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
+#include "xla/hlo/analysis/hlo_alias_analysis.h"
+#include "xla/hlo/analysis/hlo_dataflow_analysis.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
-#include "xla/service/hlo_alias_analysis.h"
-#include "xla/service/hlo_pass_interface.h"
+#include "xla/hlo/pass/hlo_pass_interface.h"
+#include "xla/service/call_graph.h"
 
 namespace xla {
 
@@ -74,7 +82,8 @@ class CopyInsertion : public HloModulePass {
   // in all the existing aliased buffers.
   absl::Status RemoveUnnecessaryCopies(
       HloModule* module, bool check_live_range_ordering = false,
-      const absl::flat_hash_set<absl::string_view>& execution_threads = {});
+      const absl::flat_hash_set<absl::string_view>& execution_threads = {},
+      bool insert_post_scheduling_control_dependencies = false);
 
   // Add copies to address special constraints on the roots of computations not
   // related to live range interference:
@@ -100,6 +109,10 @@ class CopyInsertion : public HloModulePass {
   // Add copies for conditional instructions.
   virtual absl::Status AddCopiesForConditional(
       const HloAliasAnalysis& alias_analysis, HloInstruction* conditional);
+
+  // Adds copies for transitioning into and out of non-copyable values.
+  absl::Status AddCopiesForNonCopyableTransitions(
+      const HloAliasAnalysis& alias_analysis, HloInstruction* chain_start);
 
   // Backend specific function that decides whether an instruction can share
   // buffer with its operand.

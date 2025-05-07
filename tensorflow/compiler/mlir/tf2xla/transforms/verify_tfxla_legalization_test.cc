@@ -13,11 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cstdint>
 #include <memory>
 #include <string>
-#include <vector>
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/strings/string_view.h"
 #include "llvm/ADT/StringRef.h"
@@ -28,9 +27,9 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/tensorflow/utils/serialize_mlir_module_utils.h"
 #include "tensorflow/compiler/mlir/tf2xla/transforms/passes.h"
 #include "tensorflow/compiler/mlir/tf2xla/transforms/test_utils.h"
+#include "xla/tsl/platform/statusor.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/monitoring/cell_reader.h"
-#include "tsl/platform/statusor.h"
 
 namespace tensorflow {
 namespace {
@@ -38,7 +37,7 @@ namespace {
 using ::mlir::MLIRContext;
 using ::mlir::ModuleOp;
 using ::mlir::OwningOpRef;
-using ::mlir::mhlo::test::GetMlirModuleFromString;
+using ::mlir::hlo::test::GetMlirModuleFromString;
 using ::tensorflow::monitoring::testing::CellReader;
 
 static constexpr char kFailedLegalizationStreamz[] =
@@ -56,7 +55,7 @@ class VerifyTfxlaLegalizationTest : public ::testing::Test {
 
     pm_ = std::make_unique<mlir::PassManager>(&context_);
     pm_->addNestedPass<mlir::func::FuncOp>(
-        mlir::mhlo::CreateVerifyTFXLALegalizationPass(/*legalize_chlo=*/false));
+        mlir::hlo::CreateVerifyTFXLALegalizationPass(/*legalize_chlo=*/false));
   }
   mlir::LogicalResult Run() { return pm_->run(module_.get()); }
 

@@ -19,7 +19,7 @@ limitations under the License.
 #include <utility>
 
 #include "xla/hlo/ir/hlo_instruction.h"
-#include "xla/tests/hlo_test_base.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 
 namespace xla {
 namespace {
@@ -31,13 +31,13 @@ constexpr absl::string_view kModuleStr =
     %rhs = f32[] parameter(1)
     ROOT %greater-than-or-equal-to = pred[] compare(f32[] %lhs, f32[] %rhs), direction=GE, type=TOTALORDER
   }
-  
+
   %add_F32.v3 (lhs.1: f32[], rhs.1: f32[]) -> f32[] {
     %lhs.1 = f32[] parameter(0)
     %rhs.1 = f32[] parameter(1)
     ROOT %add = f32[] add(f32[] %lhs.1, f32[] %rhs.1)
   }
-  
+
   ENTRY %R4F32OverlapSmall.v4 () -> f32[4,5,1,1] {
     %constant = f32[4,5,1,1]{3,2,1,0} constant({ { /*i0=0*/ { /*i1=0*/ {7} }, { /*i1=1*/ {2} }, { /*i1=2*/ {5} }, { /*i1=3*/ {3} }, { /*i1=4*/ {8} } }, { /*i0=1*/ { /*i1=0*/ {3} }, { /*i1=1*/ {8} }, { /*i1=2*/ {9} }, { /*i1=3*/ {3} }, { /*i1=4*/ {4} } }, { /*i0=2*/ { /*i1=0*/ {1} }, { /*i1=1*/ {5} }, { /*i1=2*/ {7} }, { /*i1=3*/ {5} }, { /*i1=4*/ {6} } }, { /*i0=3*/ { /*i1=0*/ {0} }, { /*i1=1*/ {6} }, { /*i1=2*/ {2} }, { /*i1=3*/ {10} }, { /*i1=4*/ {2} } } })
     %constant.1 = f32[2,2,1,1]{3,2,1,0} constant({ { /*i0=0*/ { /*i1=0*/ {2} }, { /*i1=1*/ {6} } }, { /*i0=1*/ { /*i1=0*/ {3} }, { /*i1=1*/ {1} } } })
@@ -45,7 +45,7 @@ constexpr absl::string_view kModuleStr =
     ROOT %select-and-scatter = f32[4,5,1,1]{3,2,1,0} select-and-scatter(f32[4,5,1,1]{3,2,1,0} %constant, f32[2,2,1,1]{3,2,1,0} %constant.1, f32[] %constant.2), window={size=2x3x1x1 stride=2x2x1x1}, select=%ge_F32.v3, scatter=%add_F32.v3
   })";
 
-class SelectAndScatterExpanderTest : public HloTestBase {
+class SelectAndScatterExpanderTest : public HloHardwareIndependentTestBase {
  protected:
   // The HLO parser changes all no layout shapes from the input to have a
   // default layout. Clear the layout of the scatter operand for testing.

@@ -15,22 +15,30 @@ limitations under the License.
 
 #include "xla/client/client.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
-#include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/status/status.h"
-#include "absl/strings/str_cat.h"
-#include "xla/client/xla_computation.h"
-#include "xla/debug_options_flags.h"
+#include "absl/status/statusor.h"
+#include "absl/types/span.h"
 #include "xla/execution_options_util.h"
+#include "xla/hlo/builder/xla_computation.h"
+#include "xla/layout.h"
 #include "xla/literal.h"
+#include "xla/service/hlo.pb.h"
+#include "xla/service/service.h"
+#include "xla/shape.h"
+#include "xla/shape_util.h"
 #include "xla/status_macros.h"
-#include "xla/types.h"
-#include "tsl/platform/errors.h"
-#include "tsl/platform/logging.h"
+#include "xla/tsl/platform/logging.h"
+#include "xla/tsl/platform/statusor.h"
+#include "xla/util.h"
+#include "xla/xla.pb.h"
+#include "xla/xla_data.pb.h"
 #include "tsl/platform/protobuf.h"
 
 namespace xla {
@@ -74,8 +82,9 @@ absl::StatusOr<Literal> Client::ExecuteAndTransfer(
 
   std::optional<Shape> shape_with_output_layout;
   if (execution_options && execution_options->has_shape_with_output_layout()) {
-    shape_with_output_layout =
-        Shape(execution_options->shape_with_output_layout());
+    TF_ASSIGN_OR_RETURN(
+        shape_with_output_layout,
+        Shape::FromProto(execution_options->shape_with_output_layout()));
   }
   return Transfer(*data, shape_with_output_layout.has_value()
                              ? &(*shape_with_output_layout)

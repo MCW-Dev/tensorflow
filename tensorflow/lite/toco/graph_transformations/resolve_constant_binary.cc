@@ -14,16 +14,19 @@ limitations under the License.
 ==============================================================================*/
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <memory>
-#include <string>
-#include <unordered_map>
 #include <vector>
 
+#include "absl/log/check.h"
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "tensorflow/core/platform/logging.h"
+#include "tensorflow/core/platform/status.h"
 #include "tensorflow/lite/toco/graph_transformations/graph_transformations.h"
 #include "tensorflow/lite/toco/model.h"
 #include "tensorflow/lite/toco/runtime/types.h"
 #include "tensorflow/lite/toco/tooling_util.h"
-#include "tensorflow/core/platform/logging.h"
 
 namespace toco {
 
@@ -188,9 +191,9 @@ bool EvaluateBinaryOperatorOnConstantInputs(Model* model,
 }
 }  // namespace
 
-::tensorflow::Status ResolveConstantBinaryOperator::Run(Model* model,
-                                                        std::size_t op_index,
-                                                        bool* modified) {
+absl::Status ResolveConstantBinaryOperator::Run(Model* model,
+                                                std::size_t op_index,
+                                                bool* modified) {
   *modified = false;
   const auto binary_it = model->operators.begin() + op_index;
   const auto* binary_op = binary_it->get();

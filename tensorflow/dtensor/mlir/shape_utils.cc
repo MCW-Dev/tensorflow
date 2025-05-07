@@ -15,22 +15,44 @@ limitations under the License.
 
 #include "tensorflow/dtensor/mlir/shape_utils.h"
 
+#include <cassert>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
+#include "absl/status/status.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/LogicalResult.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
+#include "mlir/IR/Attributes.h"  // from @llvm-project
 #include "mlir/IR/Builders.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "mlir/IR/BuiltinTypeInterfaces.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
 #include "mlir/IR/Location.h"  // from @llvm-project
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
+#include "mlir/IR/Matchers.h"  // from @llvm-project
 #include "mlir/IR/OperationSupport.h"  // from @llvm-project
+#include "mlir/IR/TypeUtilities.h"  // from @llvm-project
 #include "mlir/IR/Value.h"  // from @llvm-project
+#include "mlir/Interfaces/DerivedAttributeOpInterface.h"  // from @llvm-project
+#include "mlir/Interfaces/InferTypeOpInterface.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
+#include "mlir/Support/LogicalResult.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_attributes.h"
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_types.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/shape_inference_utils.h"
+#include "tensorflow/core/framework/shape_inference.h"
+#include "tensorflow/core/platform/errors.h"
+#include "tensorflow/core/platform/status.h"
 #include "tensorflow/core/public/version.h"
 #include "tensorflow/dtensor/cc/constants.h"
+#include "tensorflow/dtensor/cc/dstatus.h"
 #include "tensorflow/dtensor/cc/tensor_layout.h"
 #include "tensorflow/dtensor/mlir/ir/tf_dtensor.h"
 #include "tensorflow/dtensor/mlir/value_utils.h"
@@ -51,7 +73,7 @@ StatusOr<llvm::ArrayRef<int64_t>> ExtractGlobalInputShape(
         return errors::Internal("global_shape does not have static rank");
       return *global_shape;
     }
-    return ExtractGlobalOutputShape(input_value.get().cast<mlir::OpResult>());
+    return ExtractGlobalOutputShape(cast<mlir::OpResult>(input_value.get()));
   }
 
   // If we reach this point, we're working with a function argument.
@@ -63,7 +85,7 @@ StatusOr<llvm::ArrayRef<int64_t>> ExtractGlobalInputShape(
                       operand_index, op->getName())
             .str());
 
-  auto block_arg = input_value.get().dyn_cast<mlir::BlockArgument>();
+  auto block_arg = mlir::dyn_cast<mlir::BlockArgument>(input_value.get());
   auto global_shape_attr =
       enclosing_function.getArgAttrOfType<mlir::TF::ShapeAttr>(
           block_arg.getArgNumber(), kGlobalShapeDialectAttr);
@@ -105,7 +127,7 @@ StatusOr<llvm::ArrayRef<int64_t>> ExtractGlobalOutputShape(
             .str());
 
   auto shape_attr = global_shape_attr[output_index];
-  return shape_attr.cast<mlir::TF::ShapeAttr>().getShape();
+  return llvm::cast<mlir::tf_type::ShapeAttr>(shape_attr).getShape();
 }
 
 namespace {
@@ -145,7 +167,7 @@ mlir::LogicalResult InferShapeOfTFOpWithCustomOperandConstantFn(
     for (const auto& inferred_return_type :
          llvm::enumerate(inferred_return_types)) {
       if (auto shaped_type =
-              inferred_return_type.value().dyn_cast<mlir::ShapedType>()) {
+              llvm::dyn_cast<mlir::ShapedType>(inferred_return_type.value())) {
         if (shaped_type.hasRank()) {
           inferred_return_shapes[inferred_return_type.index()] =
               mlir::ShapedTypeComponents(shaped_type.getShape(),
@@ -185,14 +207,14 @@ mlir::LogicalResult InferShapeOfTFOpWithCustomOperandConstantFn(
   auto op_result_as_shape_fn =
       [](shape_inference::InferenceContext& ic,
          mlir::OpResult op_result) -> shape_inference::ShapeHandle {
-    auto rt = op_result.getType().dyn_cast<mlir::RankedTensorType>();
+    auto rt = llvm::dyn_cast<mlir::RankedTensorType>(op_result.getType());
     if (!rt || rt.getRank() != 1 || !rt.hasStaticShape()) return {};
 
     std::vector<shape_inference::DimensionHandle> dims(rt.getDimSize(0),
                                                        ic.UnknownDim());
     mlir::Attribute attr;
     if (matchPattern(op_result, m_Constant(&attr))) {
-      auto elements = attr.dyn_cast<mlir::DenseIntElementsAttr>();
+      auto elements = llvm::dyn_cast<mlir::DenseIntElementsAttr>(attr);
       if (elements)
         for (const auto& element :
              llvm::enumerate(elements.getValues<llvm::APInt>()))
@@ -210,7 +232,7 @@ mlir::LogicalResult InferShapeOfTFOpWithCustomOperandConstantFn(
 
 }  // namespace
 
-Status InferSPMDExpandedLocalShapeForResourceOutput(
+absl::Status InferSPMDExpandedLocalShapeForResourceOutput(
     mlir::OpResult* op_result, const Layout& output_layout,
     mlir::MLIRContext* context) {
   if (llvm::isa<mlir::TF::ResourceType>(
@@ -219,10 +241,8 @@ Status InferSPMDExpandedLocalShapeForResourceOutput(
                         GetGlobalShapeOfValueFromDTensorLayout(*op_result));
     const std::vector<int64_t>& local_shape =
         output_layout.LocalShapeFromGlobalShape(global_shape);
-    auto resource_type = op_result->getType()
-                             .cast<mlir::TensorType>()
-                             .getElementType()
-                             .dyn_cast<mlir::TF::ResourceType>();
+    auto resource_type = llvm::dyn_cast<mlir::tf_type::ResourceType>(
+        llvm::cast<mlir::TensorType>(op_result->getType()).getElementType());
 
     auto sub_types = resource_type.getSubtypes();
     auto resource_arg_sub_type = sub_types.front();
@@ -252,7 +272,7 @@ mlir::Operation* InferSPMDExpandedLocalShape(mlir::Operation* op) {
     const auto& return_type = std::get<0>(it);
     auto& op_result = std::get<1>(it);
     const auto element_type =
-        op_result.getType().cast<mlir::TensorType>().getElementType();
+        llvm::cast<mlir::TensorType>(op_result.getType()).getElementType();
 
     if (return_type.hasRank()) {
       op_result.setType(
@@ -270,7 +290,7 @@ StatusOr<llvm::ArrayRef<int64_t>> GetShapeOfValue(const mlir::Value& value,
   // Getting the subtype or self allows supporting extracting the underlying
   // shape that variant or resource tensors point to.
   mlir::Type type = GetSubtypeOrSelf(value);
-  if (auto ranked_type = type.dyn_cast<mlir::RankedTensorType>()) {
+  if (auto ranked_type = llvm::dyn_cast<mlir::RankedTensorType>(type)) {
     if (ranked_type.hasStaticShape() || !fail_on_dynamic)
       return ranked_type.getShape();
     else
@@ -281,7 +301,7 @@ StatusOr<llvm::ArrayRef<int64_t>> GetShapeOfValue(const mlir::Value& value,
 
 StatusOr<llvm::ArrayRef<int64_t>> GetGlobalShapeOfValueFromDTensorLayout(
     const mlir::Value& value) {
-  if (value.isa<mlir::OpResult>() &&
+  if (mlir::isa<mlir::OpResult>(value) &&
       mlir::isa<mlir::TF::DTensorLayout>(value.getDefiningOp())) {
     auto layout_op = mlir::cast<mlir::TF::DTensorLayout>(value.getDefiningOp());
     if (layout_op.getGlobalShape()) return layout_op.getGlobalShape().value();

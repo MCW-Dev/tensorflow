@@ -71,7 +71,7 @@ def QuantizeCompositeFunctionsPass : Pass<"stablehlo-quantize-composite-function
   let dependentDialects = [
     "mlir::arith::ArithDialect",
     "mlir::stablehlo::StablehloDialect",
-    "mlir::quant::QuantizationDialect",
+    "mlir::quant::QuantDialect",
     "mlir::quantfork::QuantizationForkDialect",
     "TF::TensorFlowDialect",
   ];
@@ -89,7 +89,7 @@ def PrepareQuantizePass : Pass<"stablehlo-prepare-quantize", "mlir::ModuleOp"> {
     ];
   let dependentDialects = [
       "mlir::stablehlo::StablehloDialect",
-      "mlir::quant::QuantizationDialect",
+      "mlir::quant::QuantDialect",
       "mlir::quantfork::QuantizationForkDialect",
       "mlir::arith::ArithDialect",
   ];
@@ -105,7 +105,7 @@ def QuantizePass : Pass<"stablehlo-quantize", "mlir::ModuleOp"> {
   ];
   let dependentDialects = [
     "mlir::stablehlo::StablehloDialect",
-    "mlir::quant::QuantizationDialect",
+    "mlir::quant::QuantDialect",
     "mlir::quantfork::QuantizationForkDialect",
   ];
 }
@@ -147,8 +147,17 @@ def ConvertXlaCallModuleOpToBfloat16Pass : Pass<"stablehlo-convert-xla-call-modu
   let summary = "Convert serialized XlaCallModuleOp to bfloat16";
   let dependentDialects = [
     "TF::TensorFlowDialect",
-    "mlir::quant::QuantizationDialect",
+    "mlir::quant::QuantDialect",
     "mlir::shape::ShapeDialect",
+    "mlir::stablehlo::StablehloDialect",
+  ];
+}
+
+def ConvertShapeToStablehloWithConstraintsPass : Pass<"stablehlo-convert-shape-to-stablehlo-with-constraints", "mlir::func::FuncOp"> {
+  let summary = "Convert shape.cstr_broadcastable to stablehlo.custom_call @shape_assertion";
+  let dependentDialects = [
+    "mlir::shape::ShapeDialect",
+    "mlir::tensor::TensorDialect",
     "mlir::stablehlo::StablehloDialect",
   ];
 }
@@ -192,7 +201,7 @@ def InsertWeightParamPass : Pass<"stablehlo-insert-weight-param", "mlir::func::F
   let dependentDialects = [
       "mlir::stablehlo::StablehloDialect",
       "TF::TensorFlowDialect",
-      "mlir::quant::QuantizationDialect",
+      "mlir::quant::QuantDialect",
       "mlir::quantfork::QuantizationForkDialect",
   ];
 }

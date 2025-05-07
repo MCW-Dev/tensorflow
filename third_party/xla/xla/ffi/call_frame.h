@@ -81,9 +81,10 @@ class CallFrameBuilder {
   using AttributesMap = absl::flat_hash_map<std::string, Attribute>;
 
   // Dictionary is just a wrapper around AttributesMap. We need an indirection
-  // through `std::unique_ptr` to be able to define recursive `std::variant`.
+  // through `std::shared_ptr` to be able to define recursive `std::variant`. We
+  // use shared pointer to keep `AttributesMap` copyable.
   struct Dictionary {
-    std::unique_ptr<AttributesMap> attrs;
+    std::shared_ptr<AttributesMap> attrs;
   };
 
   // A helper class to build call frame attributes.
@@ -92,14 +93,14 @@ class CallFrameBuilder {
     AttributesBuilder();
     ~AttributesBuilder();
 
+    void Insert(std::string name, Attribute attr);
+    void Insert(std::string name, AttributesMap attrs);
+    void Append(AttributesMap attrs);
+
     // This overload is only necessary to support older GCC versions.
     void Insert(std::string name, const char* attr) {
-      Insert(std::move(name), std::string(attr));
+      Insert(std::move(name), Attribute{std::string(attr)});
     }
-    void Insert(std::string name, FlatAttribute attr);
-    void Insert(std::string name, FlatAttributesMap attrs);
-
-    void Append(FlatAttributesMap attrs);
 
     AttributesMap Build();
 
@@ -112,8 +113,12 @@ class CallFrameBuilder {
   void AddBufferArg(se::DeviceMemoryBase memory, PrimitiveType type,
                     absl::Span<const int64_t> dims);
 
+  void AddTokenArg();
+
   void AddBufferRet(se::DeviceMemoryBase memory, PrimitiveType type,
                     absl::Span<const int64_t> dims);
+
+  void AddTokenRet();
 
   void AddAttributes(AttributesMap attrs);
 
@@ -149,10 +154,13 @@ class CallFrame {
   absl::Status UpdateWithBuffers(absl::Span<const se::DeviceMemoryBase> args,
                                  absl::Span<const se::DeviceMemoryBase> rets);
 
+  // Creates a copy of the call frame.
+  CallFrame Copy() const;
+
   // Creates a copy of the call frame with updated arguments and results.
   absl::StatusOr<CallFrame> CopyWithBuffers(
       absl::Span<const se::DeviceMemoryBase> args,
-      absl::Span<const se::DeviceMemoryBase> rets);
+      absl::Span<const se::DeviceMemoryBase> rets) const;
 
   // Builds an XLA_FFI_CallFrame from owned arguments and attributes.
   XLA_FFI_CallFrame Build(

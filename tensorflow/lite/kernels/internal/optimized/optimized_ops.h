@@ -1521,6 +1521,30 @@ inline void AddElementwise(int size, const ArithmeticParams& params,
   }
 }
 
+#ifndef EIGEN_TFLITE
+inline void AddElementwise(int size, const ArithmeticParams& params,
+                           const Eigen::half* input1_data,
+                           const Eigen::half* input2_data,
+                           Eigen::half* output_data) {
+  for (int i = 0; i < size; ++i) {
+    auto x = input1_data[i] + input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(
+        x, params.Eigen_half_activation_min, params.Eigen_half_activation_max);
+  }
+}
+
+inline void AddElementwise(int size, const ArithmeticParams& params,
+                           const Eigen::bfloat16* input1_data,
+                           const Eigen::bfloat16* input2_data,
+                           Eigen::bfloat16* output_data) {
+  for (int i = 0; i < size; ++i) {
+    auto x = input1_data[i] + input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(x, params.bf16_activation_min,
+                                                  params.bf16_activation_max);
+  }
+}
+#endif
+
 inline void Add(const ArithmeticParams& params,
                 const RuntimeShape& input1_shape, const float* input1_data,
                 const RuntimeShape& input2_shape, const float* input2_data,
@@ -1530,6 +1554,33 @@ inline void Add(const ArithmeticParams& params,
       MatchingElementsSize(input1_shape, input2_shape, output_shape);
   AddElementwise(flat_size, params, input1_data, input2_data, output_data);
 }
+
+#ifndef EIGEN_TFLITE
+inline void Add(const ArithmeticParams& params,
+                const RuntimeShape& input1_shape,
+                const Eigen::half* input1_data,
+                const RuntimeShape& input2_shape,
+                const Eigen::half* input2_data,
+                const RuntimeShape& output_shape, Eigen::half* output_data) {
+  ruy::profiler::ScopeLabel label("Add");
+  const int flat_size =
+      MatchingElementsSize(input1_shape, input2_shape, output_shape);
+  AddElementwise(flat_size, params, input1_data, input2_data, output_data);
+}
+
+inline void Add(const ArithmeticParams& params,
+                const RuntimeShape& input1_shape,
+                const Eigen::bfloat16* input1_data,
+                const RuntimeShape& input2_shape,
+                const Eigen::bfloat16* input2_data,
+                const RuntimeShape& output_shape,
+                Eigen::bfloat16* output_data) {
+  ruy::profiler::ScopeLabel label("Add");
+  const int flat_size =
+      MatchingElementsSize(input1_shape, input2_shape, output_shape);
+  AddElementwise(flat_size, params, input1_data, input2_data, output_data);
+}
+#endif
 
 // Element-wise add that can often be used for inner loop of broadcast add as
 // well as the non-broadcast add.
@@ -1758,6 +1809,30 @@ inline void AddScalarBroadcast(int size, const ArithmeticParams& params,
   }
 }
 
+#ifndef EIGEN_TFLITE
+inline void AddScalarBroadcast(int size, const ArithmeticParams& params,
+                               Eigen::half broadcast_value,
+                               const Eigen::half* input2_data,
+                               Eigen::half* output_data) {
+  for (int i = 0; i < size; ++i) {
+    auto x = broadcast_value + input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(
+        x, params.Eigen_half_activation_min, params.Eigen_half_activation_max);
+  }
+}
+
+inline void AddScalarBroadcast(int size, const ArithmeticParams& params,
+                               Eigen::bfloat16 broadcast_value,
+                               const Eigen::bfloat16* input2_data,
+                               Eigen::bfloat16* output_data) {
+  for (int i = 0; i < size; ++i) {
+    auto x = broadcast_value + input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(x, params.bf16_activation_min,
+                                                  params.bf16_activation_max);
+  }
+}
+#endif
+
 inline void Add(const ArithmeticParams& params,
                 const RuntimeShape& input1_shape, const uint8_t* input1_data,
                 const RuntimeShape& input2_shape, const uint8_t* input2_data,
@@ -1947,6 +2022,36 @@ inline void MulElementwise(int size, const ArithmeticParams& params,
   }
 }
 
+#ifndef EIGEN_TFLITE
+inline void MulElementwise(int size, const ArithmeticParams& params,
+                           const Eigen::half* input1_data,
+                           const Eigen::half* input2_data,
+                           Eigen::half* output_data) {
+  const Eigen::half output_activation_min = params.Eigen_half_activation_min;
+  const Eigen::half output_activation_max = params.Eigen_half_activation_max;
+
+  for (int i=0; i < size; ++i) {
+    auto x = input1_data[i] * input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(x, output_activation_min,
+                                                  output_activation_max);
+  }
+}
+
+inline void MulElementwise(int size, const ArithmeticParams& params,
+                           const Eigen::bfloat16* input1_data,
+                           const Eigen::bfloat16* input2_data,
+                           Eigen::bfloat16* output_data) {
+  const Eigen::bfloat16 output_activation_min = params.bf16_activation_min;
+  const Eigen::bfloat16 output_activation_max = params.bf16_activation_max;
+
+  for (int i=0; i < size; ++i) {
+    auto x = input1_data[i] * input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax<Eigen::bfloat16>(
+        x, output_activation_min, output_activation_max);
+  }
+}
+#endif
+
 inline void MulElementwise(int32_t n, const ArithmeticParams& params,
                            const int32_t* __restrict lhs,
                            const int32_t* __restrict rhs,
@@ -2003,11 +2108,11 @@ inline void MulElementwise(int32_t n, const ArithmeticParams& params,
                                           activation_max_val);
   }
 }
-
+template <typename T>
 inline void Mul(const ArithmeticParams& params,
-                const RuntimeShape& input1_shape, const float* input1_data,
-                const RuntimeShape& input2_shape, const float* input2_data,
-                const RuntimeShape& output_shape, float* output_data) {
+                const RuntimeShape& input1_shape, const T* input1_data,
+                const RuntimeShape& input2_shape, const T* input2_data,
+                const RuntimeShape& output_shape, T* output_data) {
   ruy::profiler::ScopeLabel label("Mul");
 
   const int flat_size =
@@ -2284,6 +2389,30 @@ inline void MulSimpleBroadcast(int size, const ArithmeticParams& params,
         x, params.float_activation_min, params.float_activation_max);
   }
 }
+
+#ifndef EIGEN_TFLITE
+inline void MulSimpleBroadcast(int size, const ArithmeticParams& params,
+                               const Eigen::half broadcast_value,
+                               const Eigen::half* input2_data,
+                               Eigen::half* output_data) {
+  for (int i=0 ; i < size; ++i) {
+    Eigen::half x = broadcast_value * input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(
+        x, params.Eigen_half_activation_min, params.Eigen_half_activation_max);
+  }
+}
+
+inline void MulSimpleBroadcast(int size, const ArithmeticParams& params,
+                               const Eigen::bfloat16 broadcast_value,
+                               const Eigen::bfloat16* input2_data,
+                               Eigen::bfloat16* output_data) {
+  for (int i = 0 ; i < size; ++i) {
+    Eigen::bfloat16 x = broadcast_value * input2_data[i];
+    output_data[i] = ActivationFunctionWithMinMax(x, params.bf16_activation_min,
+                                                  params.bf16_activation_max);
+  }
+}
+#endif
 
 inline void Mul(const ArithmeticParams& params,
                 const RuntimeShape& input1_shape, const uint8_t* input1_data,
@@ -3915,13 +4044,14 @@ inline void LogSoftmax(const SoftmaxParams& params, float input_scale,
   }
 }
 
-inline void Logistic(const RuntimeShape& input_shape, const float* input_data,
-                     const RuntimeShape& output_shape, float* output_data) {
+template <typename T>
+inline void Logistic(const RuntimeShape& input_shape, const T* input_data,
+                     const RuntimeShape& output_shape, T* output_data) {
   ruy::profiler::ScopeLabel label("Logistic");
   auto input_map = MapAsVector(input_data, input_shape);
   auto output_map = MapAsVector(output_data, output_shape);
   output_map.array() =
-      input_map.array().unaryExpr(Eigen::internal::scalar_logistic_op<float>());
+      input_map.array().unaryExpr(Eigen::internal::scalar_logistic_op<T>());
 }
 
 // Convenience version that allows, for example, generated-code calls to be
@@ -4029,8 +4159,9 @@ inline void Logistic(const LogisticParams& params,
   }
 }
 
-inline void Tanh(const RuntimeShape& input_shape, const float* input_data,
-                 const RuntimeShape& output_shape, float* output_data) {
+template <typename T>
+inline void Tanh(const RuntimeShape& input_shape, const T* input_data,
+                 const RuntimeShape& output_shape, T* output_data) {
   ruy::profiler::ScopeLabel label("Tanh");
   auto input_map = MapAsVector(input_data, input_shape);
   auto output_map = MapAsVector(output_data, output_shape);
@@ -4222,16 +4353,18 @@ inline void Cast(const RuntimeShape& input_shape, const SrcT* input_data,
   output_map.array() = input_map.array().template cast<DstT>();
 }
 
-inline void Floor(const RuntimeShape& input_shape, const float* input_data,
-                  const RuntimeShape& output_shape, float* output_data) {
+template <typename T>
+inline void Floor(const RuntimeShape& input_shape, const T* input_data,
+                  const RuntimeShape& output_shape, T* output_data) {
   ruy::profiler::ScopeLabel label("Floor");
   auto input_map = MapAsVector(input_data, input_shape);
   auto output_map = MapAsVector(output_data, output_shape);
   output_map.array() = Eigen::floor(input_map.array());
 }
 
-inline void Ceil(const RuntimeShape& input_shape, const float* input_data,
-                 const RuntimeShape& output_shape, float* output_data) {
+template <typename T>
+inline void Ceil(const RuntimeShape& input_shape, const T* input_data,
+                 const RuntimeShape& output_shape, T* output_data) {
   ruy::profiler::ScopeLabel label("Ceil");
   auto input_map = MapAsVector(input_data, input_shape);
   auto output_map = MapAsVector(output_data, output_shape);
@@ -7087,327 +7220,12 @@ inline void Logistic16bitPrecision(const LogisticParams& params,
   }
 }
 
-// Transpose2D only deals with typical 2D matrix transpose ops.
-// Perform transpose by transposing 4x4 blocks of the input, proceeding from
-// left to right (down the rows) of the input, and then from top to bottom.
-template <typename T>
-inline void Transpose2D(const RuntimeShape& input_shape, const T* input_data,
-                        const RuntimeShape& output_shape, T* output_data) {
-  TFLITE_DCHECK_EQ(input_shape.DimensionsCount(), 2);
-  TFLITE_DCHECK_EQ(output_shape.DimensionsCount(), 2);
-
-  const int d0 = input_shape.DimsData()[0];
-  const int d1 = input_shape.DimsData()[1];
-  const int kLines = 4;
-  const int kSkipSize = (kLines - 1) * d1;
-
-  const T* input = input_data;
-
-  int i = 0;
-  for (; i <= d0 - kLines; i += kLines) {
-    T* output = output_data + i;
-
-    const T* input_ptr = input;
-    optimized_ops_preload_l1_keep(input_ptr);
-    input_ptr += d1;
-    optimized_ops_preload_l1_keep(input_ptr);
-    input_ptr += d1;
-    optimized_ops_preload_l1_keep(input_ptr);
-    input_ptr += d1;
-    optimized_ops_preload_l1_keep(input_ptr);
-
-    int j = 0;
-    for (; j <= d1 - kLines; j += kLines) {
-      input_ptr = input;
-      const T a00 = input_ptr[0];
-      const T a01 = input_ptr[1];
-      const T a02 = input_ptr[2];
-      const T a03 = input_ptr[3];
-      input_ptr += d1;
-      const T a10 = input_ptr[0];
-      const T a11 = input_ptr[1];
-      const T a12 = input_ptr[2];
-      const T a13 = input_ptr[3];
-      input_ptr += d1;
-      const T a20 = input_ptr[0];
-      const T a21 = input_ptr[1];
-      const T a22 = input_ptr[2];
-      const T a23 = input_ptr[3];
-      input_ptr += d1;
-      const T a30 = input_ptr[0];
-      const T a31 = input_ptr[1];
-      const T a32 = input_ptr[2];
-      const T a33 = input_ptr[3];
-
-      output[0] = a00;
-      output[1] = a10;
-      output[2] = a20;
-      output[3] = a30;
-      output += d0;
-
-      output[0] = a01;
-      output[1] = a11;
-      output[2] = a21;
-      output[3] = a31;
-      output += d0;
-
-      output[0] = a02;
-      output[1] = a12;
-      output[2] = a22;
-      output[3] = a32;
-      output += d0;
-
-      output[0] = a03;
-      output[1] = a13;
-      output[2] = a23;
-      output[3] = a33;
-      output += d0;
-
-      input += kLines;
-    }
-    if (j == d1) {
-      input += kSkipSize;
-    } else {
-      for (int p = 0; p < kLines; ++p) {
-        for (int q = 0; q < d1 - j; ++q) {
-          *(output + q * d0 + p) = *(input + p * d1 + q);
-        }
-      }
-      input += (d1 - j) + kSkipSize;
-    }
-  }
-  for (; i < d0; ++i) {
-    T* output = output_data + i;
-    for (int j = 0; j < d1; ++j) {
-      *output = *input;
-      output += d0;
-      ++input;
-    }
-  }
-}
-
-template <>
-inline void Transpose2D(const RuntimeShape& input_shape,
-                        const int32_t* input_data,
-                        const RuntimeShape& output_shape,
-                        int32_t* output_data) {
-  TFLITE_DCHECK_EQ(input_shape.DimensionsCount(), 2);
-  TFLITE_DCHECK_EQ(output_shape.DimensionsCount(), 2);
-
-  const int d0 = input_shape.DimsData()[0];
-  const int d1 = input_shape.DimsData()[1];
-#ifdef USE_NEON
-  const int kLines = 4;
-  const int kSkipSize = (kLines - 1) * d1;
-#endif
-
-  const int32_t* input = input_data;
-
-  int i = 0;
-#ifdef USE_NEON
-  for (; i <= d0 - kLines; i += kLines) {
-    int32_t* output = output_data + i;
-
-    const int32_t* input_ptr = input;
-    optimized_ops_preload_l1_keep(input_ptr);
-    input_ptr += d1;
-    optimized_ops_preload_l1_keep(input_ptr);
-    input_ptr += d1;
-    optimized_ops_preload_l1_keep(input_ptr);
-    input_ptr += d1;
-    optimized_ops_preload_l1_keep(input_ptr);
-
-    int j = 0;
-    for (; j <= d1 - kLines; j += kLines) {
-      input_ptr = input;
-      int32x4_t a0 = vld1q_s32(input);
-      input_ptr += d1;
-      int32x4_t a1 = vld1q_s32(input_ptr);
-      input_ptr += d1;
-      int32x4_t a2 = vld1q_s32(input_ptr);
-      input_ptr += d1;
-      int32x4_t a3 = vld1q_s32(input_ptr);
-
-      int32x4x2_t tmp1 = vuzpq_s32(a0, a2);
-      int32x4x2_t tmp2 = vuzpq_s32(a1, a3);
-      int32x4x2_t tmp3 = vtrnq_s32(tmp1.val[0], tmp2.val[0]);
-      int32x4x2_t tmp4 = vtrnq_s32(tmp1.val[1], tmp2.val[1]);
-
-      vst1q_s32(output, tmp3.val[0]);
-      output += d0;
-      vst1q_s32(output, tmp4.val[0]);
-      output += d0;
-      vst1q_s32(output, tmp3.val[1]);
-      output += d0;
-      vst1q_s32(output, tmp4.val[1]);
-      output += d0;
-      input += kLines;
-    }
-    if (j == d1) {
-      input += kSkipSize;
-    } else {
-      for (int p = 0; p < kLines; ++p) {
-        for (int q = 0; q < d1 - j; ++q) {
-          *(output + q * d0 + p) = *(input + p * d1 + q);
-        }
-      }
-      input += (d1 - j) + kSkipSize;
-    }
-  }
-#endif
-  for (; i < d0; ++i) {
-    int32_t* output = output_data + i;
-    for (int j = 0; j < d1; ++j) {
-      *output = *input;
-      output += d0;
-      ++input;
-    }
-  }
-}
-
-// TODO(b/173718660): see if we can reduce the number
-// of lines of code in branching without affecting latency.
-template <typename T>
-inline void Transpose3D(const TransposeParams& params,
-                        const RuntimeShape& input_shape, const T* input_data,
-                        const RuntimeShape& output_shape, T* output_data) {
-  int s2, s3;
-  s2 = input_shape.Dims(1);
-  s3 = input_shape.Dims(2);
-
-  int p1, p2, p3;
-  if (params.perm[0] == 2) {
-    p1 = 1;
-  } else if (params.perm[1] == 2) {
-    p2 = 1;
-  } else {
-    p3 = 1;
-  }
-
-  if (params.perm[0] == 1) {
-    p1 = s3;
-  } else if (params.perm[1] == 1) {
-    p2 = s3;
-  } else {
-    p3 = s3;
-  }
-
-  if (params.perm[0] == 0) {
-    p1 = s2 * s3;
-  } else if (params.perm[1] == 0) {
-    p2 = s2 * s3;
-  } else {
-    p3 = s2 * s3;
-  }
-
-  int o_s[3];
-  o_s[0] = input_shape.Dims(params.perm[0]);
-  o_s[1] = input_shape.Dims(params.perm[1]);
-  o_s[2] = input_shape.Dims(params.perm[2]);
-
-  for (int i1 = 0; i1 < o_s[0]; ++i1) {
-    for (int i2 = 0; i2 < o_s[1]; ++i2) {
-      for (int i3 = 0; i3 < o_s[2]; ++i3) {
-        const int i = i1 * p1 + i2 * p2 + i3 * p3;
-        const int o = i1 * o_s[1] * o_s[2] + i2 * o_s[2] + i3;
-        output_data[o] = input_data[i];
-      }
-    }
-  }
-}
-
-template <typename T>
-void TransposeImpl(const TransposeParams& params,
-                   const RuntimeShape& input_shape, const T* input_data,
-                   const RuntimeShape& output_shape, T* output_data) {
-  const int dims_cnt = input_shape.DimensionsCount();
-
-  int dim0, dim1;
-  if (transpose_utils::IsTranspose2DApplicable(params, input_shape, &dim0,
-                                               &dim1)) {
-    Transpose2D(RuntimeShape({dim0, dim1}), input_data,
-                RuntimeShape({dim1, dim0}), output_data);
-    return;
-  }
-
-  // TODO(b/141217325): notably Eigen is better suited for
-  // larger inputs whereas Transpose3D is generally
-  // better for smaller ones.
-  //
-  // E.g. on Nexus 5, Eigen is better for size 96^3 and up
-  // and Transpose3D is better for 72^3 and down.
-  //
-  // 96^3 is not mobile-friendly for certain usecases
-  // (e.g. model used in beam search for seq2seq) but is in others.
-  // Consider tradeoffs.
-  if (dims_cnt == 3) {
-    Transpose3D(params, input_shape, input_data, output_shape, output_data);
-    return;
-  }
-
-  // Reroute to the reference version if an optimized method for the given data
-  // is not available.
-  reference_ops::Transpose<T>(params, input_shape, input_data, output_shape,
-                              output_data);
-}
-
 template <typename T, int N = 6>
-void Transpose(const TransposeParams& unshrinked_params,
-               const RuntimeShape& unshrinked_input_shape, const T* input_data,
-               const RuntimeShape& unshrinked_output_shape, T* output_data) {
-  ruy::profiler::ScopeLabel label("Transpose");
-
-  const int output_size = unshrinked_output_shape.DimensionsCount();
-  TFLITE_DCHECK_EQ(output_size, unshrinked_params.perm_count);
-
-  RuntimeShape shrinked_input_shape = RuntimeShape(unshrinked_input_shape);
-  RuntimeShape shrinked_output_shape = RuntimeShape(unshrinked_output_shape);
-  TransposeParams shrinked_params = unshrinked_params;
-
-  // Reduce any dimensions that have one size. Lower transpose op usually
-  // performs better since memory access patterns will be improved.
-  transpose_utils::RemoveOneSizeDimensions(
-      &shrinked_input_shape, &shrinked_output_shape, &shrinked_params);
-
-  // Handle identity cases.
-  // TODO(b/140779653): Add an optimization pass in the conversion process to
-  // remove transpose op nodes where they do nothing like the below one.
-  bool identical = true;
-  for (int i = 0; i < shrinked_params.perm_count; ++i) {
-    if (shrinked_params.perm[i] != i) {
-      identical = false;
-      break;
-    }
-  }
-  if (identical) {
-    memcpy(output_data, input_data,
-           unshrinked_input_shape.FlatSize() * sizeof(T));
-    return;
-  }
-
-  // Reduce dimensions by flattening.
-  if (shrinked_params.perm[0] == 0 && output_size >= 3) {
-    RuntimeShape non_flatten_input_shape;
-    RuntimeShape non_flatten_output_shape;
-    TransposeParams non_flatten_params;
-    const int total_size = shrinked_input_shape.FlatSize();
-    const int non_flatten_size = transpose_utils::Flatten(
-        shrinked_input_shape, shrinked_output_shape, shrinked_params,
-        &non_flatten_input_shape, &non_flatten_output_shape,
-        &non_flatten_params);
-    TFLITE_DCHECK_NE(non_flatten_params.perm[0], 0);
-
-    for (int i = 0; i < total_size; i += non_flatten_size) {
-      TransposeImpl<T>(non_flatten_params, non_flatten_input_shape,
-                       input_data + i, non_flatten_output_shape,
-                       output_data + i);
-    }
-    return;
-  }
-
-  // Call non-flattened case.
-  TransposeImpl<T>(shrinked_params, shrinked_input_shape, input_data,
-                   shrinked_output_shape, output_data);
+void Transpose(const TransposeParams& params, const RuntimeShape& input_shape,
+               const T* input_data, const RuntimeShape& output_shape,
+               T* output_data) {
+  return reference_ops::Transpose(params, input_shape, input_data, output_shape,
+                                  output_data);
 }
 
 // Assume input1 & input2 have the same scale & zero point.

@@ -15,10 +15,10 @@ limitations under the License.
 
 #include "xla/service/gpu/model/affine_map_evaluator.h"
 
-#include "mlir/IR/AffineExpr.h"  // from @llvm-project
-#include "mlir/IR/AffineMap.h"  // from @llvm-project
-#include "mlir/IR/MLIRContext.h"  // from @llvm-project
-#include "xla/tests/hlo_test_base.h"
+#include "mlir/IR/AffineExpr.h"
+#include "mlir/IR/AffineMap.h"
+#include "mlir/IR/MLIRContext.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "tsl/platform/test.h"
 
 namespace xla {
@@ -31,7 +31,7 @@ using ::mlir::bindDims;
 using ::mlir::bindSymbols;
 using ::testing::ElementsAre;
 
-class AffineMapEvaluator : public HloTestBase {
+class AffineMapEvaluator : public HloHardwareIndependentTestBase {
  public:
   mlir::MLIRContext mlir_context_;
 };

@@ -27,6 +27,7 @@ limitations under the License.
 #include "xla/backends/profiler/gpu/cupti_collector.h"
 #include "xla/backends/profiler/gpu/cupti_tracer.h"
 #include "xla/backends/profiler/gpu/cupti_wrapper.h"
+#include "xla/tsl/profiler/utils/time_utils.h"
 #include "xla/tsl/util/env_var.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/macros.h"
@@ -34,7 +35,6 @@ limitations under the License.
 #include "tsl/profiler/lib/profiler_factory.h"
 #include "tsl/profiler/lib/profiler_interface.h"
 #include "tsl/profiler/protobuf/xplane.pb.h"
-#include "tsl/profiler/utils/time_utils.h"
 
 namespace xla {
 namespace profiler {
@@ -46,8 +46,7 @@ using tsl::ReadBoolFromEnvVar;
 // GpuTracer for GPU.
 class GpuTracer : public tsl::profiler::ProfilerInterface {
  public:
-  GpuTracer(CuptiTracer* cupti_tracer, CuptiInterface* cupti_interface)
-      : cupti_tracer_(cupti_tracer) {
+  explicit GpuTracer(CuptiTracer* cupti_tracer) : cupti_tracer_(cupti_tracer) {
     VLOG(1) << "GpuTracer created.";
   }
   ~GpuTracer() override {}
@@ -81,50 +80,52 @@ absl::Status GpuTracer::DoStart() {
   }
 
   options_.cbids_selected = {
-      // KERNEL
-      CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel,
-      CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx,
-      // MEMCPY
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpy,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyAsync,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoD_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoDAsync_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoH_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoHAsync_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoD_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyAtoH_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyAtoHAsync_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyAtoD_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoA_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyAtoA_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpy2D_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpy2DUnaligned_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpy2DAsync_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpy3D_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpy3DAsync_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoA_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoAAsync_v2,
-      // MemAlloc
-      CUPTI_DRIVER_TRACE_CBID_cuMemAlloc_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemAllocPitch_v2,
-      // MemFree
-      CUPTI_DRIVER_TRACE_CBID_cuMemFree_v2,
-      // Memset
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD8_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD16_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD32_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D8_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D16_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D32_v2,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD8Async,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD16Async,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD32Async,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D8Async,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D16Async,
-      CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D32Async,
-      // GENERIC
-      CUPTI_DRIVER_TRACE_CBID_cuStreamSynchronize,
+    // KERNEL
+    CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel,
+#if CUDA_VERSION >= 11080  // CUDA 11.8
+    CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx,
+#endif  // CUDA_VERSION >= 11080
+    // MEMCPY
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpy,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyAsync,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoD_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoDAsync_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoH_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoHAsync_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoD_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoDAsync_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyAtoH_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyAtoHAsync_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyAtoD_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyDtoA_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyAtoA_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpy2D_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpy2DUnaligned_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpy2DAsync_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpy3D_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpy3DAsync_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoA_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemcpyHtoAAsync_v2,
+    // MemAlloc
+    CUPTI_DRIVER_TRACE_CBID_cuMemAlloc_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemAllocPitch_v2,
+    // MemFree
+    CUPTI_DRIVER_TRACE_CBID_cuMemFree_v2,
+    // Memset
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD8_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD16_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD32_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D8_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D16_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D32_v2,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD8Async,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD16Async,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD32Async,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D8Async,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D16Async,
+    CUPTI_DRIVER_TRACE_CBID_cuMemsetD2D32Async,
+    // GENERIC
+    CUPTI_DRIVER_TRACE_CBID_cuStreamSynchronize,
   };
 
   bool trace_concurrent_kernels = false;
@@ -139,7 +140,10 @@ absl::Status GpuTracer::DoStart() {
   options_.activities_selected.push_back(CUPTI_ACTIVITY_KIND_OVERHEAD);
   options_.activities_selected.push_back(CUPTI_ACTIVITY_KIND_MEMSET);
 
+// CUDA/CUPTI 10 have issues (leaks and crashes) with CuptiFinalize.
+#if CUDA_VERSION >= 11000
   options_.cupti_finalize = true;
+#endif
 
   CuptiTracerCollectorOptions collector_options;
   collector_options.num_gpus = cupti_tracer_->NumGpus();
@@ -148,7 +152,7 @@ absl::Status GpuTracer::DoStart() {
   cupti_collector_ = CreateCuptiCollector(collector_options, start_walltime_ns,
                                           start_gputime_ns);
 
-  cupti_tracer_->Enable(options_, cupti_collector_.get());
+  cupti_tracer_->Enable(options_, cupti_collector_.get()).IgnoreError();
   return absl::OkStatus();
 }
 
@@ -201,7 +205,7 @@ absl::Status GpuTracer::CollectData(XSpace* space) {
         space->add_warnings(std::move(events_dropped));
       }
       if (cupti_collector_) {
-        uint64_t end_gpu_ns = CuptiTracer::GetTimestamp();
+        uint64_t end_gpu_ns = cupti_collector_->GetTracingEndTimeNs();
         cupti_collector_->Export(space, end_gpu_ns);
       }
       return absl::OkStatus();
@@ -222,8 +226,7 @@ std::unique_ptr<tsl::profiler::ProfilerInterface> CreateGpuTracer(
   if (!cupti_tracer->IsAvailable()) {
     return nullptr;
   }
-  profiler::CuptiInterface* cupti_interface = profiler::GetCuptiInterface();
-  return std::make_unique<profiler::GpuTracer>(cupti_tracer, cupti_interface);
+  return std::make_unique<profiler::GpuTracer>(cupti_tracer);
 }
 
 auto register_gpu_tracer_factory = [] {

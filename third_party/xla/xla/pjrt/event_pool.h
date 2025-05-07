@@ -16,11 +16,15 @@ limitations under the License.
 #ifndef XLA_PJRT_EVENT_POOL_H_
 #define XLA_PJRT_EVENT_POOL_H_
 
+#include <cstdint>
 #include <memory>
 #include <stack>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
+#include "xla/stream_executor/event.h"
+#include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/types.h"
 

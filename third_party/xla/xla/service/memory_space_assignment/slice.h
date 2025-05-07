@@ -38,6 +38,7 @@ limitations under the License.
 #define XLA_SERVICE_MEMORY_SPACE_ASSIGNMENT_SLICE_H_
 
 #include <cstdint>
+#include <functional>
 #include <ostream>
 #include <string>
 #include <tuple>
@@ -45,6 +46,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
+#include "absl/status/statusor.h"
 #include "xla/service/heap_simulator/heap_simulator.h"
 #include "xla/service/memory_space_assignment/memory_space_assignment.pb.h"
 #include "xla/shape.h"

@@ -13,21 +13,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cstddef>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
+#include "absl/status/status.h"
+#include "tensorflow/core/platform/status.h"
 #include "tensorflow/lite/toco/graph_transformations/graph_transformations.h"
 #include "tensorflow/lite/toco/model.h"
 #include "tensorflow/lite/toco/tooling_util.h"
-#include "tensorflow/core/platform/logging.h"
 
 namespace toco {
 
-::tensorflow::Status RemoveTrivialConcatenationInput::Run(Model* model,
-                                                          std::size_t op_index,
-                                                          bool* modified) {
+absl::Status RemoveTrivialConcatenationInput::Run(Model* model,
+                                                  std::size_t op_index,
+                                                  bool* modified) {
   *modified = false;
   // TensorFlow allows Concatenation nodes to have 0-D inputs,
   // and they are then treated as empty i.e. omitted from concatenation,

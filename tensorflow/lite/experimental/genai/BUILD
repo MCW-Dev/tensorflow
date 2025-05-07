@@ -8,6 +8,7 @@ load("//tensorflow/lite:special_rules.bzl", "tflite_portable_test_suite")
 cc_library(
     name = "genai_ops",
     srcs = [
+        "external_kvcache.cc",
         "genai_ops.cc",
         "kvcache.cc",
         "sdpa.cc",
@@ -19,17 +20,15 @@ cc_library(
     deps = [
         "//tensorflow/lite:framework",
         "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/c:common",
         "//tensorflow/lite/core:subgraph",
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/experimental/resource",
         "//tensorflow/lite/experimental/resource:cache_buffer",
         "//tensorflow/lite/kernels:kernel_util",
-        "//tensorflow/lite/kernels:reference_ops",
         "//tensorflow/lite/kernels/internal:common",
-        "//tensorflow/lite/kernels/internal:compatibility",
         "//tensorflow/lite/kernels/internal:reference_base",
         "//tensorflow/lite/kernels/internal:tensor",
-        "//tensorflow/lite/kernels/internal:tensor_utils",
         "//tensorflow/lite/kernels/internal:types",
         "@flatbuffers",
     ],
@@ -44,6 +43,25 @@ cc_test(
         "//tensorflow/lite/c:c_api_types",
         "//tensorflow/lite/kernels:test_util",
         "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "external_kvcache_test",
+    srcs = ["external_kvcache_test.cc"],
+    copts = tflite_copts(),
+    deps = [
+        ":genai_ops",
+        "//tensorflow/lite:framework",
+        "//tensorflow/lite:util",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/c:common",
+        "//tensorflow/lite/kernels:test_util",
+        "//tensorflow/lite/kernels/internal:tensor",
+        "//tensorflow/lite/kernels/internal:types",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -66,6 +84,7 @@ pybind_extension(
         ":genai_ops",
         "//tensorflow/lite:framework_stable",
         "//tensorflow/lite:mutable_op_resolver",
+        "//tensorflow/lite/c:common",
         "//third_party/python_runtime:headers",
         "@pybind11",
     ],

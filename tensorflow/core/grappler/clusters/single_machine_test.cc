@@ -52,7 +52,9 @@ class SingleMachineTest : public ::testing::Test {
 #endif
     cluster_ = std::make_unique<SingleMachine>(timeout_s, 3 /* num_cpu_cores */,
                                                0 /* num_gpus */);
+#if !defined(__APPLE__)
     TF_CHECK_OK(cluster_->EnablePeakMemoryStats());
+#endif
     TF_CHECK_OK(cluster_->Provision());
   }
 
@@ -246,10 +248,10 @@ TEST_F(SingleMachineTest, TimeOuts) {
 
   TF_CHECK_OK(cluster_->Initialize(item));
   RunMetadata metadata;
-  Status s1 = cluster_->Run(item.graph, item.feed, item.fetch, &metadata);
-  EXPECT_TRUE(errors::IsDeadlineExceeded(s1));
-  Status s2 = cluster_->Run(item.graph, item.feed, item.fetch, &metadata);
-  EXPECT_TRUE(errors::IsDeadlineExceeded(s2));
+  absl::Status s1 = cluster_->Run(item.graph, item.feed, item.fetch, &metadata);
+  EXPECT_TRUE(absl::IsDeadlineExceeded(s1));
+  absl::Status s2 = cluster_->Run(item.graph, item.feed, item.fetch, &metadata);
+  EXPECT_TRUE(absl::IsDeadlineExceeded(s2));
 }
 
 static void RunInfiniteTFLoop() {
@@ -334,16 +336,16 @@ static void RunInfiniteTFLoop() {
   TF_CHECK_OK(cluster.Provision());
   TF_CHECK_OK(cluster.Initialize(item));
 
-  Status s1 = cluster.Run(item.graph, item.feed, item.fetch, nullptr);
-  if (!errors::IsDeadlineExceeded(s1)) {
+  absl::Status s1 = cluster.Run(item.graph, item.feed, item.fetch, nullptr);
+  if (!absl::IsDeadlineExceeded(s1)) {
     LOG(ERROR) << "Expected 'deadline exceeded' error, got " << s1;
     // Exit to break the infinite loop
     _exit(1);
   }
 
   // Attempt to shutdown the cluster and make sure we get the proper error code.
-  Status s2 = cluster.Shutdown();
-  if (!errors::IsUnavailable(s2)) {
+  absl::Status s2 = cluster.Shutdown();
+  if (!absl::IsUnavailable(s2)) {
     LOG(ERROR) << "Expected 'unavailable' error, got " << s2;
     // Exit to break the infinite loop
     _exit(2);
@@ -628,10 +630,10 @@ TEST_F(SingleMachineTest, PeakMemoryStatsNotEnabled) {
   TF_CHECK_OK(cluster.Initialize(item));
 
   std::unordered_map<string, uint64> device_peak_memory;
-  Status s = cluster.GetPeakMemoryUsage(&device_peak_memory);
+  absl::Status s = cluster.GetPeakMemoryUsage(&device_peak_memory);
   TF_CHECK_OK(cluster.Shutdown());
   ASSERT_FALSE(s.ok());
-  EXPECT_TRUE(errors::IsInvalidArgument(s));
+  EXPECT_TRUE(absl::IsInvalidArgument(s));
 }
 #endif
 

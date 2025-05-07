@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
@@ -30,7 +31,6 @@ limitations under the License.
 #include "xla/layout_util.h"
 #include "xla/service/compiler.h"
 #include "xla/service/executable.h"
-#include "xla/service/hlo_execution_profile.h"
 #include "xla/service/maybe_owning_device_memory.h"
 #include "xla/service/service_executable_run_options.h"
 #include "xla/service/shaped_buffer.h"
@@ -38,6 +38,7 @@ limitations under the License.
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
+#include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/util.h"
@@ -208,8 +209,7 @@ TpuExecutableInterface::AllocateOutputMemoryWithInputReuse(
 
 absl::StatusOr<ExecutionOutput> TpuExecutableInterface::ExecuteAsyncOnStream(
     const ServiceExecutableRunOptions* run_options,
-    std::vector<ExecutionInput> arguments,
-    HloExecutionProfile* /*hlo_execution_profile*/) {
+    std::vector<ExecutionInput> arguments) {
   std::vector<se::DeviceMemoryBase> memory_bases;
   memory_bases.reserve(arguments.size());
   for (auto& argument : arguments) {

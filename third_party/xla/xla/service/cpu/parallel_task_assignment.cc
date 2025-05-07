@@ -28,15 +28,17 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "xla/backends/cpu/codegen/target_machine_features.h"
+#include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/service/cpu/backend_config.pb.h"
 #include "xla/service/cpu/ir_emission_utils.h"
-#include "xla/service/cpu/shape_partition.h"
-#include "xla/service/cpu/target_machine_features.h"
 #include "xla/service/hlo_cost_analysis.h"
 #include "xla/service/llvm_ir/dynamic_update_slice_util.h"
+#include "xla/shape_partition.h"
 #include "xla/util.h"
 #include "tsl/platform/cpu_info.h"
 #include "tsl/platform/logging.h"  // IWYU pragma: keep
@@ -95,8 +97,8 @@ class DefaultCostModel : public ParallelCostModel {
       // TODO(b/29630486) Develop system bandwidth model.
       max_parallelism = std::min<int64_t>(
           max_parallelism_, std::ceil(std::sqrt(tsl::port::MaxParallelism())));
-      // Use shape size instruction cost and L2 cache size min per-thread cost.
-      instruction_cost = shape_size_(instruction->shape());
+      // Use bytes accessed cost and L2 cache size min per-thread cost.
+      instruction_cost = bytes_accessed;
       min_cost_per_thread = 256LL << 10;  // 256KB L2 Cache size.
     } else {
       // Use max parallelism for compute bound instructions.
@@ -168,6 +170,13 @@ int64_t ParallelTaskAssignment::GetTargetParallelTaskCount(
     return 1;
   }
 
+  // Skip custom fusions.
+  if (opcode == HloOpcode::kFusion) {
+    const HloFusionInstruction* fusion =
+        Cast<HloFusionInstruction>(instruction);
+    if (fusion->fusion_kind() == HloInstruction::FusionKind::kCustom) return 1;
+  }
+
   // Only allow instructions that can be trivially parallelized (where all
   // outputs can be computed independently of each other).
   if (instruction->IsElementwise() || instruction->IsLoopFusion() ||
@@ -221,18 +230,35 @@ bool ParallelTaskAssigner::AssignParallelTasksHelper(
   std::vector<HloInstruction*> instructions(computation->instructions().begin(),
                                             computation->instructions().end());
   for (auto* instruction : instructions) {
-    // Assign parallel tasks to sub-computations for While and Call HLOs.
+    // Assign parallel tasks to sub-computations for While, Conditional and Call
+    // HLOs.
     // TODO(b/27458679) Evaluate alternative intra-op parallelism placement,
     // and support other callable computations like reduce.
+    bool control_flow_hlo = false;
+
     if (instruction->opcode() == HloOpcode::kWhile) {
+      control_flow_hlo = true;
       changed |= AssignParallelTasksHelper(module, instruction->while_body(),
                                            hlo_to_parallel_tasks);
-      continue;
+
+    } else if (instruction->opcode() == HloOpcode::kConditional) {
+      control_flow_hlo = true;
+      for (HloComputation* branch : instruction->branch_computations()) {
+        changed |=
+            AssignParallelTasksHelper(module, branch, hlo_to_parallel_tasks);
+      }
+
     } else if (instruction->opcode() == HloOpcode::kCall) {
+      control_flow_hlo = true;
       changed |= AssignParallelTasksHelper(module, instruction->to_apply(),
                                            hlo_to_parallel_tasks);
+    }
+
+    // Continue to the next instruction if we handled control flow above.
+    if (control_flow_hlo) {
       continue;
     }
+
     // Skip if no parallel tasks were computed in first pass.
     auto it = hlo_to_parallel_tasks.find(instruction);
     if (it == hlo_to_parallel_tasks.end()) {

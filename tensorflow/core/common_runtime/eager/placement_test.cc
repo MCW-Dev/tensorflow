@@ -60,7 +60,7 @@ static Device* CreateDevice(const char* type, const char* name) {
   class FakeDevice : public Device {
    public:
     explicit FakeDevice(const DeviceAttributes& attr) : Device(nullptr, attr) {}
-    Status Sync() override { return absl::OkStatus(); }
+    absl::Status Sync() override { return absl::OkStatus(); }
     Allocator* GetAllocator(AllocatorAttributes) override { return nullptr; }
   };
   DeviceAttributes attr;
@@ -126,9 +126,9 @@ TEST_F(PlacementTest, SelectDeviceExplicitHardPlacement) {
   requested.Clear();
   NodeDef invalid_op = NDef("invalid_op", "InvalidOp", {}, {});
 
-  Status status = context()->SelectDevice(requested, invalid_op, &dev);
+  absl::Status status = context()->SelectDevice(requested, invalid_op, &dev);
   LOG(ERROR) << status;
-  EXPECT_TRUE(errors::IsNotFound(status));
+  EXPECT_TRUE(absl::IsNotFound(status));
   EXPECT_TRUE(
       absl::StrContains(status.message(), "Could not find device for node"))
       << "unexpected error message " << status.message();
@@ -138,7 +138,7 @@ TEST_F(PlacementTest, SelectDeviceExplicitHardPlacement) {
   NodeDef node = NDef("x", "TestOp", {}, {});
   status = context()->SelectDevice(requested, node, &dev);
 
-  EXPECT_TRUE(errors::IsInvalidArgument(status));
+  EXPECT_TRUE(absl::IsInvalidArgument(status));
   EXPECT_TRUE(absl::StrContains(status.message(),
                                 "Could not satisfy device specification"))
       << "unexpected error message " << status.message();
@@ -167,9 +167,9 @@ TEST_F(PlacementTest, SelectDeviceExplicitSoftPlacement) {
   requested.Clear();
   NodeDef invalid_op = NDef("invalid_op", "InvalidOp", {}, {});
 
-  Status status = context()->SelectDevice(requested, invalid_op, &dev);
+  absl::Status status = context()->SelectDevice(requested, invalid_op, &dev);
   LOG(ERROR) << status;
-  EXPECT_TRUE(errors::IsNotFound(status));
+  EXPECT_TRUE(absl::IsNotFound(status));
   EXPECT_TRUE(
       absl::StrContains(status.message(), "Could not find device for node"))
       << "unexpected error message " << status.message();

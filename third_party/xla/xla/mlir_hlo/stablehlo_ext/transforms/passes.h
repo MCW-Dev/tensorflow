@@ -17,22 +17,25 @@ limitations under the License.
 #define STABLEHLO_EXT_TRANSFORMS_PASSES_H
 
 #include <memory>
+#include <string>
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassOptions.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 namespace mlir {
-namespace stablehlo {
-namespace experimental {
+namespace stablehlo_ext {
 
 #define GEN_PASS_DECL
-#define GEN_PASS_REGISTRATION
 #include "stablehlo_ext/transforms/passes.h.inc"
 
 void createChloLegalizeToStablehloPipeline(OpPassManager &pm);
 
-}  // namespace experimental
-}  // namespace stablehlo
+#define GEN_PASS_REGISTRATION
+#include "stablehlo_ext/transforms/passes.h.inc"
+
+}  // namespace stablehlo_ext
 }  // namespace mlir
 
 #endif  // STABLEHLO_EXT_TRANSFORMS_PASSES_H

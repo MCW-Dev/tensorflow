@@ -1,8 +1,8 @@
 # Description:
 #  A forwarding MPI implementation that can use any other MPI implementation via an MPI ABI
 
-load("@local_xla//xla:strict.default.bzl", "py_strict_binary")
-load("//third_party/bazel_skylib/rules:expand_template.bzl", "expand_template")
+load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("@local_xla//xla:py_strict.bzl", "py_strict_binary")
 
 package(
     default_visibility = ["//visibility:public"],

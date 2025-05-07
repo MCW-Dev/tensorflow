@@ -13,16 +13,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cstdint>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/strings/str_split.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Regex.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/Quant/QuantOps.h"  // from @llvm-project
+#include "mlir/Dialect/Quant/IR/Quant.h"  // from @llvm-project
 #include "mlir/IR/Attributes.h"  // from @llvm-project
 #include "mlir/IR/Builders.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributeInterfaces.h"  // from @llvm-project
@@ -81,7 +86,7 @@ class ImportQuantStatsPass
   void runOnOperation() override;
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<quant::QuantizationDialect,
+    registry.insert<quant::QuantDialect,
                     quantfork::QuantizationForkDialect>();
   }
 
@@ -102,8 +107,8 @@ class ImportQuantStatsPass
     if (index < 0 || index >= static_cast<int>(op->getNumResults()))
       return false;
     Value res = op->getResult(index);
-    return res.getType().isa<ShapedType>() &&
-           res.getType().cast<ShapedType>().getElementType().isa<FloatType>();
+    return isa<ShapedType>(res.getType()) &&
+           isa<FloatType>(cast<ShapedType>(res.getType()).getElementType());
   }
 
   // A method to retrieve the name for the given op.
@@ -231,11 +236,11 @@ std::unique_ptr<OperationPass<func::FuncOp>>
 CreateImportQuantStatsPassForTFControlDialect(const std::string &stats_str) {
   auto get_name_func = [](Operation *op) {
     Location loc = tensorflow::GetLocationWithoutOpType(op->getLoc());
-    if (auto name = loc.dyn_cast<NameLoc>()) {
+    if (auto name = llvm::dyn_cast<NameLoc>(loc)) {
       return name.getName().strref();
-    } else if (auto fused_name = loc.dyn_cast<FusedLoc>()) {
+    } else if (auto fused_name = llvm::dyn_cast<FusedLoc>(loc)) {
       for (auto sub_loc : fused_name.getLocations()) {
-        if (auto named_sub_loc = sub_loc.dyn_cast<NameLoc>()) {
+        if (auto named_sub_loc = llvm::dyn_cast<NameLoc>(sub_loc)) {
           return named_sub_loc.getName().strref();
         }
       }

@@ -33,9 +33,9 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/utils/hlo_traversal.h"
 #include "xla/primitive_util.h"
 #include "xla/service/gpu/backend_configs.pb.h"
-#include "xla/service/gpu/hlo_traversal.h"
 #include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/service/gpu/reduction_utils.h"
 #include "xla/shape.h"
@@ -77,8 +77,7 @@ std::optional<TransposeDescription> FindConsistentTransposeHero(
   std::vector<const HloInstruction*> non_transpose_roots;
 
   for (auto [root, hero] : llvm::zip(hlo_roots, heroes)) {
-    if (auto tr = GetDescriptionForTiledTransposeEmitter(root.instruction(),
-                                                         hero.instruction())) {
+    if (auto tr = GetDescriptionForTiledTransposeEmitter(hero.instruction())) {
       if (!tiled_transpose_hero) {
         // First transpose hero found.
         tiled_transpose_hero = tr;
@@ -171,15 +170,40 @@ HloFusionAnalysis HloFusionAnalysis::Create(
 
 // static
 HloFusionAnalysis HloFusionAnalysis::Create(
-    const HloFusionInstruction* fusion,
-    const se::DeviceDescription* device_info) {
-  CHECK(device_info != nullptr);
-  FusionBackendConfig backend_config =
-      fusion->has_backend_config()
-          ? fusion->backend_config<GpuBackendConfig>()->fusion_backend_config()
-          : FusionBackendConfig::default_instance();
-  return Create(std::move(backend_config),
-                HloFusionAdaptor::ForInstruction(fusion), device_info);
+    const HloInstruction& instruction,
+    const se::DeviceDescription& device_info) {
+  absl::StatusOr<GpuBackendConfig> gpu_backend_config =
+      instruction.backend_config<GpuBackendConfig>();
+
+  FusionBackendConfig fusion_backend_config =
+      gpu_backend_config.ok() ? gpu_backend_config->fusion_backend_config()
+                              : FusionBackendConfig::default_instance();
+  return Create(std::move(fusion_backend_config),
+                HloFusionAdaptor::ForInstruction(&instruction), &device_info);
+}
+
+// static
+HloFusionAnalysis HloFusionAnalysis::Create(
+    const HloInstruction& producer, const HloInstruction& consumer,
+    const se::DeviceDescription& device_info) {
+  absl::StatusOr<GpuBackendConfig> gpu_backend_config;
+
+  if (consumer.has_backend_config()) {
+    gpu_backend_config = consumer.backend_config<GpuBackendConfig>();
+  }
+
+  if (!gpu_backend_config.ok() && producer.has_backend_config()) {
+    gpu_backend_config = producer.backend_config<GpuBackendConfig>();
+  }
+
+  FusionBackendConfig fusion_backend_config =
+      gpu_backend_config.ok() ? gpu_backend_config->fusion_backend_config()
+                              : FusionBackendConfig::default_instance();
+
+  return HloFusionAnalysis::Create(
+      std::move(fusion_backend_config),
+      HloFusionAdaptor::ForProducerConsumer(&producer, &consumer),
+      &device_info);
 }
 
 // Returns true if the fusion has consistent transpose heros.
@@ -209,30 +233,29 @@ HloFusionAnalysis::EmitterFusionKind HloFusionAnalysis::GetEmitterFusionKind()
   }
 
   if (fusion_backend_config_.kind() == kTritonFusionKind ||
-      fusion_backend_config_.kind() == kTritonGemmFusionKind) {
+      fusion_backend_config_.kind() == kTritonGemmFusionKind ||
+      fusion_backend_config_.kind() == kTritonNestedGemmFusionKind) {
     return EmitterFusionKind::kTriton;
+  }
+
+  if (fusion_backend_config_.kind() == kDynamicMemcpyFusionKind) {
+    return EmitterFusionKind::kDynamicMemcpy;
   }
 
   if (fusion_backend_config_.kind() == kCuDnnFusionKind) {
     return EmitterFusionKind::kCuDnn;
   }
 
-  if (input_output_info_.smallest_input_dtype_bits < 8 ||
-      input_output_info_.smallest_output_dtype_bits < 8) {
-    // Only loop and input slice fusions currently can handle packed
-    // inputs/outputs, due to the special handling with IrArray needed to deal
-    // with multiple values occupying a single byte.
-    if (fusion_roots_.size() > 1 &&
-        IsInputFusibleNonStridedSlices(fusion_roots_) &&
-        AllSliceInputsAreCompatible(fusion_roots_)) {
-      return EmitterFusionKind::kInputSlices;
-    }
-    return EmitterFusionKind::kLoop;
-  }
+  // TODO(b/406763726): Only some emitters currently can handle packed
+  // inputs/outputs, due to the special handling with IrArray needed to deal
+  // with multiple values occupying a single byte.
+  bool has_subtype_type = input_output_info_.smallest_input_dtype_bits < 8 ||
+                          input_output_info_.smallest_output_dtype_bits < 8;
 
   std::optional<HloInstructionAdaptor> first_reduce_hero;
   for (auto [root, hero] : llvm::zip(fusion_roots_, fusion_heroes_)) {
-    if (IsRealReductionHero(root.instruction(), hero.instruction())) {
+    if (IsRealReductionHero(root.instruction(), hero.instruction(),
+                            *device_info_)) {
       first_reduce_hero = hero;
       break;
     }
@@ -244,7 +267,8 @@ HloFusionAnalysis::EmitterFusionKind HloFusionAnalysis::GetEmitterFusionKind()
       if (root == *first_reduce_hero) {
         continue;
       }
-      if (!IsRealReductionHero(root.instruction(), hero.instruction())) {
+      if (!IsRealReductionHero(root.instruction(), hero.instruction(),
+                               *device_info_)) {
         // Needs to have a compatible shape to the reduce operand (compatible
         // meaning same number of elements).
         if (ShapeUtil::ElementsIn(root.shape()) !=
@@ -264,7 +288,7 @@ HloFusionAnalysis::EmitterFusionKind HloFusionAnalysis::GetEmitterFusionKind()
   }
 
   // We expect that the last dimension is swapped with a different dimension.
-  if (HasConsistentTransposeHeros() && tiled_transpose_->permutation[2] != 2) {
+  if (HasConsistentTransposeHeros() && !has_subtype_type) {
     return EmitterFusionKind::kTranspose;
   }
 
@@ -280,7 +304,8 @@ HloFusionAnalysis::EmitterFusionKind HloFusionAnalysis::GetEmitterFusionKind()
     return EmitterFusionKind::kScatter;
   }
 
-  if (UseConcatenateFusion(fusion_roots_, fusion_heroes_)) {
+  if (UseConcatenateFusion(fusion_roots_, fusion_heroes_) &&
+      !has_subtype_type) {
     return EmitterFusionKind::kConcatenate;
   }
 
@@ -298,30 +323,12 @@ const HloInstruction* HloFusionAnalysis::FindHeroReduction() const {
   // have the same shape and layout as verified by
   // `IsFusedReductionOutputConsistent()`.
   for (auto [root, hero] : llvm::zip(roots, fusion_heroes_)) {
-    if (IsRealReductionHero(root.instruction(), hero.instruction())) {
+    if (IsRealReductionHero(root.instruction(), hero.instruction(),
+                            *device_info_)) {
       return &hero.instruction();
     }
   }
   LOG(FATAL) << "Did not find a hero reduction";
-}
-
-HloFusionAnalysis AnalyzeProducerConsumerFusion(
-    const HloInstruction& producer, const HloInstruction& consumer,
-    const se::DeviceDescription& device_info) {
-  return HloFusionAnalysis::Create(
-      consumer.has_backend_config()
-          ? consumer.backend_config<GpuBackendConfig>()->fusion_backend_config()
-          : producer.backend_config<GpuBackendConfig>()
-                ->fusion_backend_config(),
-      HloFusionAdaptor::ForProducerConsumer(&producer, &consumer),
-      &device_info);
-}
-
-HloFusionAnalysis AnalyzeFusion(const HloInstruction& consumer,
-                                const se::DeviceDescription& device_info) {
-  return HloFusionAnalysis::Create(
-      consumer.backend_config<GpuBackendConfig>()->fusion_backend_config(),
-      HloFusionAdaptor::ForInstruction(&consumer), &device_info);
 }
 
 }  // namespace gpu

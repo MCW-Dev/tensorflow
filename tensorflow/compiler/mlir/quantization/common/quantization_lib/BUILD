@@ -31,11 +31,11 @@ cc_library(
         ":quantization_config",
         ":quantization_interfaces_inc_gen",
         "//tensorflow/compiler/mlir/lite/quantization/ir:QuantOps",
+        "//tensorflow/compiler/mlir/lite/quantization/lite/toco_legacy:portable_tensor_utils",
         "//tensorflow/compiler/mlir/quantization/common/ir:QuantOps",
+        "//tensorflow/compiler/mlir/tools/optimize:quantization_utils",
         "//tensorflow/core:lib_proto_parsing",
         "//tensorflow/core:protos_all_cc",
-        "//tensorflow/lite/kernels/internal:tensor_utils",
-        "//tensorflow/lite/tools/optimize:quantization_utils",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/memory",
@@ -79,8 +79,8 @@ cc_library(
         "quantization_config.h",
     ],
     deps = [
+        "//tensorflow/compiler/mlir/lite/tools/optimize:reduced_precision_metadata",
         "//tensorflow/core:protos_all_cc",
-        "//tensorflow/lite/tools/optimize:reduced_precision_support",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Support",
@@ -102,16 +102,10 @@ td_library(
 gentbl_cc_library(
     name = "quantization_interfaces_inc_gen",
     compatible_with = get_compatible_with_portable(),
-    tbl_outs = [
-        (
-            ["-gen-op-interface-decls"],
-            "quantization_interface.h.inc",
-        ),
-        (
-            ["-gen-op-interface-defs"],
-            "quantization_interface.cc.inc",
-        ),
-    ],
+    tbl_outs = {
+        "quantization_interface.h.inc": ["-gen-op-interface-decls"],
+        "quantization_interface.cc.inc": ["-gen-op-interface-defs"],
+    },
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "quantization.td",
     deps = [

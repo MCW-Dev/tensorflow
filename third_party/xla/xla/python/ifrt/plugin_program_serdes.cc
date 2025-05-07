@@ -41,7 +41,9 @@ class PluginProgramSerDes
     return "xla::ifrt::PluginProgram";
   }
 
-  absl::StatusOr<std::string> Serialize(Serializable& serializable) override {
+  absl::StatusOr<std::string> Serialize(
+      const Serializable& serializable,
+      std::unique_ptr<SerializeOptions>) override {
     return absl::StrCat(kSerializationPrefix,
                         llvm::cast<PluginProgram>(serializable).data);
   }
@@ -77,7 +79,9 @@ class PluginCompileOptionsSerDes
     return "xla::ifrt::PluginCompileOptions";
   }
 
-  absl::StatusOr<std::string> Serialize(Serializable& serializable) override {
+  absl::StatusOr<std::string> Serialize(
+      const Serializable& serializable,
+      std::unique_ptr<SerializeOptions>) override {
     return "";
   }
 

@@ -1,9 +1,9 @@
+load("//xla/tsl:tsl.default.bzl", "get_compatible_with_portable")
 load(
-    "@local_tsl//tsl/platform:build_config.bzl",
+    "//xla/tsl/platform:build_config.bzl",
     "tsl_cc_test",
 )
-load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
-load("//xla/tsl:tsl.default.bzl", "get_compatible_with_portable")
+load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -21,7 +21,7 @@ cc_library(
     ],
     compatible_with = get_compatible_with_portable(),
     deps = [
-        "//xla/tsl/framework/convolution:eigen_convolution_helpers",
+        ":eigen_convolution_helpers",
     ],
 )
 
@@ -45,9 +45,9 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     defines = ["EIGEN_NEON_GEBP_NR=4"],
     deps = [
+        ":eigen_convolution_helpers",
+        ":eigen_spatial_convolutions-inl",
         "//xla/tsl/framework/contraction:eigen_contraction_kernel",
-        "//xla/tsl/framework/convolution:eigen_convolution_helpers",
-        "//xla/tsl/framework/convolution:eigen_spatial_convolutions-inl",
         "@eigen_archive//:eigen3",
     ],
 )
@@ -69,8 +69,6 @@ filegroup(
 )
 
 # Test against platforms and architecures that don't support CUDA.
-# TODO(b/153737462): Automatically filter tests to create the appropriate
-# portable test list.
 test_suite(
     name = "portable_kernel_tests",
     tags = [
@@ -99,9 +97,9 @@ tsl_cc_test(
     ],
     deps = [
         ":eigen_helpers",
+        "//xla/tsl/platform:test",
+        "//xla/tsl/platform:test_benchmark",
+        "//xla/tsl/platform:test_main",
         "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/platform:test",
-        "@local_tsl//tsl/platform:test_benchmark",
-        "@local_tsl//tsl/platform:test_main",
     ],
 )

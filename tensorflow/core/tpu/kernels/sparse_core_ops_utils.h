@@ -23,6 +23,8 @@ limitations under the License.
 
 #include "absl/status/status.h"
 #include "tensorflow/compiler/jit/flags.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "tensorflow/core/platform/status.h"
 #include "tensorflow/core/platform/types.h"
 
@@ -37,7 +39,7 @@ std::vector<int> ConvertBinarySplitsToBucketSplits(int64 split,
 int64 ConvertBucketSplitsToBinarySplits(std::vector<int> bucket_splits,
                                         int max_division_level);
 
-Status ValidateInputCombiner(const std::string& combiner);
+absl::Status ValidateInputCombiner(const std::string& combiner);
 
 std::function<float(float)> GetCombinerScaleContributionFunction(
     absl::string_view combiner);
@@ -63,12 +65,38 @@ int64_t GetXlaSparseCoreStackingMemLimit();
 
 int64_t GetXlaSparseCoreStackingTableShardLimit();
 
-Status GetMaxIdsAndUniquesExternal(const std::string& program_key,
-                                   const std::string& table_name,
-                                   int64_t num_samples_per_sparse_core,
-                                   int64_t feature_width,
-                                   int64_t* max_ids_per_partition,
-                                   int64_t* max_unique_ids_per_partition);
+absl::Status GetMaxIdsAndUniquesExternal(const std::string& program_key,
+                                         const std::string& table_name,
+                                         int64_t num_samples_per_sparse_core,
+                                         int64_t feature_width,
+                                         int64_t* max_ids_per_partition,
+                                         int64_t* max_unique_ids_per_partition);
+
+xla::XlaOp ApplyWeightClippingToTable(xla::XlaBuilder* builder,
+                                      xla::XlaOp table, float clip_weight_min,
+                                      float clip_weight_max);
+
+xla::XlaComputation BuildSgdOptimizerComputation(int32_t feature_width,
+                                                 float clip_weight_min,
+                                                 float clip_weight_max);
+
+xla::XlaComputation BuildAdagradOptimizerComputation(int32_t feature_width,
+                                                     float clip_weight_min,
+                                                     float clip_weight_max);
+
+xla::XlaComputation BuildAdagradMomentumOptimizerComputation(
+    int32_t feature_width, bool use_nesterov, float exponent, float beta1,
+    float beta2, float epsilon, float clip_weight_min, float clip_weight_max);
+
+xla::XlaComputation BuildAdamOptimizerComputation(
+    int32_t feature_width, bool use_sum_inside_sqrt, float beta1, float beta2,
+    float epsilon, float clip_weight_min, float clip_weight_max);
+
+xla::XlaComputation BuildFtrlOptimizerComputation(
+    int32_t feature_width, bool multiply_linear_by_learning_rate, float beta,
+    float learning_rate_power, float l1_regularization_strength,
+    float l2_regularization_strength, float clip_weight_min,
+    float clip_weight_max);
 
 }  // namespace tensorflow
 

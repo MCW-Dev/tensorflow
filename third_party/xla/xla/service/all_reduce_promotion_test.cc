@@ -15,15 +15,21 @@ limitations under the License.
 
 #include "xla/service/all_reduce_promotion.h"
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+#include "absl/strings/string_view.h"
+#include "xla/hlo/ir/hlo_module.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
+#include "xla/hlo/testlib/pattern_matcher_gmock.h"
 #include "xla/service/pattern_matcher.h"
-#include "xla/service/pattern_matcher_gmock.h"
-#include "xla/tests/hlo_test_base.h"
+#include "xla/xla_data.pb.h"
+#include "tsl/platform/statusor.h"
 
 namespace xla {
 namespace {
 namespace m = ::xla::match;
 
-class AllReducePromotionTest : public HloTestBase {
+class AllReducePromotionTest : public HloHardwareIndependentTestBase {
  public:
   AllReducePromotion pass_{{{U16, U32}, {S16, S32}}};
 };

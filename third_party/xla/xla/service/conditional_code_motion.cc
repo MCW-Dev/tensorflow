@@ -38,13 +38,13 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/pass/hlo_pass_pipeline.h"
+#include "xla/hlo/transforms/simplifiers/hlo_dce.h"
+#include "xla/hlo/transforms/simplifiers/tuple_simplifier.h"
 #include "xla/literal.h"
 #include "xla/map_util.h"
 #include "xla/service/hlo_cse.h"
-#include "xla/service/hlo_dce.h"
-#include "xla/service/hlo_pass_pipeline.h"
 #include "xla/service/hlo_verifier.h"
-#include "xla/service/tuple_simplifier.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
@@ -61,7 +61,7 @@ HloInstruction* CloneNestedTuples(HloInstruction* tuple) {
     return tuple;
   }
   std::vector<HloInstruction*> tuple_users, gte_users;
-  for (int i = 0; i < tuple->shape().tuple_shapes_size(); ++i) {
+  for (int i = 0; i < tuple->shape().tuple_shapes().size(); ++i) {
     gte_users.push_back(nullptr);
   }
   for (auto* tuple_user : tuple->users()) {
@@ -77,7 +77,7 @@ HloInstruction* CloneNestedTuples(HloInstruction* tuple) {
   if (!tuple_users.empty() || tuple->user_count() == 0 ||
       tuple == tuple->parent()->root_instruction()) {
     VLOG(5) << "CLONING: " << tuple->ToString() << "\n";
-    int64_t tuple_size = tuple->shape().tuple_shapes_size();
+    int64_t tuple_size = tuple->shape().tuple_shapes().size();
     std::vector<HloInstruction*> operands;
     operands.reserve(tuple_size);
     for (int64_t j = 0; j < tuple_size; ++j) {
@@ -785,6 +785,12 @@ absl::StatusOr<bool> ConditionalCodeMotion::MoveUserInstructionsIn(
   if (to_move_in.empty()) {
     return false;
   }
+
+  if (!conditional->shape().IsTuple() && conditional->user_count() > 1) {
+    // This function cannot handle this case.
+    return false;
+  }
+
   // Mapping boundaries to be moved to their new representations.
   absl::flat_hash_map<Boundary, Boundary> hoisted_boundaries;
   int64_t to_move_in_size = to_move_in.size();
@@ -806,8 +812,8 @@ absl::StatusOr<bool> ConditionalCodeMotion::MoveUserInstructionsIn(
   // 0 to save the old operand being used.
   int64_t op_index =
       conditional->shape().IsTuple()
-          ? ((use_index >= 0) ? conditional->shape().tuple_shapes_size() - 1
-                              : conditional->shape().tuple_shapes_size())
+          ? ((use_index >= 0) ? conditional->shape().tuple_shapes().size() - 1
+                              : conditional->shape().tuple_shapes().size())
           : 0;
   // Use to map the tuple_use instruction to its operand;
   Boundary b_opd_use(Boundary::Position::kInsideBranch);
@@ -831,7 +837,7 @@ absl::StatusOr<bool> ConditionalCodeMotion::MoveUserInstructionsIn(
       // If old_root is not a kTuple but has tuple shape, elements within the
       // tuple must be extracted first to be used by the new instructions.
       const Shape& old_shape = old_root->shape();
-      for (int i = 0; i < old_shape.tuple_shapes_size(); ++i) {
+      for (int i = 0; i < old_shape.tuple_shapes().size(); ++i) {
         auto element =
             computation->AddInstruction(HloInstruction::CreateGetTupleElement(
                 old_shape.tuple_shapes(i), old_root, i));
@@ -970,7 +976,7 @@ class MoveOperandIntoBranch {
                               inst->operands()[i]) -
                     inst->operands().begin();
         VLOG(2) << "operand index = " << j << "\n";
-        CHECK(j < branch_input->shape().tuple_shapes_size());
+        CHECK(j < branch_input->shape().tuple_shapes().size());
         if (j < i) {
           operands[i] = operands[j];
         } else {
@@ -1005,7 +1011,9 @@ class MoveOperandIntoBranch {
       CHECK_NE(new_tuple, nullptr);
       VLOG(5) << "Cloned new tuple:" << new_tuple->parent()->ToString() << "\n";
       std::vector<std::vector<HloInstruction*>> gte_users;
-      for (int64_t j = 0; j < branch_param->shape().tuple_shapes_size(); ++j) {
+      gte_users.reserve(branch_param->shape().tuple_shapes().size());
+      for (int64_t j = 0; j < branch_param->shape().tuple_shapes().size();
+           ++j) {
         gte_users.push_back(std::vector<HloInstruction*>());
       }
       for (auto* param_user : branch_param->users()) {
@@ -1038,7 +1046,7 @@ class MoveOperandIntoBranch {
             if (matching_index > 0) {
               param_tuple = branch_param;
             }
-            CHECK_GT(param_shape->tuple_shapes_size(), tuple_index);
+            CHECK_GT(param_shape->tuple_shapes().size(), tuple_index);
             new_param_shape = &param_shape->tuple_shapes(tuple_index);
             param_shape = new_param_shape;
             VLOG(1) << "new_param_shape: " << param_shape->ToString();

@@ -73,7 +73,7 @@ static std::string cudaGetErrorString(int err) { return std::to_string(err); }
 #define TF_RETURN_IF_CUDA_ERROR(result)                                       \
   do {                                                                        \
     cudaError_t error(result);                                                \
-    if (!SE_PREDICT_TRUE(error == cudaSuccess)) {                             \
+    if (!TF_PREDICT_TRUE(error == cudaSuccess)) {                             \
       return absl::InternalError(                                             \
           absl::StrCat("Cuda call failed with ", cudaGetErrorString(error))); \
     }                                                                         \
@@ -82,7 +82,7 @@ static std::string cudaGetErrorString(int err) { return std::to_string(err); }
 #define TF_OP_REQUIRES_CUDA_SUCCESS(context, result)                          \
   do {                                                                        \
     cudaError_t error(result);                                                \
-    if (!SE_PREDICT_TRUE(error == cudaSuccess)) {                             \
+    if (!TF_PREDICT_TRUE(error == cudaSuccess)) {                             \
       context->SetStatus(absl::InternalError(                                 \
           absl::StrCat("Cuda call failed with", cudaGetErrorString(error)))); \
       return;                                                                 \
@@ -194,7 +194,7 @@ __device__ const unsigned kGpuWarpAll = 0xffffffff;
 __device__ inline unsigned GpuLaneId() {
   unsigned int lane_id;
 #if GOOGLE_CUDA
-#if __clang__
+#if __clang__ && !__NVCC__
   return __nvvm_read_ptx_sreg_laneid();
 #else   // __clang__
   asm("mov.u32 %0, %%laneid;" : "=r"(lane_id));

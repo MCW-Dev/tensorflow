@@ -15,23 +15,24 @@ limitations under the License.
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
+#include <gtest/gtest.h>
 #include "absl/log/log.h"
 #include "absl/strings/string_view.h"
-#include "xla/service/gpu/gpu_asm_opts_util.h"
+#include "absl/types/span.h"
 #include "xla/service/gpu/stream_executor_util.h"
-#include "xla/stream_executor/cuda/cuda_asm_compiler.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/kernel.h"
+#include "xla/stream_executor/launch_dim.h"
 #include "xla/stream_executor/platform.h"
 #include "xla/stream_executor/platform_manager.h"
 #include "xla/stream_executor/stream_executor.h"
+#include "xla/tsl/platform/status.h"
+#include "xla/tsl/platform/statusor.h"
 #include "xla/xla.pb.h"
-#include "tsl/platform/status.h"
-#include "tsl/platform/statusor.h"
-#include "tsl/platform/test.h"
 
 namespace xla {
 namespace gpu {
@@ -151,13 +152,8 @@ TEST(SharedMemoryUseTest, ArrayReversalWorks) {
   const int buffer_size_bytes = n_elements * sizeof(data_type);
   VLOG(1) << "Using " << buffer_size_bytes << " bytes of shared memory";
 
-  std::vector<uint8_t> compiled_ptx =
-      se::CompileGpuAsm(executor->device_ordinal(), kPTX.data(),
-                        PtxOptsFromDebugOptions(DebugOptions{}))
-          .value();
   std::unique_ptr<stream_executor::Kernel> kernel =
-      CreateKernel("dyn_shmem_kernel", /*num_args=*/3,
-                   reinterpret_cast<char*>(compiled_ptx.data()),
+      CreateKernel("dyn_shmem_kernel", /*num_args=*/3, kPTX,
                    /*cubin_data=*/{}, executor,
                    /*shared_mem_bytes=*/buffer_size_bytes)
           .value();
@@ -180,10 +176,11 @@ TEST(SharedMemoryUseTest, ArrayReversalWorks) {
   se::DeviceMemory<uint32_t> dev_n_rows = executor->AllocateScalar<uint32_t>();
   TF_CHECK_OK(stream->Memcpy(&dev_n_rows, &n_rows, sizeof(uint32_t)));
   TF_CHECK_OK(stream->BlockHostUntilDone());
+
   TF_CHECK_OK(ExecuteKernelOnStream(
       *kernel, {device_buffer, dev_n_cols, dev_n_rows},
       {/*block_x_count=*/1, /*thread_x_count_per_block=*/n_cols},
-      stream.get()));
+      /*cluster_dim=*/{}, stream.get()));
   TF_CHECK_OK(stream->BlockHostUntilDone());
   TF_CHECK_OK(
       stream->Memcpy(host_buffer.data(), device_buffer, buffer_size_bytes));

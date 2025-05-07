@@ -103,6 +103,8 @@ void FillNumericTensorBuffer(DataType dtype, size_t num_elements, void* buffer,
     TF_CALL_float(CASE);
     TF_CALL_int4(CASE);
     TF_CALL_uint4(CASE);
+    TF_CALL_int2(CASE);
+    TF_CALL_uint2(CASE);
 #undef CASE
     default:
       CHECK(false) << "Unsupported data type: " << DataTypeString(dtype);
@@ -135,6 +137,8 @@ void CheckBufferDataIsEqual(DataType dtype, int64_t num_elements, void* a,
     TF_CALL_float(CASE);
     TF_CALL_int4(CASE);
     TF_CALL_uint4(CASE);
+    TF_CALL_int2(CASE);
+    TF_CALL_uint2(CASE);
 #undef CASE
     default:
       CHECK(false) << "Unsupported data type: " << DataTypeString(dtype);
@@ -142,7 +146,7 @@ void CheckBufferDataIsEqual(DataType dtype, int64_t num_elements, void* a,
 }
 
 AbstractTensorPtr TensorHandleToTensor(ImmediateExecutionTensorHandle* handle) {
-  Status status;
+  absl::Status status;
   AbstractTensorPtr tensor(handle->Resolve(&status));
   CHECK(status.ok()) << status.message();
   CHECK_NE(tensor.get(), nullptr);

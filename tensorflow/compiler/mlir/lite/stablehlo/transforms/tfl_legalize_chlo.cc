@@ -15,7 +15,6 @@ limitations under the License.
 #include <memory>
 #include <utility>
 
-#include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/PatternMatch.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
@@ -26,6 +25,7 @@ limitations under the License.
 #include "stablehlo/dialect/ChloOps.h"  // from @stablehlo  // IWYU pragma: keep
 #include "stablehlo/dialect/StablehloOps.h"  // from @stablehlo  // IWYU pragma: keep
 #include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"  // IWYU pragma: keep
+#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/legalize_hlo_conversions/gelu.h"
 #include "tensorflow/compiler/mlir/lite/transforms/passes.h"  // IWYU pragma: keep
 
 namespace mlir {
@@ -33,7 +33,7 @@ namespace odml {
 namespace {
 
 #define GEN_PASS_DEF_LEGALIZECHLOTOTFLPASS
-#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/passes.h.inc"
+#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/stablehlo_passes.h.inc"
 
 class LegalizeChloToTflPass
     : public impl::LegalizeChloToTflPassBase<LegalizeChloToTflPass> {
@@ -42,8 +42,11 @@ class LegalizeChloToTflPass
 
   void runOnOperation() override {
     auto func = getOperation();
-    RewritePatternSet patterns(&getContext());
-    if (failed(applyPatternsAndFoldGreedily(func, std::move(patterns)))) {
+    auto* ctx = &getContext();
+
+    RewritePatternSet patterns(ctx);
+    patterns.add<LowerGELU>(ctx);
+    if (failed(applyPatternsGreedily(func, std::move(patterns)))) {
       signalPassFailure();
     }
   }

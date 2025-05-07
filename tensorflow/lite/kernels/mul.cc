@@ -37,15 +37,6 @@ limitations under the License.
 #include "tensorflow/lite/kernels/internal/types.h"
 #include "tensorflow/lite/kernels/kernel_util.h"
 
-#ifdef TFLITE_KERNEL_USE_XNNPACK
-#include <array>
-#include <limits>
-
-#include "xnnpack.h"  // from @XNNPACK
-#include "tensorflow/lite/kernels/cpu_backend_context.h"
-#include "tensorflow/lite/minimal_logging.h"
-#endif  // TFLITE_KERNEL_USE_XNNPACK
-
 namespace tflite {
 namespace ops {
 namespace builtin {
@@ -124,9 +115,9 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
     output_size = TfLiteIntArrayCopy(input1->dims);
   }
 
-  if (output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||
-      (output->quantization.type != kTfLiteNoQuantization &&
-       output->type == kTfLiteInt16)) {
+  if ((output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||
+       output->type == kTfLiteInt16) &&
+      (output->quantization.type != kTfLiteNoQuantization)) {
     TF_LITE_ENSURE_STATUS(CalculateActivationRangeQuantized(
         context, params->activation, output, &data->output_activation_min,
         &data->output_activation_max));
@@ -193,60 +184,45 @@ void EvalMul(TfLiteContext* context, TfLiteNode* node, TfLiteMulParams* params,
         TF_LITE_MUL(reference_ops, Mul, float);
       }
     } else {
-#ifdef TFLITE_KERNEL_USE_XNNPACK
-      const size_t num_input1_dims =
-          static_cast<size_t>(GetTensorShape(input1).DimensionsCount());
-      const size_t num_input2_dims =
-          static_cast<size_t>(GetTensorShape(input2).DimensionsCount());
-      if (std::max(num_input1_dims, num_input2_dims) <= XNN_MAX_TENSOR_DIMS) {
-        std::array<size_t, XNN_MAX_TENSOR_DIMS> input1_shape;
-        std::array<size_t, XNN_MAX_TENSOR_DIMS> input2_shape;
-        for (size_t i = 0; i < num_input1_dims; ++i) {
-          input1_shape[i] = GetTensorShape(input1).Dims(i);
-        }
-        for (size_t i = 0; i < num_input2_dims; ++i) {
-          input2_shape[i] = GetTensorShape(input2).Dims(i);
-        }
-        CpuBackendContext* cpu_backend_context =
-            CpuBackendContext::GetFromContext(context);
-        pthreadpool_t threadpool =
-            cpu_backend_context->get_xnnpack_threadpool();
-        float output_min = -std::numeric_limits<float>::infinity();
-        float output_max = std::numeric_limits<float>::infinity();
-        // NOTE: In the case of NaN inputs the behavior is platform-dependent.
-        // Passing in NaN values should not cause hardware exceptions, but NaN
-        // propagation is not guaranteed.
-        CalculateActivationRange(params->activation, &output_min, &output_max);
-        const enum xnn_status status = xnn_run_multiply_nd_f32(
-            num_input1_dims, input1_shape.data(), num_input2_dims,
-            input2_shape.data(), GetTensorData<float>(input1),
-            GetTensorData<float>(input2), GetTensorData<float>(output),
-            output_min, output_max,
-            /*flags=*/XNN_FLAG_YIELD_WORKERS, threadpool);
-        if (status != xnn_status_success) {
-          TFLITE_LOG(TFLITE_LOG_INFO,
-                     "Failed to run xnn_run_multiply_nd_f32. Error code: %d",
-                     status);
-          if (need_broadcast) {
-            TF_LITE_MUL(reference_ops, BroadcastMul6DSlow, float);
-          } else {
-            TF_LITE_MUL(reference_ops, Mul, float);
-          }
-        }
-        return;
-      }
-#endif  // TFLITE_KERNEL_USE_XNNPACK
       if (need_broadcast) {
         TF_LITE_MUL(optimized_ops, BroadcastMulDispatch, float);
       } else {
         TF_LITE_MUL(optimized_ops, Mul, float);
       }
     }
+  } else if (output->type == kTfLiteFloat16) {
+    if (kernel_type == kReference) {
+      if (need_broadcast) {
+        TF_LITE_MUL(reference_ops, BroadcastMul6DSlow, Eigen::half);
+      } else {
+        TF_LITE_MUL(reference_ops, Mul, Eigen::half);
+      }
+    } else {
+      if (need_broadcast) {
+        TF_LITE_MUL(optimized_ops, BroadcastMulDispatch, Eigen::half);
+      } else {
+        TF_LITE_MUL(optimized_ops, Mul, Eigen::half);
+      }
+    }
+  } else if (output->type == kTfLiteBFloat16) {
+    if (kernel_type == kReference) {
+      if (need_broadcast) {
+        TF_LITE_MUL(reference_ops, BroadcastMul6DSlow, Eigen::bfloat16);
+      } else {
+        TF_LITE_MUL(reference_ops, Mul, Eigen::bfloat16);
+      }
+    } else {
+      if (need_broadcast) {
+        TF_LITE_MUL(optimized_ops, BroadcastMulDispatch, Eigen::bfloat16);
+      } else {
+        TF_LITE_MUL(optimized_ops, Mul, Eigen::bfloat16);
+      }
+    }
   } else if (output->type == kTfLiteInt16) {
-    int16_t output_activation_min, output_activation_max;
-    CalculateActivationRange(params->activation, &output_activation_min,
-                             &output_activation_max);
-    SetActivationParams(output_activation_min, output_activation_max,
+    int16_t int16_output_activation_min, int16_output_activation_max;
+    CalculateActivationRange(params->activation, &int16_output_activation_min,
+                             &int16_output_activation_max);
+    SetActivationParams(int16_output_activation_min, int16_output_activation_max,
                         &op_params);
     if (need_broadcast) {
       reference_ops::BroadcastMul6DSlow<int16_t, true>(
@@ -258,6 +234,23 @@ void EvalMul(TfLiteContext* context, TfLiteNode* node, TfLiteMulParams* params,
           op_params, GetTensorShape(input1), GetTensorData<int16_t>(input1),
           GetTensorShape(input2), GetTensorData<int16_t>(input2),
           GetTensorShape(output), GetTensorData<int16_t>(output));
+    }
+  } else if (output->type == kTfLiteInt8) {
+    int8_t int8_output_activation_min, int8_output_activation_max;
+    CalculateActivationRange(params->activation, &int8_output_activation_min,
+                             &int8_output_activation_max);
+    SetActivationParams(int8_output_activation_min, int8_output_activation_max,
+                        &op_params);
+    if (need_broadcast) {
+      reference_ops::BroadcastMul6DSlow<int8_t, true>(
+          op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
+          GetTensorShape(input2), GetTensorData<int8_t>(input2),
+          GetTensorShape(output), GetTensorData<int8_t>(output));
+    } else {
+      reference_ops::Mul<int8_t>(
+          op_params, GetTensorShape(input1), GetTensorData<int8_t>(input1),
+          GetTensorShape(input2), GetTensorData<int8_t>(input2),
+          GetTensorShape(output), GetTensorData<int8_t>(output));
     }
   } else if (output->type == kTfLiteInt64) {
     if (need_broadcast) {
@@ -387,9 +380,11 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node, OpData* data,
                       TfLiteMulParams* params, const TfLiteTensor* input1,
                       const TfLiteTensor* input2, TfLiteTensor* output) {
   bool output_quantized = output->quantization.type != kTfLiteNoQuantization;
-  if (output->type == kTfLiteFloat32 || output->type == kTfLiteInt32 ||
+  if (output->type == kTfLiteFloat32 || output->type == kTfLiteFloat16 ||
+      output->type == kTfLiteBFloat16 || output->type == kTfLiteInt32 ||
       output->type == kTfLiteInt64 || output->type == kTfLiteComplex64 ||
-      (!output_quantized && output->type == kTfLiteInt16) ||
+      (!output_quantized &&
+      (output->type == kTfLiteInt16 || output->type == kTfLiteInt8)) ||
       output->type == kTfLiteUInt32) {
     EvalMul<kernel_type>(context, node, params, data, input1, input2, output);
   } else if (output->type == kTfLiteUInt8 || output->type == kTfLiteInt8 ||
@@ -398,10 +393,11 @@ TfLiteStatus EvalImpl(TfLiteContext* context, TfLiteNode* node, OpData* data,
         context, EvalQuantized<kernel_type>(context, node, params, data, input1,
                                             input2, output));
   } else {
-    TF_LITE_KERNEL_LOG(context,
-                       "Mul only supports FLOAT32, COMPLEX32, INT8, INT16,"
-                       " INT32, INT64 and quantized UINT8 now, got %d.",
-                       output->type);
+    TF_LITE_KERNEL_LOG(
+        context,
+        "Mul only supports FLOAT32, COMPLEX32, INT8, INT16, FLOAT16, BFLOAT16"
+        " INT32, INT64 and quantized UINT8 now, got %d.",
+        output->type);
     return kTfLiteError;
   }
 

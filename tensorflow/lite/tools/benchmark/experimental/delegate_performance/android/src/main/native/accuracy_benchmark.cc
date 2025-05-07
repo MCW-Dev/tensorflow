@@ -20,11 +20,17 @@ limitations under the License.
 #include <sys/stat.h>
 
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
+#include "flatbuffers/base.h"  // from @flatbuffers
 #include "flatbuffers/buffer.h"  // from @flatbuffers
 #include "flatbuffers/flatbuffer_builder.h"  // from @flatbuffers
+#include "flatbuffers/flatbuffers.h"  // from @flatbuffers
+#include "flatbuffers/vector.h"  // from @flatbuffers
 #include "tensorflow/lite/acceleration/configuration/configuration_generated.h"
 #include "tensorflow/lite/experimental/acceleration/mini_benchmark/c/c_api.h"
 #include "tensorflow/lite/kernels/internal/compatibility.h"

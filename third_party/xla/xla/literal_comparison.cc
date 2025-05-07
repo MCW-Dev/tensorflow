@@ -31,13 +31,13 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "absl/base/casts.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/types/span.h"
-#include "Eigen/Core"  // from @eigen_archive
+#include "Eigen/Core"
 #include "xla/error_spec.h"
+#include "xla/fp_util.h"
 #include "xla/index_util.h"
 #include "xla/layout_util.h"
 #include "xla/literal.h"
@@ -45,12 +45,11 @@ limitations under the License.
 #include "xla/primitive_util.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
+#include "xla/tsl/platform/errors.h"
+#include "xla/tsl/platform/logging.h"  // IWYU pragma: keep
 #include "xla/types.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/platform/errors.h"
-#include "tsl/platform/logging.h"  // IWYU pragma: keep
-#include "tsl/platform/ml_dtypes.h"
 
 using absl::StrAppend;
 using absl::StrAppendFormat;
@@ -140,7 +139,7 @@ template <typename NativeT>
 absl::Status Equal(LiteralSlice expected, LiteralSlice actual,
                    absl::Span<int64_t> multi_index, int64_t dimension,
                    Literal* mismatched = nullptr) {
-  if (dimension == expected.shape().dimensions_size()) {
+  if (dimension == expected.shape().dimensions().size()) {
     NativeT expected_value = expected.Get<NativeT>(multi_index);
     NativeT actual_value = actual.Get<NativeT>(multi_index);
     bool result =
@@ -207,8 +206,8 @@ template <typename NativeT>
 std::string FpValueToString(NativeT value) {
   if constexpr (is_specialized_floating_point_v<NativeT>) {
     constexpr int kPrecisionDigits = std::numeric_limits<NativeT>::max_digits10;
-    const int kExponentDigts =
-        std::ceil(std::log10(std::numeric_limits<NativeT>::max_exponent10));
+    const int kExponentDigts = std::ceil(
+        std::log10(std::max(std::numeric_limits<NativeT>::max_exponent10, 1)));
     constexpr int kExtraChars = 4;
     const int kTotalChars = kPrecisionDigits * kExponentDigts + kExtraChars;
     return absl::StrFormat("%*.*g", kTotalChars, kPrecisionDigits,
@@ -255,18 +254,25 @@ class NearComparator {
     // from the 'actual' literal.
     int64_t linear_index;
 
+    int float_distance = -1;
+
     bool operator<(const Mismatch& other) const {
       return rel_error < other.rel_error;
     }
 
     std::string ToString(const Shape& shape) const {
-      return absl::StrFormat(
-          "actual %s, expected %s, index %s, rel error %8.3g, abs error %8.3g",
+      auto s = absl::StrFormat(
+          "actual %s, expected %s, index %s, rel error %8.3g, abs error "
+          "%8.3g",
           FpValueToString(actual), FpValueToString(expected),
           LiteralUtil::MultiIndexAsString(
               IndexUtil::LinearIndexToMultidimensionalIndex(shape,
                                                             linear_index)),
           rel_error, abs_error);
+      if (float_distance >= 0) {
+        StrAppendFormat(&s, ", float distance %d", float_distance);
+      }
+      return s;
     }
   };
 
@@ -340,12 +346,35 @@ class NearComparator {
     }
   }
 
+  template <typename T>
+  int CalculateFloatDistance(T expected, T actual) {
+    if (error_.low_precision_fp_error_spec.type ==
+        PrimitiveType::PRIMITIVE_TYPE_INVALID)
+      return -1;
+    return primitive_util::FloatingPointTypeSwitch<int>(
+        [&](const auto kType) -> int {
+          using NarrowNativeT = primitive_util::NativeTypeOf<kType>;
+          // TODO(b/370786669): Once ml_dtypes is updated to include
+          // https://github.com/jax-ml/ml_dtypes/pull/205, do not special-case
+          // e3m4 by casting to half first.
+          if constexpr (std::is_same_v<NarrowNativeT, tsl::float8_e3m4>) {
+            return CalculateDistanceInFloats(NarrowNativeT(half(expected)),
+                                             NarrowNativeT(half(actual)));
+          } else {
+            return CalculateDistanceInFloats(NarrowNativeT(expected),
+                                             NarrowNativeT(actual));
+          }
+        },
+        error_.low_precision_fp_error_spec.type);
+  }
+
   // Compares the two given elements from the expected and actual literals at
   // the given literal_index and keeps track of various mismatch statistics.
   template <typename T>
   void CompareValues(T expected, T actual, int64_t linear_index) {
     double abs_error;
     double rel_error;
+    int float_distance = -1;
     if (CompareEqual<T>(expected, actual, {linear_index})) {
       abs_error = 0;
       rel_error = 0;
@@ -387,7 +416,11 @@ class NearComparator {
       abs_error = std::numeric_limits<double>::infinity();
       rel_error = std::numeric_limits<double>::infinity();
     } else {
+      float_distance = CalculateFloatDistance<T>(expected, actual);
       abs_error = FpAbsoluteValue(actual - expected);
+      if (!std::numeric_limits<T>::is_signed && IsNaN(abs_error)) {
+        abs_error = FpAbsoluteValue(expected - actual);
+      }
 
       // Avoid division by 0 even though it's well-defined because ubsan can be
       // configured to treat this as a fatal error.
@@ -397,8 +430,24 @@ class NearComparator {
         rel_error = std::numeric_limits<double>::infinity();
       }
     }
-    const bool is_abs_mismatch = abs_error > error_.abs;
-    const bool is_rel_mismatch = rel_error > error_.rel;
+    bool is_within_n_floats = false;
+    bool should_use_float_error_spec =
+        error_.low_precision_fp_error_spec.type !=
+        PrimitiveType::PRIMITIVE_TYPE_INVALID;
+    if (should_use_float_error_spec &&
+        error_.low_precision_fp_error_spec.within_n_values >= 0) {
+      is_within_n_floats =
+          float_distance <= error_.low_precision_fp_error_spec.within_n_values;
+    }
+
+    const bool is_abs_mismatch =
+        (should_use_float_error_spec && is_within_n_floats)
+            ? false
+            : (abs_error > error_.abs);
+    const bool is_rel_mismatch =
+        (should_use_float_error_spec && is_within_n_floats)
+            ? false
+            : (rel_error > error_.rel);
     const bool is_mismatch = is_abs_mismatch && is_rel_mismatch;
 
     // Update the error of the relative bucket only if the *absolute* error
@@ -423,8 +472,12 @@ class NearComparator {
     // Keep track of the kTopRelativeErrorCount relative error mismatches.
     if (top_rel_mismatches_.size() < kTopRelativeErrorCount ||
         rel_error > top_rel_mismatches_.begin()->rel_error) {
-      Mismatch mismatch = {actual, expected, rel_error, abs_error,
-                           linear_index};
+      Mismatch mismatch = {/*actual=*/actual,
+                           /*expected=*/expected,
+                           /*rel_error=*/rel_error,
+                           /*abs_error=*/abs_error,
+                           /*linear_index=*/linear_index,
+                           /*float_distance=*/float_distance};
       top_rel_mismatches_.insert(mismatch);
       if (top_rel_mismatches_.size() > kTopRelativeErrorCount) {
         top_rel_mismatches_.erase(top_rel_mismatches_.begin());
@@ -465,7 +518,7 @@ class NearComparator {
       }
       return;
     }
-    std::vector<int64_t> multi_index(actual_.shape().rank(), 0);
+    std::vector<int64_t> multi_index(actual_.shape().dimensions().size(), 0);
     CompareLiteralsSlow(0, &multi_index);
   }
 
@@ -653,14 +706,18 @@ absl::Status EqualHelper(const LiteralSlice& expected,
       next_index.pop_back();
     }
   } else {
-    std::vector<int64_t> multi_index(expected.shape().dimensions_size(), 0);
+    std::vector<int64_t> multi_index(
+        expected.shape().IsArray() ? expected.shape().dimensions().size() : 0,
+        0);
     auto index = absl::MakeSpan(multi_index);
 
-    Shape unequal_shape = ShapeUtil::MakeShape(PrimitiveType::PRED,
-                                               expected.shape().dimensions());
+    const Shape unequal_shape = ShapeUtil::MakeShape(
+        PrimitiveType::PRED, expected.shape().IsArray()
+                                 ? expected.shape().dimensions()
+                                 : absl::Span<const int64_t>());
     Literal miscompared(unequal_shape);
-    Literal* miscompared_ptr =
-        (miscompare_callback == nullptr ? nullptr : &miscompared);
+    Literal* const miscompared_ptr =
+        (miscompare_callback == nullptr) ? nullptr : &miscompared;
 
     primitive_util::PrimitiveTypeSwitch<void>(
         [&](auto primitive_type_constant) -> void {
@@ -777,7 +834,7 @@ absl::Status EqualShapes(const Shape& expected, const Shape& actual) {
           ShapeUtil::TupleElementCount(expected),
           ShapeUtil::TupleElementCount(actual));
     }
-    for (int i = 0; i < expected.tuple_shapes_size(); ++i) {
+    for (int i = 0; i < expected.tuple_shapes().size(); ++i) {
       absl::Status result =
           EqualShapes(expected.tuple_shapes(i), actual.tuple_shapes(i));
       if (!result.ok()) {
@@ -785,7 +842,7 @@ absl::Status EqualShapes(const Shape& expected, const Shape& actual) {
       }
     }
   } else if (expected.IsArray()) {
-    if (expected.rank() != actual.rank()) {
+    if (expected.dimensions().size() != actual.dimensions().size()) {
       return InvalidArgument("want rank of %s got rank of %s",
                              ShapeUtil::HumanString(expected),
                              ShapeUtil::HumanString(actual));
@@ -795,12 +852,12 @@ absl::Status EqualShapes(const Shape& expected, const Shape& actual) {
                              PrimitiveType_Name(expected.element_type()),
                              PrimitiveType_Name(actual.element_type()));
     }
-    if (expected.dimensions_size() != actual.dimensions_size()) {
+    if (expected.dimensions().size() != actual.dimensions().size()) {
       return InvalidArgument("want dimensions_size %d got dimensions_size %d",
-                             expected.dimensions_size(),
-                             actual.dimensions_size());
+                             expected.dimensions().size(),
+                             actual.dimensions().size());
     }
-    for (int i = 0; i < expected.dimensions_size(); ++i) {
+    for (int i = 0; i < expected.dimensions().size(); ++i) {
       if (expected.dimensions(i) != actual.dimensions(i)) {
         return InvalidArgument(
             "mismatch in dimension #%d expected: %s actual: %s", i,
@@ -820,6 +877,10 @@ absl::Status EqualDynamicShapesAndDimensions(const LiteralSlice& expected,
       [&expected, &actual](const Shape& expected_shape,
                            const ShapeIndex& index) -> absl::Status {
         auto actual_shape = ShapeUtil::GetSubshape(actual.shape(), index);
+        if (!expected_shape.IsArray()) {
+          return absl::OkStatus();
+        }
+
         for (int i = 0; i < expected_shape.dimensions().size(); ++i) {
           if (!expected_shape.is_dynamic_dimension(i) &&
               !actual_shape.is_dynamic_dimension(i)) {
@@ -880,9 +941,9 @@ absl::Status EmitLiteralsInErrorMessage(const absl::Status& result,
 absl::Status Equal(const LiteralSlice& expected, const LiteralSlice& actual) {
   if (VLOG_IS_ON(1)) {
     LOG(INFO) << "expected:";
-    XLA_LOG_LINES(::tsl::INFO, expected.ToString());
+    XLA_LOG_LINES(INFO, expected.ToString());
     LOG(INFO) << "actual:";
-    XLA_LOG_LINES(::tsl::INFO, actual.ToString());
+    XLA_LOG_LINES(INFO, actual.ToString());
   }
   absl::Status result = EqualHelper(expected, actual, {}, nullptr);
   return EmitLiteralsInErrorMessage(result, expected, actual);
@@ -893,9 +954,9 @@ absl::Status Near(const LiteralSlice& expected, const LiteralSlice& actual,
                   const MiscompareCallback& miscompare_callback) {
   if (VLOG_IS_ON(1)) {
     LOG(INFO) << "Expected literal:";
-    XLA_LOG_LINES(::tsl::INFO, expected.ToString());
+    XLA_LOG_LINES(INFO, expected.ToString());
     LOG(INFO) << "Actual literal:";
-    XLA_LOG_LINES(::tsl::INFO, actual.ToString());
+    XLA_LOG_LINES(INFO, actual.ToString());
   }
   absl::Status result = NearHelper(expected, actual, /*shape_index=*/{}, error,
                                    detailed_message, miscompare_callback);

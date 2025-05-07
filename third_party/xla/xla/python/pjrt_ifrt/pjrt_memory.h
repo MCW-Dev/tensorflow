@@ -16,9 +16,13 @@ limitations under the License.
 #ifndef XLA_PYTHON_PJRT_IFRT_PJRT_MEMORY_H_
 #define XLA_PYTHON_PJRT_IFRT_PJRT_MEMORY_H_
 
+#include <vector>
+
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "llvm/Support/ExtensibleRTTI.h"
 #include "xla/pjrt/pjrt_client.h"
+#include "xla/pjrt/pjrt_device_description.h"
 #include "xla/python/ifrt/memory.h"
 
 namespace xla {
@@ -38,6 +42,10 @@ class PjRtMemory final
     : public llvm::RTTIExtends<PjRtMemory, PjRtCompatibleMemory> {
  public:
   PjRtMemory(PjRtClient* client, xla::PjRtMemorySpace* pjrt_memory);
+
+  // Constructor for memories for non-addressable devices that are not backed by
+  // a PjRtMemorySpace.
+  PjRtMemory(PjRtClient* client, const MemoryKind& kind, Device* device);
 
   PjRtClient* client() const { return client_; }
   xla::PjRtMemorySpace* pjrt_memory() override { return pjrt_memory_; }

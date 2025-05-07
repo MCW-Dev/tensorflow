@@ -37,9 +37,12 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         "//tensorflow/lite:allocation",
+        "//tensorflow/lite:array",
         "//tensorflow/lite:kernel_api",
         "//tensorflow/lite:minimal_logging",
         "//tensorflow/lite:util",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/c:common",
         "//tensorflow/lite/core/c:c_api_types",
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/delegates:serialization",
@@ -52,7 +55,7 @@ cc_library(
         "//tensorflow/lite/nnapi/sl:nnapi_support_library_headers",
         "//tensorflow/lite/schema:schema_fbs",
         "@FP16",
-        "@farmhash_archive//:farmhash",
+        "@eigen_archive//:eigen3",
     ],
 )
 
@@ -111,9 +114,11 @@ cc_library(
     copts = ["-DNNAPI_VERBOSE_VALIDATION"],
     deps = [
         "//tensorflow/lite:allocation",
+        "//tensorflow/lite:array",
         "//tensorflow/lite:kernel_api",
         "//tensorflow/lite:minimal_logging",
         "//tensorflow/lite:util",
+        "//tensorflow/lite/c:common",
         "//tensorflow/lite/core/c:c_api_types",
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/delegates:serialization",
@@ -126,7 +131,7 @@ cc_library(
         "//tensorflow/lite/nnapi/sl:nnapi_support_library_headers",
         "//tensorflow/lite/schema:schema_fbs",
         "@FP16",
-        "@farmhash_archive//:farmhash",
+        "@eigen_archive//:eigen3",
     ],
 )
 
@@ -179,12 +184,15 @@ cc_test(
     ],
     tags = [
         "no_windows",
+        # TODO(b/401046768): Re-enable once the test is fixed.
+        "notap",
         "tflite_not_portable_ios",
     ],
     deps = [
         ":nnapi_delegate",
-        ":nnapi_delegate_mock_test",
         "//tensorflow/lite:framework",
+        "//tensorflow/lite:string",
+        "//tensorflow/lite:string_util",
         "//tensorflow/lite/core:framework",
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/kernels:builtin_ops",
@@ -192,6 +200,8 @@ cc_test(
         "//tensorflow/lite/kernels:test_util",
         "//tensorflow/lite/nnapi:nnapi_implementation",
         "//tensorflow/lite/nnapi:nnapi_lib",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_absl//absl/log:check",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -204,19 +214,19 @@ cc_test(
     ],
     tags = [
         "no_windows",
+        # TODO(b/401046768): Re-enable once the test is fixed.
+        "notap",
         "tflite_not_portable_ios",
     ],
     visibility = ["//visibility:private"],
     deps = [
         ":nnapi_delegate",
-        ":nnapi_delegate_mock_test",
         "//tensorflow/lite:framework",
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/kernels:builtin_ops",
         "//tensorflow/lite/kernels:deprecated_backends",
         "//tensorflow/lite/kernels:test_util",
-        "//tensorflow/lite/nnapi:nnapi_implementation",
-        "//tensorflow/lite/nnapi:nnapi_lib",
+        "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -240,7 +250,7 @@ cc_test(
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/kernels:test_util",
         "//tensorflow/lite/nnapi:nnapi_implementation",
-        "//tensorflow/lite/nnapi:nnapi_lib",
+        "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -266,6 +276,7 @@ cc_test(
         "//tensorflow/lite/kernels:test_util",
         "//tensorflow/lite/nnapi:nnapi_implementation",
         "//tensorflow/lite/nnapi:nnapi_lib",
+        "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -285,12 +296,12 @@ cc_test(
         ":nnapi_delegate",
         ":nnapi_delegate_mock_test",
         "//tensorflow/lite:framework",
-        "//tensorflow/lite:kernel_api",
         "//tensorflow/lite/core:framework",
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/kernels:test_util",
         "//tensorflow/lite/nnapi:nnapi_implementation",
         "//tensorflow/lite/nnapi:nnapi_lib",
+        "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -310,13 +321,13 @@ cc_test(
         ":nnapi_delegate",
         ":nnapi_delegate_mock_test",
         "//tensorflow/lite:framework",
-        "//tensorflow/lite:kernel_api",
         "//tensorflow/lite/core:framework",
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/kernels:builtin_ops",
         "//tensorflow/lite/kernels:test_util",
         "//tensorflow/lite/nnapi:nnapi_implementation",
         "//tensorflow/lite/nnapi:nnapi_lib",
+        "//tensorflow/lite/schema:schema_fbs",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -330,11 +341,10 @@ cc_test(
         "quant_lstm_sup_test.cc",
     ],
     deps = [
-        ":nnapi_delegate",
         "//tensorflow/lite:framework",
+        "//tensorflow/lite/c:common",
         "//tensorflow/lite/core/c:common",
         "//tensorflow/lite/kernels:kernel_util",
-        "//tensorflow/lite/testing:util",
         "@com_google_googletest//:gtest_main",
     ],
 )

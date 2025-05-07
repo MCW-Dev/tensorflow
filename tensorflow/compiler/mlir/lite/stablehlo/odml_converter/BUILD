@@ -25,7 +25,6 @@ tf_cc_binary(
         "//third_party/odml/infra:__subpackages__",
     ],  # Prototype phase.
     deps = [
-        ":outline_composites",
         ":shlo_simplify",
         "//tensorflow/compiler/mlir:init_mlir",
         "//tensorflow/compiler/mlir/lite:tensorflow_lite",
@@ -39,28 +38,6 @@ tf_cc_binary(
         "@stablehlo//:chlo_ops",
         "@stablehlo//:stablehlo_ops",
     ],
-)
-
-cc_library(
-    name = "outline_composites",
-    srcs = [
-        "transforms/outline_composites.cc",
-    ],
-    hdrs = ["passes.h"],
-    compatible_with = get_compatible_with_portable(),
-    deps = [
-        ":passes_inc_gen",
-        "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:BufferizationInterfaces",
-        "@llvm-project//mlir:FuncDialect",
-        "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:Pass",
-        "@llvm-project//mlir:Support",
-        "@llvm-project//mlir:TransformUtils",
-        "@stablehlo//:chlo_ops",
-        "@stablehlo//:stablehlo_ops",
-    ],
-    alwayslink = 1,
 )
 
 cc_library(
@@ -87,12 +64,7 @@ cc_library(
 gentbl_cc_library(
     name = "shlo_simplify_inc_gen",
     compatible_with = get_compatible_with_portable(),
-    tbl_outs = [
-        (
-            ["-gen-rewriters"],
-            "transforms/generated_shlo_simplify.inc",
-        ),
-    ],
+    tbl_outs = {"transforms/generated_shlo_simplify.inc": ["-gen-rewriters"]},
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "transforms/shlo_simplify.td",
     deps = ["@stablehlo//:stablehlo_ops_td_files"],
@@ -114,15 +86,10 @@ cc_library(
 gentbl_cc_library(
     name = "passes_inc_gen",
     compatible_with = get_compatible_with_portable(),
-    tbl_outs = [
-        (
-            [
-                "-gen-pass-decls",
-                "-name=ODMLConverter",
-            ],
-            "passes.h.inc",
-        ),
-    ],
+    tbl_outs = {"passes.h.inc": [
+        "-gen-pass-decls",
+        "-name=ODMLConverter",
+    ]},
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "passes.td",
     deps = ["@llvm-project//mlir:PassBaseTdFiles"],

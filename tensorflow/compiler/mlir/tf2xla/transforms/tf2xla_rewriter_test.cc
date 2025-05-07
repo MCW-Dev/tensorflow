@@ -16,17 +16,17 @@ limitations under the License.
 
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include "absl/memory/memory.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/Builders.h"  // from @llvm-project
+#include "mlir/IR/Diagnostics.h"  // from @llvm-project
 #include "mlir/IR/Operation.h"  // from @llvm-project
 #include "mlir/IR/OwningOpRef.h"  // from @llvm-project
 #include "mlir/IR/PatternMatch.h"  // from @llvm-project
@@ -34,23 +34,22 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Transforms/DialectConversion.h"  // from @llvm-project
+#include "stablehlo/dialect/StablehloOps.h"  // from @stablehlo
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_dialect.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/compiler/mlir/tf2xla/transforms/test_utils.h"
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
-#include "xla/client/xla_builder.h"
-#include "xla/client/xla_computation.h"
-#include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/shape_util.h"
+#include "xla/tsl/lib/core/status_test_util.h"
+#include "xla/tsl/platform/errors.h"
+#include "xla/tsl/platform/status.h"
+#include "xla/tsl/platform/statusor.h"
 #include "xla/xla_data.pb.h"
-#include "tensorflow/core/framework/op_kernel.h"
-#include "tsl/lib/core/status_test_util.h"
-#include "tsl/platform/errors.h"
-#include "tsl/platform/status.h"
-#include "tsl/platform/statusor.h"
 
 namespace mlir {
-namespace mhlo {
+namespace hlo {
 
 using ::mlir::LogicalResult;
 using ::mlir::ModuleOp;
@@ -103,7 +102,7 @@ class Tf2XlaRewriterTestPeer {
         tf2xla_rewriter_(op, empty_rewriter_,
                          /*device_type=*/"XLA_CPU_JIT") {}
 
-  absl::StatusOr<TupleOp> ImportXlaComputationIntoModule(
+  absl::StatusOr<stablehlo::TupleOp> ImportXlaComputationIntoModule(
       XlaComputation& computation) {
     return tf2xla_rewriter_.ImportXlaComputation(computation);
   }
@@ -124,7 +123,7 @@ class Tf2XlaRewriterTest : public ::testing::Test {
 
   Status CreateMlirModule(std::string module_string = kMlirModuleStr) {
     TF_ASSIGN_OR_RETURN(
-        module_, test::GetMlirModuleFromString(module_string, &context_));
+        module_, hlo::test::GetMlirModuleFromString(module_string, &context_));
 
     context_.loadAllAvailableDialects();
     return absl::OkStatus();
@@ -185,7 +184,7 @@ class Tf2XlaRewriterTest : public ::testing::Test {
     return main_func.getBody().front().front();
   }
 
-  absl::StatusOr<TupleOp> ImportXlaComputationIntoModule(
+  absl::StatusOr<stablehlo::TupleOp> ImportXlaComputationIntoModule(
       XlaComputation& computation) {
     SourceMgrDiagnosticHandler sourceMgrHandler(source_manager_, &context_);
 
@@ -205,7 +204,8 @@ TEST_F(Tf2XlaRewriterTest, LegalizesOpWithTf2xlaHloImporter) {
   TF_EXPECT_OK(LegalizeModule());
 
   int num_tuple_ops = 0;
-  module_->walk([&num_tuple_ops](TupleOp tuple_op) { num_tuple_ops += 1; });
+  module_->walk(
+      [&num_tuple_ops](stablehlo::TupleOp tuple_op) { num_tuple_ops += 1; });
 
   EXPECT_EQ(num_tuple_ops, 0);
 }
@@ -215,7 +215,7 @@ TEST_F(Tf2XlaRewriterTest, ImportsXlaComputationIntoModule) {
 
   XlaComputation computation = GetTestXlaComputation();
 
-  TF_ASSERT_OK_AND_ASSIGN(TupleOp root_tuple,
+  TF_ASSERT_OK_AND_ASSIGN(stablehlo::TupleOp root_tuple,
                           ImportXlaComputationIntoModule(computation));
 
   ModuleOp parent_module =
@@ -262,7 +262,7 @@ TEST_F(Tf2XlaRewriterTest, ImportsSingleComputation) {
   EXPECT_EQ(computation.proto().computations_size(), 2);
 
   TF_ASSERT_OK(CreateMlirModule());
-  TF_ASSERT_OK_AND_ASSIGN(TupleOp root_tuple,
+  TF_ASSERT_OK_AND_ASSIGN(stablehlo::TupleOp root_tuple,
                           ImportXlaComputationIntoModule(computation));
   EXPECT_TRUE(root_tuple);
 
@@ -299,6 +299,40 @@ TEST_F(Tf2XlaRewriterTest, DoesntEnforceCompileTimeConstantCheck) {
   TF_ASSERT_OK(LegalizeModule(kModuleWithNonConstParam));
 }
 
+TEST_F(Tf2XlaRewriterTest, CreatesDefaultValues) {
+  // If a TF op has default value attributes and the mlir is missing them then
+  // the LegalizeOp should insert the default values when converting the dialect
+  // op to a node def.
+  // TF.RandomUniform would fail without the seeds being set if they were not
+  // automatically inserted with the default values.
+  static constexpr char kModuleWithOpWithoutValuesThatShouldBeDefaulted[] = R"(
+  module attributes {tf.versions = {bad_consumers = [], min_consumer = 0 : i32, producer = 1610 : i32}} {
+    func.func @main() -> tensor<1x2x3x4xf32> attributes {allow_soft_placement = false, tf.entry_function = {control_outputs = "", inputs = "_arg0,_arg1,_arg2", outputs = "_retval0"}} {
+      %cst = "tf.Const"() {value = dense<[1, 2, 3, 4]> : tensor<4xi32>} : () -> tensor<4xi32>
+      %0 = "tf.RandomUniform"(%cst) : (tensor<4xi32>) -> tensor<1x2x3x4xf32>
+      return %0 : tensor<1x2x3x4xf32>
+    }
+  })";
+
+  TF_ASSERT_OK(LegalizeModule(kModuleWithOpWithoutValuesThatShouldBeDefaulted));
+}
+
+TEST_F(Tf2XlaRewriterTest, OpWithLocationDoesntBreakNodeDefName) {
+  // A named location 'Name(Source)' causes the GetNameFromLoc method to append
+  // all the other locations to the name with a ';' separator. This test ensures
+  // that the name used for the NodeDef does not contain that invalid character.
+  static constexpr char kModuleWithOpWithoutValuesThatShouldBeDefaulted[] =
+      R"mlir(
+  module attributes {tf.versions = {bad_consumers = [], min_consumer = 0 : i32, producer = 1610 : i32}} {
+    func.func @main(%arg0: tensor<2xf32>) -> tensor<2xf32> {
+    %0 = "tf.Exp"(%arg0) : (tensor<2xf32>) -> tensor<2xf32> loc(fused["exp"("exp"), "exp"])
+    func.return %0 : tensor<2xf32>
+  }
+  })mlir";
+
+  TF_ASSERT_OK(LegalizeModule(kModuleWithOpWithoutValuesThatShouldBeDefaulted));
+}
+
 TEST_F(Tf2XlaRewriterTest, ErrorsWithInvalidNumberOfParametersToArgs) {
   XlaBuilder builder("test_builder");
   XlaComputation to_apply;
@@ -323,10 +357,10 @@ TEST_F(Tf2XlaRewriterTest, ErrorsWithInvalidNumberOfParametersToArgs) {
   EXPECT_EQ(computation.proto().computations_size(), 2);
 
   TF_ASSERT_OK(CreateMlirModule());
-  absl::StatusOr<TupleOp> status_or_tuple_op =
+  absl::StatusOr<stablehlo::TupleOp> status_or_tuple_op =
       ImportXlaComputationIntoModule(computation);
   EXPECT_FALSE(status_or_tuple_op.ok());
 }
 
-}  // namespace mhlo
+}  // namespace hlo
 }  // namespace mlir

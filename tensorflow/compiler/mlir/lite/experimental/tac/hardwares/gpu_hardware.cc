@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "tensorflow/compiler/mlir/lite/experimental/tac/hardwares/gpu_hardware.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
@@ -55,6 +57,15 @@ double GpuHardware::GetHardwareSwitchingCost(const TargetHardware* from,
   // TODO(renjieliu): Implement a better version for different hardware cases.
   return buffer_size * kCrossHardwareTransferPerByteCost / 8.0 +
          kCrossHardwareTransferFixedCost;
+}
+
+bool GpuHardware::IsOpSupported(mlir::Operation* op) const {
+  if (TargetHardware::IsOpSupported(op)) {
+    return true;
+  }
+
+  // We also support quantized ops.
+  return !NotTFLQuantDequantizeOp(op);
 }
 
 namespace {

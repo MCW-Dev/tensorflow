@@ -45,11 +45,27 @@ tf_module {
     mtype: "<type \'module\'>"
   }
   member {
+    name: "float8_e4m3b11fnuz"
+    mtype: "<class \'tensorflow.python.framework.dtypes.DType\'>"
+  }
+  member {
     name: "float8_e4m3fn"
     mtype: "<class \'tensorflow.python.framework.dtypes.DType\'>"
   }
   member {
+    name: "float8_e4m3fnuz"
+    mtype: "<class \'tensorflow.python.framework.dtypes.DType\'>"
+  }
+  member {
     name: "float8_e5m2"
+    mtype: "<class \'tensorflow.python.framework.dtypes.DType\'>"
+  }
+  member {
+    name: "float8_e5m2fnuz"
+    mtype: "<class \'tensorflow.python.framework.dtypes.DType\'>"
+  }
+  member {
+    name: "int2"
     mtype: "<class \'tensorflow.python.framework.dtypes.DType\'>"
   }
   member {
@@ -63,6 +79,10 @@ tf_module {
   member {
     name: "tensorrt"
     mtype: "<type \'module\'>"
+  }
+  member {
+    name: "uint2"
+    mtype: "<class \'tensorflow.python.framework.dtypes.DType\'>"
   }
   member {
     name: "uint4"
