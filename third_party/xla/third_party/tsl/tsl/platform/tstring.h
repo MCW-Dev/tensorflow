@@ -100,7 +100,7 @@ class tstring {
   tstring(const char* str, size_t len);
   tstring(const char* str);  // NOLINT TODO(b/147740521): Make explicit.
   tstring(size_t n, char c);
-  explicit tstring(const StringPiece str);
+  explicit tstring(const absl::string_view str);
 #ifdef PLATFORM_GOOGLE
   explicit tstring(const absl::Cord& cord);
 #endif  // PLATFORM_GOOGLE
@@ -119,7 +119,7 @@ class tstring {
   tstring& operator=(const std::string& str);
   tstring& operator=(const char* str);
   tstring& operator=(char ch);
-  tstring& operator=(const StringPiece str);
+  tstring& operator=(const absl::string_view str);
 #ifdef PLATFORM_GOOGLE
   tstring& operator=(const absl::Cord& cord);
 #endif  // PLATFORM_GOOGLE
@@ -143,13 +143,7 @@ class tstring {
   // TODO(b/147740521): Make explicit.
   operator std::string() const;  // NOLINT
   // TODO(b/147740521): Make explicit.
-  operator StringPiece() const;  // NOLINT
-#ifdef PLATFORM_GOOGLE
-  template <typename T,
-            typename std::enable_if<std::is_same<T, absl::AlphaNum>::value,
-                                    T>::type* = nullptr>
-  operator T() const;  // NOLINT TODO(b/147740521): Remove.
-#endif  // PLATFORM_GOOGLE
+  operator absl::string_view() const;  // NOLINT
 
   // Attributes
   size_t size() const;
@@ -191,7 +185,7 @@ class tstring {
   // View Assignment
   tstring& assign_as_view(const tstring& str);
   tstring& assign_as_view(const std::string& str);
-  tstring& assign_as_view(const StringPiece str);
+  tstring& assign_as_view(const absl::string_view str);
   tstring& assign_as_view(const char* str, size_t len);
   tstring& assign_as_view(const char* str);
 
@@ -215,6 +209,11 @@ class tstring {
   friend tstring operator+(const tstring& a, const tstring& b);
   friend std::ostream& operator<<(std::ostream& o, const tstring& str);
   friend std::hash<tstring>;
+  // Support for absl::StrCat() etc.
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const tstring& str) {
+    absl::Format(&sink, "%s", absl::string_view(str));
+  }
 };
 
 // Non-member function overloads
@@ -245,7 +244,7 @@ inline tstring::tstring(size_t n, char c) {
 inline tstring::tstring(const std::string& str)
     : tstring(str.data(), str.size()) {}
 
-inline tstring::tstring(const StringPiece str)
+inline tstring::tstring(const absl::string_view str)
     : tstring(str.data(), str.size()) {}
 
 #ifdef PLATFORM_GOOGLE
@@ -301,7 +300,7 @@ inline tstring& tstring::operator=(char c) {
   return *this;
 }
 
-inline tstring& tstring::operator=(const StringPiece str) {
+inline tstring& tstring::operator=(const absl::string_view str) {
   TF_TString_Copy(&tstr_, str.data(), str.size());
 
   return *this;
@@ -377,17 +376,9 @@ inline tstring::operator std::string() const {
   return std::string(data(), size());
 }
 
-inline tstring::operator StringPiece() const {
-  return StringPiece(data(), size());
+inline tstring::operator absl::string_view() const {
+  return absl::string_view(data(), size());
 }
-
-#ifdef PLATFORM_GOOGLE
-template <typename T, typename std::enable_if<
-                          std::is_same<T, absl::AlphaNum>::value, T>::type*>
-inline tstring::operator T() const {
-  return T(StringPiece(*this));
-}
-#endif  // PLATFORM_GOOGLE
 
 // Attributes
 
@@ -477,7 +468,7 @@ inline tstring& tstring::assign_as_view(const std::string& str) {
   return *this;
 }
 
-inline tstring& tstring::assign_as_view(const StringPiece str) {
+inline tstring& tstring::assign_as_view(const absl::string_view str) {
   assign_as_view(str.data(), str.size());
 
   return *this;

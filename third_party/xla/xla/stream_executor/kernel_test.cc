@@ -21,6 +21,8 @@ limitations under the License.
 #include <type_traits>
 #include <vector>
 
+#include "absl/types/span.h"
+#include "benchmark/benchmark.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/kernel_spec.h"
 #include "xla/stream_executor/platform.h"
@@ -66,19 +68,16 @@ static_assert(
     std::is_same_v<ArgsStorage<DeviceMemoryBase*, const DeviceMemoryBase*>,
                    std::tuple<const void*, const void*>>);
 
-static std::unique_ptr<StreamExecutor> NewStreamExecutor() {
+static StreamExecutor* NewStreamExecutor() {
   Platform* platform = PlatformManager::PlatformWithName("Host").value();
-  StreamExecutorConfig config(/*ordinal=*/0);
-  return platform->GetUncachedExecutor(config).value();
+  return platform->ExecutorForDevice(/*ordinal=*/0).value();
 }
 
 TEST(KernelTest, PackDeviceMemoryArguments) {
-  auto executor = NewStreamExecutor();
-
   DeviceMemoryBase a(reinterpret_cast<void*>(0x12345678));
   DeviceMemoryBase b(reinterpret_cast<void*>(0x87654321));
 
-  auto args = PackKernelArgs({a, b}, 0).value();
+  auto args = PackKernelArgs<DeviceMemoryBase>({a, b}, 0).value();
   ASSERT_EQ(args->number_of_arguments(), 2);
 
   auto packed = args->argument_addresses();
@@ -125,7 +124,7 @@ TEST(KernelTest, FailToCreateTypedKernelFromEmptySpec) {
   MultiKernelLoaderSpec empty_spec(/*arity=*/0);
 
   auto executor = NewStreamExecutor();
-  auto kernel = TypedKernelFactory<>::Create(executor.get(), empty_spec);
+  auto kernel = TypedKernelFactory<>::Create(executor, empty_spec);
   EXPECT_FALSE(kernel.ok());
 }
 
@@ -140,7 +139,7 @@ static void BM_PackDeviceMemoryArgs(benchmark::State& state) {
   }
 
   for (auto s : state) {
-    auto packed = PackKernelArgs(args, 0);
+    auto packed = PackKernelArgs<DeviceMemoryBase>(args, 0);
     benchmark::DoNotOptimize(packed);
   }
 }

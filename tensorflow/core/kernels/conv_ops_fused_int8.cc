@@ -371,8 +371,7 @@ void operator()(
 
     se::TfAllocatorAdapter tf_allocator_adapter(ctx->device()->GetAllocator({}),
                                                 stream);
-    se::RedzoneAllocator rz_allocator(stream, &tf_allocator_adapter,
-                                      se::GpuAsmOpts());
+    se::RedzoneAllocator rz_allocator(stream, &tf_allocator_adapter);
 
     const int batch_size = GetTensorDim(input_param, data_format, 'N');
     int conv_input_rows = GetTensorDim(input_param, data_format, 'H');
@@ -571,23 +570,22 @@ void operator()(
   constexpr auto type = se::dnn::ToDataType<int8>::value;
   constexpr auto bias_type = se::dnn::ToDataType<BiasType>::value;
 
-  const bool use_cudnn_frontend = CudnnUseFrontend();
   AutotuneEntry<se::dnn::FusedConvOp> autotune_entry;
   if (!FusedConvAutotuneMap::GetInstance()->Find(fused_conv_parameters,
                                                  &autotune_entry)) {
-    VLOG(2) << "Autotuning fused convolution (use_frontend="
-            << use_cudnn_frontend << "): " << fused_conv_parameters.ToString();
+    VLOG(2) << "Autotuning fused convolution: "
+            << fused_conv_parameters.ToString();
     profiler::ScopedAnnotation trace("cudnn_autotuning");
 
     std::vector<std::unique_ptr<const se::dnn::FusedConvRunner>> runners;
     auto dnn = stream->parent()->AsDnn();
     CHECK_NE(dnn, nullptr);
     TF_CHECK_OK(dnn->GetFusedConvolveRunners(
-        use_cudnn_frontend, se::dnn::ConvolutionKind::FORWARD, type, bias_type,
-        type, conv_scale, side_input_scale, /*leakyrelu_alpha=*/0.0, stream,
-        conv_input_desc, filter_desc, bias_desc, output_desc, conv_desc,
-        /*use_fallback=*/false, dnn_activation_mode, GetNumericOptions(),
-        &runners));
+        se::dnn::ConvolutionKind::FORWARD, type, bias_type, type, conv_scale,
+        side_input_scale, /*leakyrelu_alpha=*/0.0, stream, conv_input_desc,
+        filter_desc, bias_desc, output_desc, conv_desc,
+        /*use_fallback=*/false, dnn_activation_mode,
+        GetNumericOptionsForCuDnn(), &runners));
 
     auto launch_func =
         [&](se::ScratchAllocator* allocator_used,
@@ -622,7 +620,7 @@ void operator()(
       }
     }
 
-    if (!CudnnUseFrontend() || found_working_engine) {
+    if (found_working_engine) {
       auto runners_or = BestCudnnConvAlgorithm<se::dnn::FusedConvOp>(
           results, std::move(runners));
       OP_REQUIRES_OK(ctx, runners_or.status());
@@ -633,12 +631,11 @@ void operator()(
       auto dnn = stream->parent()->AsDnn();
       CHECK_NE(dnn, nullptr);
       TF_CHECK_OK(dnn->GetFusedConvolveRunners(
-          use_cudnn_frontend, se::dnn::ConvolutionKind::FORWARD, type,
-          bias_type, type, conv_scale, side_input_scale, leakyrelu_alpha,
-          stream, conv_input_desc, filter_desc, bias_desc, output_desc,
-          conv_desc,
-          /*use_fallback=*/true, dnn_activation_mode, GetNumericOptions(),
-          &fallback_runners));
+          se::dnn::ConvolutionKind::FORWARD, type, bias_type, type, conv_scale,
+          side_input_scale, leakyrelu_alpha, stream, conv_input_desc,
+          filter_desc, bias_desc, output_desc, conv_desc,
+          /*use_fallback=*/true, dnn_activation_mode,
+          GetNumericOptionsForCuDnn(), &fallback_runners));
 
       auto fallback_results_or = internal::AutotuneConvImpl(
           ctx, fallback_runners, cudnn_use_autotune, launch_func,

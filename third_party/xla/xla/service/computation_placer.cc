@@ -31,6 +31,7 @@ limitations under the License.
 #include "xla/stream_executor/cuda/cuda_platform_id.h"
 #include "xla/stream_executor/host/host_platform_id.h"
 #include "xla/stream_executor/rocm/rocm_platform_id.h"
+#include "xla/stream_executor/sycl/sycl_platform_id.h"
 #include "xla/types.h"
 #include "xla/util.h"
 #include "tsl/platform/errors.h"
@@ -205,7 +206,8 @@ ComputationPlacer::GetForPlatform(const se::Platform* platform) {
 
 /* static */ std::map<se::Platform::Id, ComputationPlacer::State>*
 ComputationPlacer::GetPlatformComputationPlacers() {
-  static auto* r = new std::map<se::Platform::Id, ComputationPlacer::State>;
+  static auto* const r =
+      new std::map<se::Platform::Id, ComputationPlacer::State>;
   return r;
 }
 
@@ -222,6 +224,8 @@ static bool InitModule() {
       stream_executor::cuda::kCudaPlatformId, &CreateComputationPlacer);
   xla::ComputationPlacer::RegisterComputationPlacer(
       stream_executor::rocm::kROCmPlatformId, &CreateComputationPlacer);
+  xla::ComputationPlacer::RegisterComputationPlacer(
+      stream_executor::sycl::kSyclPlatformId, &CreateComputationPlacer);
   return true;
 }
 static bool module_initialized = InitModule();

@@ -27,9 +27,9 @@ limitations under the License.
 #include "xla/stream_executor/blas.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor.h"
+#include "xla/tsl/protobuf/dnn.pb.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/protobuf/dnn.pb.h"
 #if GOOGLE_CUDA
 #include "tsl/platform/tensor_float_32_utils.h"
 #endif
@@ -46,12 +46,20 @@ absl::StatusOr<DataType> AsBlasDataType(PrimitiveType dtype) {
   switch (dtype) {
     case PrimitiveType::F8E5M2:
       return DataType::kF8E5M2;
+    case PrimitiveType::F8E4M3:
+      return DataType::kF8E4M3;
     case PrimitiveType::F8E4M3FN:
       return DataType::kF8E4M3FN;
     case PrimitiveType::F8E5M2FNUZ:
       return DataType::kF8E5M2FNUZ;
     case PrimitiveType::F8E4M3FNUZ:
       return DataType::kF8E4M3FNUZ;
+    case PrimitiveType::F8E3M4:
+      return DataType::kF8E3M4;
+    case PrimitiveType::F4E2M1FN:
+      return DataType::kF4E2M1FN;
+    case PrimitiveType::F8E8M0FNU:
+      return DataType::kF8E8M0FNU;
     case PrimitiveType::S8:
       return DataType::kInt8;
     case PrimitiveType::F16:
@@ -79,12 +87,20 @@ absl::StatusOr<PrimitiveType> AsXlaPrimitiveType(DataType dtype) {
   switch (dtype) {
     case DataType::kF8E5M2:
       return PrimitiveType::F8E5M2;
+    case DataType::kF8E4M3:
+      return PrimitiveType::F8E4M3;
     case DataType::kF8E4M3FN:
       return PrimitiveType::F8E4M3FN;
     case DataType::kF8E5M2FNUZ:
       return PrimitiveType::F8E5M2FNUZ;
     case DataType::kF8E4M3FNUZ:
       return PrimitiveType::F8E4M3FNUZ;
+    case DataType::kF8E3M4:
+      return PrimitiveType::F8E3M4;
+    case DataType::kF4E2M1FN:
+      return PrimitiveType::F4E2M1FN;
+    case DataType::kF8E8M0FNU:
+      return PrimitiveType::F8E8M0FNU;
     case DataType::kInt8:
       return PrimitiveType::S8;
     case DataType::kHalf:
@@ -141,9 +157,13 @@ absl::StatusOr<ComputationType> GetBlasComputationType(
   if (algorithm == xla::PrecisionConfig::ALG_UNSET) {
     switch (output_dtype) {
       case PrimitiveType::F8E5M2:      // fall-through
+      case PrimitiveType::F8E4M3:      // fall-through
       case PrimitiveType::F8E4M3FN:    // fall-through
       case PrimitiveType::F8E5M2FNUZ:  // fall-through
       case PrimitiveType::F8E4M3FNUZ:  // fall-through
+      case PrimitiveType::F8E3M4:      // fall-through
+      case PrimitiveType::F4E2M1FN:    // fall-through
+      case PrimitiveType::F8E8M0FNU:   // fall-through
       case PrimitiveType::F16:         // fall-through
       case PrimitiveType::BF16:
         // Accumulate in f32 precision.
@@ -214,6 +234,29 @@ DataType GetScaleType(DataType c_type, ComputationType computation_type) {
               : c_type);
 }
 
-}  // namespace gpu
+absl::StatusOr<BlasLt::MatmulPlan*> BlasLt::GetOrCreateMatmulPlan(
+    const std::string& key, PlanCreateFunc create) {
+  absl::MutexLock lock(&plan_cache_mu_);  // double mutex ???
+  auto res = plan_cache_.emplace(key, MatmulPlanPtr{});
+  // New entry inserted: always create a new matmul plan if key is empty,
+  // this is used by command_buffer_thunk test.
+  if (res.second || key.empty()) {
+    VLOG(2) << "Creating a plan for: " << key;
+    TF_ASSIGN_OR_RETURN(res.first->second, create());
+    VLOG(2) << "Plan created: cache size: " << plan_cache_.size();
+  }
+  return res.first->second.get();
+}
 
+void BlasLt::ClearMatmulPlanCache() {
+  absl::MutexLock lock(&plan_cache_mu_);
+  plan_cache_.clear();
+}
+
+size_t BlasLt::GetMatmulPlanCacheSize() const {
+  absl::MutexLock lock(&plan_cache_mu_);
+  return plan_cache_.size();
+}
+
+}  // namespace gpu
 }  // namespace stream_executor

@@ -105,7 +105,8 @@ class TFETensorTest(test_util.TensorFlowTestCase):
     ctx = context.context()
     # Bad dtype value.
     with self.assertRaisesRegex(TypeError, "Invalid dtype argument value"):
-      ops.EagerTensor(values, device=ctx.device_name, dtype=12345)
+      # The max value of TF_DataType is 32, so using 33 for the dtype fails.
+      ops.EagerTensor(values, device=ctx.device_name, dtype=33)
 
   def testNumpyOrderHandling(self):
     n = np.array([[1, 2], [3, 4]], order="F")
@@ -469,7 +470,7 @@ class TFETensorTest(test_util.TensorFlowTestCase):
   def testEagerTensorFormatForResource(self):
     t = resource_variable_ops.VarHandleOp(shape=[], dtype=dtypes.float32)
 
-    # type is compiler-depdendent, as it comes from demangling.
+    # type is compiler-dependent, as it comes from demangling.
     handle_str = (f"<ResourceHandle("
                   f"name=\"\", "
                   f"device=\"{t.device}\", "
@@ -508,11 +509,12 @@ class TFETensorTest(test_util.TensorFlowTestCase):
         f"{t!r}", "<tf.Tensor: shape=(), dtype=variant, value=<TensorList>>")
 
   def testNumpyTooManyDimensions(self):
-    t = constant_op.constant(1., shape=[1] * 33)
+    max_dims = 64 if np.lib.NumpyVersion(np.__version__) >= "2.0.0.dev0" else 32
+    t = constant_op.constant(1., shape=[1] * (max_dims + 1))
     with self.assertRaisesRegex(
         errors.InvalidArgumentError,
-        "Cannot convert tensor with 33 dimensions to NumPy array. NumPy arrays "
-        "can have at most 32 dimensions"):
+        "Cannot convert tensor with %d dimensions to NumPy array. NumPy arrays "
+        "can have at most %d dimensions"% (max_dims + 1, max_dims)):
       t.numpy()
 
   def testNumpyDimsTooBig(self):

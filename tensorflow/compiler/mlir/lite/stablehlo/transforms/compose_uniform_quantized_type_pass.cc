@@ -20,8 +20,8 @@ limitations under the License.
 #include "llvm/ADT/Sequence.h"
 #include "llvm/Support/Debug.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/Quant/QuantOps.h"  // from @llvm-project  // NOLINT: Required to register quantization dialect.
-#include "mlir/Dialect/Quant/QuantTypes.h"  // from @llvm-project
+#include "mlir/Dialect/Quant/IR/Quant.h"  // from @llvm-project  // NOLINT: Required to register quantization dialect.
+#include "mlir/Dialect/Quant/IR/QuantTypes.h"  // from @llvm-project
 #include "mlir/IR/Builders.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
@@ -36,7 +36,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
 #include "stablehlo/dialect/StablehloOps.h"  // from @stablehlo
-#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/passes.h"
+#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/stablehlo_passes.h"
 #include "tensorflow/compiler/mlir/quantization/common/attrs_and_constraints.h"
 #include "tensorflow/compiler/mlir/quantization/common/uniform_quantized_types.h"
 
@@ -53,7 +53,7 @@ using ::mlir::quant::UniformQuantizedPerAxisType;
 using ::mlir::quant::UniformQuantizedType;
 
 #define GEN_PASS_DEF_COMPOSEUNIFORMQUANTIZEDTYPEPASS
-#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/passes.h.inc"
+#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/stablehlo_passes.h.inc"
 
 // These strings are used to identify the uniform_quantize / uniform_dequantize
 // functions.
@@ -429,9 +429,19 @@ class UniformDequantizeFunctionCallPattern {
 class ComposeUniformQuantizedConvolutionOp
     : public OpRewritePattern<stablehlo::ConvolutionOp> {
  public:
-  using OpRewritePattern<stablehlo::ConvolutionOp>::OpRewritePattern;
+  using OpRewritePattern::OpRewritePattern;
 
-  LogicalResult match(stablehlo::ConvolutionOp op) const final {
+  LogicalResult matchAndRewrite(stablehlo::ConvolutionOp op,
+                                PatternRewriter& rewriter) const final {
+    if (match(op).failed()) {
+      return failure();
+    }
+    rewrite(op, rewriter);
+    return success();
+  }
+
+ private:
+  LogicalResult match(stablehlo::ConvolutionOp op) const {
     // Verify operands' types.
     for (Type operand_type : op.getOperandTypes()) {
       if (Type element_type =
@@ -643,8 +653,7 @@ class ComposeUniformQuantizedConvolutionOp
     return success();
   }
 
-  void rewrite(stablehlo::ConvolutionOp op,
-               PatternRewriter& rewriter) const final {
+  void rewrite(stablehlo::ConvolutionOp op, PatternRewriter& rewriter) const {
     // Rewrite `call @uniform_quantize` -> `stablehlo.uniform_quantize`.
     auto input_i8_to_f32_convert_op =
         cast<stablehlo::ConvertOp>(op.getOperand(0).getDefiningOp());
@@ -883,8 +892,19 @@ class ComposeUniformQuantizedConvolutionOp
 class ComposeUniformQuantizedDotGeneralOp
     : public OpRewritePattern<stablehlo::DotGeneralOp> {
  public:
-  using OpRewritePattern<stablehlo::DotGeneralOp>::OpRewritePattern;
-  LogicalResult match(stablehlo::DotGeneralOp op) const final {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(stablehlo::DotGeneralOp op,
+                                PatternRewriter& rewriter) const final {
+    if (match(op).failed()) {
+      return failure();
+    }
+    rewrite(op, rewriter);
+    return success();
+  }
+
+ private:
+  LogicalResult match(stablehlo::DotGeneralOp op) const {
     auto input_i8_to_f32_convert_op =
         TryCast<stablehlo::ConvertOp>(op.getOperand(0).getDefiningOp(),
                                       /*name=*/"input_i8_to_f32_convert_op");
@@ -988,8 +1008,7 @@ class ComposeUniformQuantizedDotGeneralOp
     return success();
   }
 
-  void rewrite(stablehlo::DotGeneralOp op,
-               PatternRewriter& rewriter) const final {
+  void rewrite(stablehlo::DotGeneralOp op, PatternRewriter& rewriter) const {
     // Build uniform quantized type for input.
     auto input_i8_to_f32_convert_op =
         cast<stablehlo::ConvertOp>(op.getOperand(0).getDefiningOp());
@@ -1144,7 +1163,8 @@ class ComposeUniformQuantizedDotGeneralOp
             .clone(output_uniform_quantized_type),
         /*lhs=*/op.getLhs(), /*rhs=*/op.getRhs(),
         /*dot_dimension_numbers=*/op.getDotDimensionNumbers(),
-        /*precision_config=*/op.getPrecisionConfigAttr());
+        /*precision_config=*/op.getPrecisionConfigAttr(),
+        /*algorithm=*/op.getAlgorithmAttr());
 
     rewriter.replaceAllUsesWith(op.getResult(), new_dot_general_op.getResult());
 
@@ -1305,9 +1325,19 @@ class ComposeUniformQuantizedDotGeneralOp
 class ComposeUniformQuantizedDotGeneralOpWithTwoQuantizedActivations
     : public OpRewritePattern<stablehlo::DotGeneralOp> {
  public:
-  using OpRewritePattern<stablehlo::DotGeneralOp>::OpRewritePattern;
+  using OpRewritePattern::OpRewritePattern;
 
-  LogicalResult match(stablehlo::DotGeneralOp op) const final {
+  LogicalResult matchAndRewrite(stablehlo::DotGeneralOp op,
+                                PatternRewriter& rewriter) const final {
+    if (match(op).failed()) {
+      return failure();
+    }
+    rewrite(op, rewriter);
+    return success();
+  }
+
+ private:
+  LogicalResult match(stablehlo::DotGeneralOp op) const {
     // q1 - z1
     if (failed(MatchQuantizedOperand(op.getOperand(0)))) {
       LLVM_DEBUG(llvm::dbgs()
@@ -1364,8 +1394,7 @@ class ComposeUniformQuantizedDotGeneralOpWithTwoQuantizedActivations
     return success();
   }
 
-  void rewrite(stablehlo::DotGeneralOp op,
-               PatternRewriter& rewriter) const final {
+  void rewrite(stablehlo::DotGeneralOp op, PatternRewriter& rewriter) const {
     // Build uniform quantized type for input 1 (lhs).
     auto input1_zero_point_subtract_op =
         cast<stablehlo::SubtractOp>(op.getOperand(0).getDefiningOp());
@@ -1489,7 +1518,8 @@ class ComposeUniformQuantizedDotGeneralOpWithTwoQuantizedActivations
             .clone(output_uniform_quantized_type),
         /*lhs=*/op.getLhs(), /*rhs=*/op.getRhs(),
         /*dot_dimension_numbers=*/op.getDotDimensionNumbers(),
-        /*precision_config=*/op.getPrecisionConfigAttr());
+        /*precision_config=*/op.getPrecisionConfigAttr(),
+        /*algorithm=*/op.getAlgorithmAttr());
 
     rewriter.replaceAllUsesWith(op.getResult(), new_dot_general_op.getResult());
 
@@ -1596,7 +1626,7 @@ void ComposeUniformQuantizedTypePass::runOnOperation() {
                ComposeUniformQuantizedDotGeneralOpWithTwoQuantizedActivations>(
       &ctx);
 
-  if (failed(applyPatternsAndFoldGreedily(module_op, std::move(patterns)))) {
+  if (failed(applyPatternsGreedily(module_op, std::move(patterns)))) {
     module_op.emitError()
         << "Failed to compose stablehlo uniform quantized types.";
     signalPassFailure();

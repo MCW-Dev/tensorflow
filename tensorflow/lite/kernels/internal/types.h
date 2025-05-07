@@ -19,6 +19,11 @@ limitations under the License.
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <type_traits>
+
+#ifndef EIGEN_TFLITE
+#include "Eigen/Core"
+#endif
 
 #ifndef EIGEN_TFLITE
 #include "Eigen/Core"
@@ -661,6 +666,14 @@ struct ArithmeticParams {
   // float activation params.
   float float_activation_min;
   float float_activation_max;
+  #ifndef EIGEN_TFLITE
+  // float16 activation params.
+  Eigen::half Eigen_half_activation_min;
+  Eigen::half Eigen_half_activation_max;
+  // bfloat16 activation params.
+  Eigen::bfloat16 bf16_activation_min;
+  Eigen::bfloat16 bf16_activation_max;
+  #endif
   // int64_t activation params.
   int64_t int64_activation_min;
   int64_t int64_activation_max;
@@ -1079,7 +1092,21 @@ inline void SetActivationParams(Eigen::bfloat16 min, Eigen::bfloat16 max,
   params->bf16_activation_min = min;
   params->bf16_activation_max = max;
 }
+#endif
 
+template <typename P>
+inline void SetActivationParams(int8_t min, int8_t max, P* params) {
+  params->int8_activation_min = min;
+  params->int8_activation_max = max;
+}
+
+template <typename P>
+inline void GetActivationParams(const P& params, int8_t* min, int8_t* max) {
+  *min = params.int8_activation_min;
+  *max = params.int8_activation_max;
+}
+
+#ifndef EIGEN_TFLITE
 template <typename P>
 inline void GetActivationParams(const P& params, Eigen::half* min,
                                 Eigen::half* max) {

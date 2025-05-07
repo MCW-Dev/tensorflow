@@ -18,6 +18,8 @@ limitations under the License.
 
 #include <cstdint>
 
+#include "absl/strings/string_view.h"
+
 namespace xla {
 
 // HLO passes (HLO -> HLO).
@@ -42,15 +44,18 @@ void RecordPtxToCubinDuration(uint64_t time_usecs);
 // Counts compiled programs count.
 void IncrementCompiledProgramsCount();
 
-// DO NOT USE---this is exposed only for testing.
-// Resets compiled programs count.
-void ResetCompiledProgramsCountForTesting();
-
 // Gets compiled programs count.
 int64_t GetCompiledProgramsCount();
 
 // Records the size of the XLA device binary in bytes.
 void RecordXlaDeviceBinarySize(int64_t size);
+
+// Records the stacktrace of the GPU compiler.
+void RecordGpuCompilerStacktrace();
+
+// Returns the number of times the GPU compiler was called with the given
+// stacktrace.
+int GetGpuCompilerStacktraceCount(absl::string_view stacktrace);
 
 }  // namespace xla
 

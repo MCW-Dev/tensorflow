@@ -12,7 +12,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <optional>
 #include <string>
 #include <utility>
 
@@ -41,7 +40,7 @@ limitations under the License.
 #include "stablehlo/transforms/Passes.h"  // from @stablehlo
 #include "tensorflow/compiler/mlir/lite/core/macros.h"
 #include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"
-#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/passes.h"
+#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/stablehlo_passes.h"
 
 #define DEBUG_TYPE "compat-passes"
 
@@ -50,7 +49,7 @@ namespace odml {
 
 #define GEN_PASS_DEF_LEGALIZESTABLEHLOTOVHLOPASS
 #define GEN_PASS_DEF_LEGALIZEVHLOTOSTABLEHLOPASS
-#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/passes.h.inc"
+#include "tensorflow/compiler/mlir/lite/stablehlo/transforms/stablehlo_passes.h.inc"
 
 namespace {
 
@@ -58,7 +57,7 @@ namespace {
 // StableHLO --> VHLO types
 //===----------------------------------------------------------------------===//
 
-std::optional<Value> MaterializeIllegalCast(OpBuilder &builder, Type type,
+Value MaterializeIllegalCast(OpBuilder &builder, Type type,
                                             ValueRange inputs, Location loc) {
   return builder.create<UnrealizedConversionCastOp>(loc, type, inputs)
       ->getResult(0);
@@ -80,7 +79,6 @@ class StablehloToOdmlTypeConverter : public vhlo::VhloTypeConverter {
     });
     addBuiltinToVhloConversions();
 
-    addArgumentMaterialization(MaterializeIllegalCast);
     addSourceMaterialization(MaterializeIllegalCast);
     addTargetMaterialization(MaterializeIllegalCast);
   }
@@ -113,7 +111,6 @@ class VhloToStablehloTypeConverter : public vhlo::VhloTypeConverter {
     });
     addVhloToBuiltinConversions();
 
-    addArgumentMaterialization(MaterializeIllegalCast);
     addSourceMaterialization(MaterializeIllegalCast);
     addTargetMaterialization(MaterializeIllegalCast);
   }
@@ -145,7 +142,7 @@ void ConvertAndWrapUsesInUnrealizedCast(Value result, TypeConverter &converter,
                                         IRRewriter &rewriter) {
   auto type = result.getType();
   result.setType(converter.convertType(result.getType()));
-  auto new_value = converter.materializeArgumentConversion(
+  auto new_value = converter.materializeSourceConversion(
       rewriter, result.getLoc(), type, {result});
   rewriter.replaceAllUsesExcept(result, new_value, new_value.getDefiningOp());
 }
@@ -161,7 +158,7 @@ void WrapOperandsInUnrealizedCastAndConvert(Operation *op,
                                             IRRewriter &rewriter) {
   for (int i = 0; i < op->getNumOperands(); ++i) {
     auto operand = op->getOperand(i);
-    auto new_operand = converter.materializeArgumentConversion(
+    auto new_operand = converter.materializeSourceConversion(
         rewriter, op->getLoc(), converter.convertType(operand.getType()),
         {operand});
     op->setOperand(i, new_operand);
@@ -219,7 +216,7 @@ LogicalResult ApplyStablehloToVhloPatterns(ModuleOp module,
 
   StablehloToOdmlTypeConverter converter;
   RewritePatternSet patterns(context);
-  stablehlo::populateStablehloToVhloPatterns(&patterns, &converter, context);
+  stablehlo::populateStablehloToVhloPatterns(context, &patterns, &converter);
 
   if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
     return module->emitError("Failed partial conversion to VHLO");
@@ -249,7 +246,7 @@ LogicalResult ApplyVhloToStablehloPatterns(ModuleOp module) {
 
   VhloToStablehloTypeConverter converter;
   RewritePatternSet patterns(context);
-  stablehlo::populateVhloToStablehloPatterns(&patterns, &converter, context);
+  stablehlo::populateVhloToStablehloPatterns(context, &patterns, &converter);
 
   if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
     return module->emitError("Failed partial conversion to StableHLO");

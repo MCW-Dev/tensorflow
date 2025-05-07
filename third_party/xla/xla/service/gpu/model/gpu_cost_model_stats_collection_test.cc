@@ -21,33 +21,21 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 #include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/gpu_device_info_for_tests.h"
 #include "xla/service/gpu/model/gpu_hlo_cost_analysis.h"
 #include "xla/service/hlo_cost_analysis.h"
-#include "xla/shape.h"
-#include "xla/shape_util.h"
-#include "xla/tests/hlo_test_base.h"
-#include "xla/tests/verified_hlo_module.h"
 #include "tsl/platform/statusor.h"
 
 namespace xla {
 namespace gpu {
 
-class GpuCostModelStatsCollectionTest : public HloTestBase {
-  HloCostAnalysis::ShapeSizeFunction ShapeSizeBytesFunction() const {
-    return [&](const Shape& shape) {
-      constexpr int64_t kPointerSize = 8;
-      return ShapeUtil::ByteSizeOf(shape, kPointerSize);
-    };
-  }
-
+class GpuCostModelStatsCollectionTest : public HloHardwareIndependentTestBase {
  public:
   GpuCostModelStatsCollection cost_model_stats_{
       TestGpuDeviceInfo::RTXA6000DeviceInfo(),
-      GpuHloCostAnalysis::Options{ShapeSizeBytesFunction(),
-                                  /*per_second_rates=*/{},
-                                  /*count_multiple_input_accesses=*/true}};
+      GpuHloCostAnalysis::Options{.count_multiple_input_accesses = true}};
 };
 
 TEST_F(GpuCostModelStatsCollectionTest, FusinInEntryComputation) {
@@ -70,11 +58,9 @@ TEST_F(GpuCostModelStatsCollectionTest, FusinInEntryComputation) {
   HloInstruction* root = module->entry_computation()->root_instruction();
   TF_ASSERT_OK_AND_ASSIGN(auto gpu_config,
                           root->backend_config<GpuBackendConfig>());
-  const FusionBackendConfig& backend_config =
-      gpu_config.fusion_backend_config();
 
-  EXPECT_TRUE(backend_config.has_reification_cost());
-  EXPECT_GT(backend_config.reification_cost().end_to_end_cycles(), 0);
+  EXPECT_EQ(gpu_config.reification_cost_size(), 1);
+  EXPECT_GT(gpu_config.reification_cost()[0].end_to_end_cycles(), 0);
 }
 
 TEST_F(GpuCostModelStatsCollectionTest, FusinInWhileComputation) {
@@ -109,11 +95,9 @@ TEST_F(GpuCostModelStatsCollectionTest, FusinInWhileComputation) {
                              ->root_instruction();
   TF_ASSERT_OK_AND_ASSIGN(auto gpu_config,
                           root->backend_config<GpuBackendConfig>());
-  const FusionBackendConfig& backend_config =
-      gpu_config.fusion_backend_config();
 
-  EXPECT_TRUE(backend_config.has_reification_cost());
-  EXPECT_GT(backend_config.reification_cost().end_to_end_cycles(), 0);
+  EXPECT_EQ(gpu_config.reification_cost_size(), 1);
+  EXPECT_GT(gpu_config.reification_cost()[0].end_to_end_cycles(), 0);
 }
 
 }  // namespace gpu

@@ -25,13 +25,14 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "xla/client/executable_build_options.h"
 #include "xla/hlo/ir/hlo_instruction.h"
-#include "xla/service/algebraic_simplifier.h"
+#include "xla/hlo/parser/hlo_parser.h"
+#include "xla/hlo/pass/hlo_pass_pipeline.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
+#include "xla/hlo/transforms/simplifiers/algebraic_simplifier.h"
 #include "xla/service/hlo_module_config.h"
-#include "xla/service/hlo_parser.h"
-#include "xla/service/hlo_pass_pipeline.h"
+#include "xla/service/spmd/shardy/constants.h"
 #include "xla/shape_util.h"
 #include "xla/stream_executor/device_description.h"
-#include "xla/tests/hlo_test_base.h"
 #include "xla/util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
@@ -40,7 +41,7 @@ namespace xla {
 namespace gpu {
 namespace {
 
-class GpuSpmdPartitioningTest : public HloTestBase,
+class GpuSpmdPartitioningTest : public HloHardwareIndependentTestBase,
                                 public ::testing::WithParamInterface<bool> {
  public:
   absl::StatusOr<std::unique_ptr<HloModule>> PartitionComputation(
@@ -48,8 +49,14 @@ class GpuSpmdPartitioningTest : public HloTestBase,
     HloModuleConfig config = GetModuleConfigForTest(
         /*replica_count=*/1, /*num_partitions=*/num_devices);
     config.set_num_partitions(num_devices);
+    config.set_use_shardy_partitioner(UseShardy());
     TF_ASSIGN_OR_RETURN(auto module,
                         ParseAndReturnVerifiedModule(hlo_module, config));
+    if (UseShardy()) {
+      FrontendAttributes attrs;
+      attrs.mutable_map()->try_emplace(xla::sdy::kImportMhloShardings, "t");
+      module->add_frontend_attributes(attrs);
+    }
 
     HloPassPipeline spmd_pipeline("spmd-partitioner");
     se::CudaComputeCapability ampere(8, 0);
@@ -65,9 +72,9 @@ class GpuSpmdPartitioningTest : public HloTestBase,
  protected:
   bool UseShardy() const { return GetParam(); }
 
-  DebugOptions GetDebugOptionsForTest() override {
-    DebugOptions debug_options = HloTestBase::GetDebugOptionsForTest();
-    debug_options.set_xla_use_shardy(UseShardy());
+  DebugOptions GetDebugOptionsForTest() const override {
+    DebugOptions debug_options =
+        HloHardwareIndependentTestBase::GetDebugOptionsForTest();
     return debug_options;
   }
 };

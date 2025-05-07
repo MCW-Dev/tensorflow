@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "xla/client/lib/testing.h"
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -22,15 +23,15 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "xla/client/client.h"
-#include "xla/client/xla_builder.h"
-#include "xla/client/xla_computation.h"
 #include "xla/execution_options_util.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/literal.h"
 #include "xla/literal_util.h"
 #include "xla/service/service.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
-#include "xla/tests/test_utils.h"
+#include "xla/tsl/lib/gtl/value_or_die.h"
 #include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/errors.h"
@@ -112,7 +113,8 @@ std::vector<std::unique_ptr<GlobalData>> MakeFakeArgumentsOrDie(
 
   std::vector<std::unique_ptr<GlobalData>> results;
   for (const ShapeProto& shape : program_shape.parameters()) {
-    results.push_back(MakeFakeDataOrDie(Shape(shape), client, debug_opts));
+    results.push_back(MakeFakeDataOrDie(
+        tsl::gtl::ValueOrDie(Shape::FromProto(shape)), client, debug_opts));
   }
   return results;
 }

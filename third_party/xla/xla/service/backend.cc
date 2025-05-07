@@ -13,9 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "absl/log/check.h"
+#include "absl/status/status.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/types/span.h"
+#include "xla/service/computation_placer.h"
+#include "xla/service/stream_pool.h"
+#include "xla/service/transfer_manager.h"
+#include "xla/stream_executor/platform.h"
+#include "tsl/platform/statusor.h"
 #define EIGEN_USE_THREADS
-
-#include "xla/service/backend.h"
 
 #include <memory>
 #include <optional>
@@ -26,6 +33,7 @@ limitations under the License.
 
 #include "absl/status/statusor.h"
 #include "unsupported/Eigen/CXX11/Tensor"
+#include "xla/service/backend.h"
 #include "xla/service/compiler.h"
 #include "xla/service/platform_util.h"
 #include "xla/stream_executor/host/host_platform_id.h"
@@ -90,9 +98,9 @@ struct Backend::IntraOpThreadPool {
                       TransferManager::GetForPlatform(platform));
   TF_ASSIGN_OR_RETURN(auto computation_placer,
                       ComputationPlacer::GetForPlatform(platform));
-  std::unique_ptr<Backend> backend(
-      new Backend(platform, compiler, stream_executors, transfer_manager,
-                  computation_placer, options.intra_op_parallelism_threads()));
+  std::unique_ptr<Backend> backend(new Backend(
+      platform, std::move(compiler), stream_executors, transfer_manager,
+      computation_placer, options.intra_op_parallelism_threads()));
   return std::move(backend);
 }
 
@@ -136,13 +144,13 @@ absl::StatusOr<std::vector<StreamPool::Ptr>> Backend::BorrowStreams(
   return ptrs;
 }
 
-Backend::Backend(se::Platform* platform, Compiler* compiler,
+Backend::Backend(se::Platform* platform, std::unique_ptr<Compiler> compiler,
                  absl::Span<se::StreamExecutor* const> stream_executors,
                  TransferManager* transfer_manager,
                  ComputationPlacer* computation_placer,
                  int intra_op_parallelism_threads)
     : platform_(platform),
-      compiler_(compiler),
+      compiler_(std::move(compiler)),
       transfer_manager_(transfer_manager),
       computation_placer_(computation_placer),
       stream_executors_(stream_executors.begin(), stream_executors.end()) {
@@ -199,7 +207,7 @@ absl::StatusOr<se::StreamExecutor*> Backend::stream_executor(
 }
 
 absl::StatusOr<bool> Backend::devices_equivalent(int device_ordinal_a,
-                                                 int device_ordinal_b) {
+                                                 int device_ordinal_b) const {
   // Use the name from device description to determine equivalence. This is a
   // bit crude but works for GPUs which is the important case where we compile
   // an executable for one GPU and want to know if it will run (well) on

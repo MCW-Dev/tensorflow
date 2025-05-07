@@ -17,13 +17,15 @@ limitations under the License.
 
 #include <cstdint>
 #include <functional>
-#include <string_view>
+#include <memory>
 #include <utility>
 
 #include "absl/algorithm/container.h"
 #include "absl/base/attributes.h"
 #include "absl/base/dynamic_annotations.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
@@ -33,14 +35,16 @@ limitations under the License.
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Support/LLVM.h"
 #include "xla/executable_run_options.h"
+#include "xla/ffi/api/c_api.h"
 #include "xla/ffi/attribute_map.h"
 #include "xla/ffi/call_frame.h"
+#include "xla/ffi/execution_state.h"
 #include "xla/ffi/ffi_api.h"
 #include "xla/primitive_util.h"
 #include "xla/service/custom_call_status.h"
+#include "xla/tsl/platform/errors.h"
+#include "xla/tsl/platform/statusor.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/platform/logging.h"
-#include "tsl/platform/statusor.h"
 
 namespace ffi = xla::ffi;
 
@@ -62,6 +66,10 @@ void BuildArgBuffers(absl::Span<const int32_t> types, int64_t* encoded_dims,
   int64_t dim_pos = 0;
   for (int64_t i = 0; i < types.size(); ++i) {
     auto dtype = static_cast<xla::PrimitiveType>(types[i]);
+    if (dtype == xla::PrimitiveType::TOKEN) {
+      builder.AddTokenArg();
+      continue;
+    }
     auto dims = DecodeDims(encoded_dims + dim_pos);
     auto elem_count = absl::c_accumulate(dims, 1, std::multiplies<int64_t>());
     auto data_width = xla::primitive_util::ByteWidth(dtype) * elem_count;
@@ -81,6 +89,10 @@ void BuildRetBuffers(absl::Span<const int32_t> types, int64_t* encoded_dims,
   int64_t dim_pos = 0;
   for (int64_t i = 0; i < types.size(); ++i) {
     auto dtype = static_cast<xla::PrimitiveType>(types[i]);
+    if (dtype == xla::PrimitiveType::TOKEN) {
+      builder.AddTokenRet();
+      continue;
+    }
     auto dims = DecodeDims(encoded_dims + dim_pos);
     auto elem_count = absl::c_accumulate(dims, 1, std::multiplies<int64_t>());
     auto data_width = xla::primitive_util::ByteWidth(dtype) * elem_count;
@@ -95,8 +107,8 @@ void BuildRetBuffers(absl::Span<const int32_t> types, int64_t* encoded_dims,
 }
 
 static absl::Status BuildAndCallFfi(
-    const xla::ExecutableRunOptions* run_options, std::string_view target_name,
-    std::string_view backend_config, absl::Span<void* const> outputs,
+    const xla::ExecutableRunOptions* run_options, absl::string_view target_name,
+    absl::string_view backend_config, absl::Span<void* const> outputs,
     absl::Span<void* const> inputs, absl::Span<const int32_t> result_types,
     int64_t* result_dims, absl::Span<const int32_t> operand_types,
     int64_t* operand_dims) {
@@ -108,13 +120,13 @@ static absl::Status BuildAndCallFfi(
       ffi::FindHandler(target_name, "Host");
 
   if (!registration.ok()) {
-    return absl::UnimplementedError(
+    return absl::NotFoundError(
         absl::StrCat("No registered implementation for custom call to ",
                      target_name, " for Host."));
   }
 
   // For FFI handlers backend config must be a compatible MLIR dictionary.
-  ffi::CallFrameBuilder::FlatAttributesMap attributes;
+  ffi::CallFrameBuilder::AttributesMap attributes;
   if (!backend_config.empty() && backend_config != "{}") {
     // Backend config not empty, so proceed to parse it into an MLIR attribute
     // and build an MLIR compatible map of attributes out of it.
@@ -127,6 +139,22 @@ static absl::Status BuildAndCallFfi(
           "Unsupported backend config. Expected a string parsable into "
           "dictionary attribute");
     }
+  }
+
+  auto execution_state = std::make_unique<ffi::ExecutionState>();
+
+  // Initialize handler execution state
+  if (registration->bundle.instantiate) {
+    ffi::CallFrameBuilder builder(0, 0);
+    ffi::CallFrameBuilder::AttributesBuilder attrs;
+    attrs.Append(attributes);
+    ffi::CallFrameBuilder::AttributesMap attrs_map = attrs.Build();
+    builder.AddAttributes(attrs_map);
+    ffi::CallFrame call_frame = builder.Build();
+    ffi::CallOptions options;
+    options.execution_state = execution_state.get();
+    TF_RETURN_IF_ERROR(Call(registration->bundle.instantiate, call_frame,
+                            options, XLA_FFI_ExecutionStage_INSTANTIATE));
   }
 
   ffi::CallFrameBuilder builder(inputs.size(), outputs.size());
@@ -142,9 +170,12 @@ static absl::Status BuildAndCallFfi(
 
   // Forward executable run options to the FFI handlers via the call options.
   ffi::CallOptions call_options = {
-      run_options->device_ordinal(), run_options->stream(),
-      run_options->allocator(), /*called_computation=*/nullptr,
-      run_options->ffi_execution_context()};
+      run_options->run_id(),
+      run_options->device_ordinal(),
+      ffi::CallOptions::CpuOptions{run_options->intra_op_thread_pool()},
+      /*called_computation=*/nullptr,
+      run_options->ffi_execution_context(),
+      execution_state.get()};
 
   ffi::CallFrame call_frame = builder.Build();
   return ffi::Call(registration->bundle.execute, call_frame, call_options);

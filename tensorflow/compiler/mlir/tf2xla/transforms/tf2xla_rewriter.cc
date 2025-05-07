@@ -14,16 +14,19 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/compiler/mlir/tf2xla/transforms/tf2xla_rewriter.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
 #include "absl/memory/memory.h"
-#include "absl/strings/string_view.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_replace.h"
+#include "absl/types/span.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -34,6 +37,7 @@ limitations under the License.
 #include "mlir/Dialect/Tensor/IR/Tensor.h"  // from @llvm-project
 #include "mlir/IR/Builders.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "mlir/IR/BuiltinTypeInterfaces.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
 #include "mlir/IR/Diagnostics.h"  // from @llvm-project
 #include "mlir/IR/IRMapping.h"  // from @llvm-project
@@ -47,10 +51,11 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Transforms/DialectConversion.h"  // from @llvm-project
+#include "stablehlo/dialect/Base.h"  // from @stablehlo
+#include "stablehlo/dialect/StablehloOps.h"  // from @stablehlo
 #include "tensorflow/compiler/mlir/op_or_arg_name_mapper.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tpu_embedding_ops_registry.h"
-#include "tensorflow/compiler/mlir/tensorflow/translate/export_tf_dialect_op.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/convert_tensor.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/convert_type.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/translate_utils.h"
@@ -60,18 +65,23 @@ limitations under the License.
 #include "tensorflow/compiler/tf2xla/xla_expression.h"
 #include "tensorflow/compiler/tf2xla/xla_helpers.h"
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
-#include "xla/client/xla_builder.h"
-#include "xla/client/xla_computation.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
-#include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
+#include "xla/hlo/translate/hlo_to_mhlo/hlo_function_importer.h"
+#include "xla/hlo/translate/hlo_to_mhlo/hlo_to_mlir_hlo.h"
+#include "xla/hlo/translate/mhlo_to_hlo/type_to_shape.h"
 #include "xla/service/hlo.pb.h"
-#include "xla/translate/hlo_to_mhlo/hlo_function_importer.h"
-#include "xla/translate/hlo_to_mhlo/hlo_to_mlir_hlo.h"
-#include "xla/translate/mhlo_to_hlo/type_to_shape.h"
+#include "xla/tsl/platform/env.h"
+#include "xla/tsl/platform/errors.h"
+#include "xla/tsl/platform/status.h"
+#include "xla/tsl/platform/statusor.h"
+#include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
 #include "tensorflow/core/common_runtime/process_function_library_runtime.h"
 #include "tensorflow/core/framework/attr_value.pb.h"
+#include "tensorflow/core/framework/function.pb.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/resource_mgr.h"
@@ -80,19 +90,31 @@ limitations under the License.
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/protobuf/config.pb.h"
 #include "tensorflow/core/public/session_options.h"
-#include "tsl/platform/env.h"
-#include "tsl/platform/errors.h"
-#include "tsl/platform/status.h"
-#include "tsl/platform/statusor.h"
 
 namespace mlir {
-namespace mhlo {
+namespace hlo {
 namespace {
 
 using ::mlir::ModuleOp;
 using ::tensorflow::Tensor;
 using ::tsl::StatusOr;
 using ::xla::XlaComputation;
+
+// The OpOrArgLocNameMapper adds invalid characters to the name of the op when
+// concatenating locations. This version removes those characters to make the
+// name valid for NodeDef.
+class OpOrArgLocNameMapperWithoutInvalidCharacters
+    : public tensorflow::OpOrArgLocNameMapper {
+ public:
+  OpOrArgLocNameMapperWithoutInvalidCharacters() = default;
+  ~OpOrArgLocNameMapperWithoutInvalidCharacters() override = default;
+
+ protected:
+  std::string GetName(tensorflow::OpOrVal op_or_val) override {
+    std::string name = OpOrArgLocNameMapper::GetName(op_or_val);
+    return absl::StrReplaceAll(name, {{";", "."}});
+  }
+};
 
 static std::unique_ptr<tensorflow::StaticDeviceMgr> CreateDeviceMgr(
     const std::string& device_type) {
@@ -125,6 +147,8 @@ Tf2XlaRewriter::Tf2XlaRewriter(Operation* op, PatternRewriter& rewriter,
     : op_(op),
       device_type_(device_type),
       rewriter_(rewriter),
+      name_mapper_(
+          std::make_unique<OpOrArgLocNameMapperWithoutInvalidCharacters>()),
       context_(nullptr),
       xla_builder_(op_->getName().getStringRef().str()) {}
 
@@ -132,7 +156,7 @@ Tf2XlaRewriter::~Tf2XlaRewriter() {
   if (context_) context_->Unref();
 }
 
-absl::StatusOr<mhlo::TupleOp> Tf2XlaRewriter::ImportXlaComputation(
+absl::StatusOr<stablehlo::TupleOp> Tf2XlaRewriter::ImportXlaComputation(
     XlaComputation& computation) {
   xla::DebugOptions debug_options;
   TF_ASSIGN_OR_RETURN(auto hlo_module_config,
@@ -171,8 +195,8 @@ absl::StatusOr<mhlo::TupleOp> Tf2XlaRewriter::ImportXlaComputation(
       xla::HloFunctionImporter::ImportInstructions(
           *hlo_module->entry_computation(), arguments, symbol_table, &builder));
 
-  mhlo::TupleOp root_tuple =
-      mlir::dyn_cast_or_null<mhlo::TupleOp>(root_value.getDefiningOp());
+  stablehlo::TupleOp root_tuple =
+      mlir::dyn_cast_or_null<stablehlo::TupleOp>(root_value.getDefiningOp());
   if (!root_tuple) {
     return tsl::errors::InvalidArgument(
         "Imported XLA Root Value is not a tuple op");
@@ -237,13 +261,11 @@ bool IsBounded(Type ty) {
 
   if (ranked_ty.hasStaticShape()) return true;
 
-  auto encoding =
-      mlir::dyn_cast_or_null<TypeExtensionsAttr>(ranked_ty.getEncoding());
-  if (!encoding) return false;
+  ArrayRef<int64_t> bounds = hlo::encodingToBounds(ranked_ty.getEncoding());
+  if (bounds.empty()) return false;
 
   for (int i = 0; i < ranked_ty.getRank(); ++i) {
-    if (ranked_ty.isDynamicDim(i) &&
-        encoding.getBounds()[i] == ShapedType::kDynamic) {
+    if (ranked_ty.isDynamicDim(i) && bounds[i] == ShapedType::kDynamic) {
       return false;
     }
   }
@@ -319,7 +341,7 @@ LogicalResult Tf2XlaRewriter::LegalizeOp() {
   }
 
   auto nodedef_or = tensorflow::ConvertTFDialectOpToNodeDef(
-      op_, name_mapper_.GetUniqueName(op_),
+      op_, name_mapper_->GetUniqueName(op_),
       /*ignore_unregistered_attrs=*/true);
   if (!nodedef_or.ok()) {
     return op_->emitRemark() << "failed to convert op to NodeDef: "
@@ -388,23 +410,23 @@ LogicalResult Tf2XlaRewriter::LegalizeOp() {
 
   if (failed(VerifyOpResults(op_context))) return failure();
 
-  absl::StatusOr<mhlo::TupleOp> tuple_result_or_status =
+  absl::StatusOr<stablehlo::TupleOp> tuple_result_or_status =
       CompileWithHloImporter(op_context);
   if (!tuple_result_or_status.ok()) {
     return op_->emitRemark() << tuple_result_or_status.status().ToString();
   }
-    mhlo::TupleOp tuple_result = tuple_result_or_status.value();
+  stablehlo::TupleOp tuple_result = tuple_result_or_status.value();
 
-    llvm::SmallVector<Value> output_values;
-    if (failed(GetKernelOutputs(op_context, tuple_result, output_values))) {
-      return failure();
-    }
+  llvm::SmallVector<Value> output_values;
+  if (failed(GetKernelOutputs(op_context, tuple_result, output_values))) {
+    return failure();
+  }
 
   rewriter_.replaceOp(op_, output_values);
   return success();
 }
 
-absl::StatusOr<mhlo::TupleOp> Tf2XlaRewriter::CompileWithHloImporter(
+absl::StatusOr<stablehlo::TupleOp> Tf2XlaRewriter::CompileWithHloImporter(
     tensorflow::OpKernelContext& op_context) {
   // XLA can only return a single value. Wrap all output op return values
   // in a Tuple op that gets unpacked later.
@@ -448,7 +470,7 @@ mlir::LogicalResult Tf2XlaRewriter::VerifyOpResults(
 // multiple values. We get around this by returning a tuple as an XLA op. We
 // then unpack it here to return the multiple values instead.
 mlir::LogicalResult Tf2XlaRewriter::UnpackTupleResults(
-    mhlo::TupleOp tuple_result, llvm::SmallVector<Value>& outputs) {
+    stablehlo::TupleOp tuple_result, llvm::SmallVector<Value>& outputs) {
   if (tuple_result->getNumOperands() != op_->getNumResults()) {
     return op_->emitRemark() << "Translated TF2XLA tuple has different "
                                 "number of results than original op";
@@ -463,7 +485,7 @@ mlir::LogicalResult Tf2XlaRewriter::UnpackTupleResults(
 }
 
 mlir::LogicalResult Tf2XlaRewriter::GetKernelOutputs(
-    tensorflow::OpKernelContext& op_context, mhlo::TupleOp tuple_results,
+    tensorflow::OpKernelContext& op_context, stablehlo::TupleOp tuple_results,
     llvm::SmallVector<Value>& outputs) {
   outputs.reserve(op_->getNumResults());
 
@@ -500,5 +522,5 @@ tensorflow::XlaExpression Tf2XlaRewriter::GetExprForOperand(
   return tensorflow::XlaExpression::XlaOp(xla_op, dtype);
 }
 
-}  // namespace mhlo
+}  // namespace hlo
 }  // namespace mlir

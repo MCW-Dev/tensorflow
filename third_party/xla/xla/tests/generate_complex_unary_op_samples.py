@@ -21,6 +21,7 @@ Constraints:
 """
 
 import os
+import platform
 import re
 import sys
 import jax._src.test_util as jtu
@@ -31,15 +32,21 @@ import numpy as np
 def disable(op, real, imag):
   # Return True to disable samples (real, imag) that are know to be
   # problematic for the given op.
-  if op == 'Tan' and ('inf' in real or 'inf' in imag):
-    # TODO(pearu): remove this if-block when google/jax#20688 has landed
-    return True
-  else:
-    del op, real, imag
+  del op, real, imag
   return False
 
 
 def main():
+  machine = platform.machine()
+  is_arm_cpu = machine.startswith('aarch') or machine.startswith('arm')
+  if is_arm_cpu and platform.system() == 'Darwin':
+    # jtu.complex_plane_sample on Darwin ARM generates samples that
+    # are specific to the given platform (tiny is mapped to
+    # nextafter(tiny, inf) to avoid unexpected result when DAZ is
+    # enabled). Here we handle the Mac specific DAZ difference at C++
+    # level (see the __aarch64__-dependent min value mapping below).
+    sys.stdout.write("Don't run this script under Darwin ARM\n")
+    return
   target = (sys.argv[1] if len(sys.argv) > 1 else 'xla').lower()
   assert target in {'xla', 'tensorflow'}, target
   header_file_define = dict(
@@ -50,14 +57,20 @@ def main():
   default_extra_prec_multiplier = 1
 
   blocks = []
-  for opname in ['Log1p', 'Tan']:
+  for opname in ['Log1p', 'Tan', 'Asin', 'Asinh']:
     mpmath_op = opname.lower()
+    mpmath_op = dict(asin='arcsin', asinh='arcsinh').get(mpmath_op, mpmath_op)
     size_re, size_im = dict(Log1p=(7, 7), Tan=(7, 7)).get(
         opname, (default_size, default_size)
     )
-    extra_prec_multiplier = dict(Log1p=1, Tan=1).get(
-        opname, default_extra_prec_multiplier
-    )
+    extra_prec_multiplier = dict(
+        Log1p=1,
+        Tan=1,
+        # TODO(pearu): reduce to 1 after a fix to mpmath/mpmath#787 becomes
+        # available
+        Asin=20,
+        Asinh=20,
+    ).get(opname, default_extra_prec_multiplier)
     nmp = jtu.numpy_with_mpmath(
         mpmath, extra_prec_multiplier=extra_prec_multiplier
     )
@@ -188,8 +201,17 @@ def main():
           max='std::numeric_limits<T>::max()',
       ).items():
         if name in used_constants:
-          constants.append(f'const T {name} = {value};')
-      constants = '\n      '.join(constants)
+          if name == 'min':
+            constants.append('#ifdef __aarch64__')
+            constants.append(f'const T {name} = std::nextafter({value}, T(1));')
+            constants.append('#else')
+            constants.append(f'const T {name} = {value};')
+            constants.append('#endif')
+          else:
+            constants.append(f'const T {name} = {value};')
+      nl = '\n      '
+      constants = nl.join(constants)
+      constants = constants.replace(nl + '#', '\n#')
 
       ifblocks.append(f"""\
 if constexpr (std::is_same_v<T, {ctype}>) {{
@@ -208,7 +230,7 @@ if constexpr (std::is_same_v<T, {ctype}>) {{
         '{\n      static_assert(dependent_false<T>); /* unreachable */\n    }'
     )
     ifblocks = ' else '.join(ifblocks)
-    blocks.append(f"""
+    blocks.append(f"""\
 template <typename T, int default_dps_deficiency = 0>
 struct {opname} {{
   typedef {input_ttype} InputType;
@@ -259,10 +281,13 @@ limitations under the License.
 #define {header_file_define}
 
 namespace complex_unary_op_samples {{
+// NOLINTBEGIN(whitespace/line_length)
 
 template <class>
 constexpr bool dependent_false = false;
+
 {blocks}
+// NOLINTEND(whitespace/line_length)
 }}  // namespace complex_unary_op_samples
 
 #endif  // {header_file_define}

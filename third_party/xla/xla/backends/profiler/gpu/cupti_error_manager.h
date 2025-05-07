@@ -25,8 +25,8 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "absl/synchronization/mutex.h"
 #include "xla/backends/profiler/gpu/cupti_interface.h"
-#include "tsl/platform/mutex.h"
 #include "tsl/platform/thread_annotations.h"
 
 namespace xla {
@@ -117,6 +117,8 @@ class CuptiErrorManager : public xla::profiler::CuptiInterface {
   CUptiResult GetGraphExecId(CUgraphExec graph_exec,
                              uint32_t* graph_id) override;
 
+  CUptiResult SetThreadIdType(CUpti_ActivityThreadIdType type) override;
+
   // Clears Undo stack. We are maintaining undo stack for each profiling phase.
   // Once the profiling is done, we need to clear the undo stack.
   void CleanUp() override;
@@ -156,7 +158,7 @@ class CuptiErrorManager : public xla::profiler::CuptiInterface {
   // be extremely low. In other words, it will be contended only when the
   // profiling is being enabled or disabled, and we will have at most two
   // threads that will contend for this mutex.
-  tsl::mutex undo_stack_mu_;
+  absl::Mutex undo_stack_mu_;
 
   // Once an error is detected, we will ignore any CUPTI API call.
   std::atomic<int> disabled_;

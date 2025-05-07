@@ -19,27 +19,42 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <functional>
 #include <iterator>
 #include <limits>
-#include <numeric>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
 #include "absl/base/casts.h"
+#include "absl/base/const_init.h"
 #include "absl/base/log_severity.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/types/span.h"
+#include "xla/tsl/platform/env.h"
+#include "xla/tsl/platform/logging.h"
 #include "xla/types.h"
-#include "tsl/platform/env.h"
+#include "xla/xla_data.pb.h"
 #include "tsl/platform/numbers.h"
+#include "tsl/platform/protobuf.h"
 #include "tsl/platform/stacktrace.h"
 
 namespace xla {
@@ -136,8 +151,9 @@ std::string Reindent(absl::string_view original,
 
 template <typename FloatT>
 static void RoundTripNanPayload(FloatT value, std::string* result) {
+  static_assert(std::numeric_limits<FloatT>::has_quiet_NaN);
   static_assert(!std::is_same<FloatT, tsl::float8_e4m3fn>::value,
-                "RoundTripNanPayload does not support E4M3");
+                "RoundTripNanPayload does not support E4M3FN");
   static_assert(!std::is_same<FloatT, tsl::float8_e4m3fnuz>::value,
                 "RoundTripNanPayload does not support E4M3FNUZ");
   static_assert(!std::is_same<FloatT, tsl::float8_e5m2fnuz>::value,
@@ -162,7 +178,17 @@ static std::string GenericRoundTripFpToString(FloatT value) {
                          static_cast<double>(value));
 }
 
+std::string RoundTripFpToString(tsl::float4_e2m1fn value) {
+  return GenericRoundTripFpToString(value);
+}
+
 std::string RoundTripFpToString(tsl::float8_e5m2 value) {
+  std::string result = GenericRoundTripFpToString(value);
+  RoundTripNanPayload(value, &result);
+  return result;
+}
+
+std::string RoundTripFpToString(tsl::float8_e4m3 value) {
   std::string result = GenericRoundTripFpToString(value);
   RoundTripNanPayload(value, &result);
   return result;
@@ -184,6 +210,17 @@ std::string RoundTripFpToString(tsl::float8_e4m3fn value) {
 }
 
 std::string RoundTripFpToString(tsl::float8_e4m3b11fnuz value) {
+  std::string result = GenericRoundTripFpToString(value);
+  return result;
+}
+
+std::string RoundTripFpToString(tsl::float8_e3m4 value) {
+  std::string result = GenericRoundTripFpToString(value);
+  RoundTripNanPayload(value, &result);
+  return result;
+}
+
+std::string RoundTripFpToString(tsl::float8_e8m0fnu value) {
   std::string result = GenericRoundTripFpToString(value);
   return result;
 }
@@ -314,8 +351,8 @@ void LogLines(absl::LogSeverity sev, absl::string_view text, const char* fname,
 }
 
 int64_t Product(absl::Span<const int64_t> xs) {
-  return std::accumulate(xs.begin(), xs.end(), static_cast<int64_t>(1),
-                         std::multiplies<int64_t>());
+  return absl::c_accumulate(xs, static_cast<int64_t>(1),
+                            std::multiplies<int64_t>());
 }
 
 std::vector<int64_t> ElemwiseProduct(absl::Span<const int64_t> a,
@@ -453,6 +490,20 @@ ConvertedDimensionNumbers ConvertDimensionNumbers(
   absl::c_sort(dimensions.to_dimensions);
   return dimensions;
 }
+
+DimensionVector GetNonContractingDims(
+    int64_t rank, absl::Span<const int64_t> contracting_dim_numbers,
+    absl::Span<const int64_t> batch_dim_numbers) {
+  DimensionVector non_contracting_dim_numbers;
+  for (int64_t i = 0; i < rank; ++i) {
+    if (!absl::c_linear_search(contracting_dim_numbers, i) &&
+        !absl::c_linear_search(batch_dim_numbers, i)) {
+      non_contracting_dim_numbers.push_back(i);
+    }
+  }
+  return non_contracting_dim_numbers;
+}
+
 std::string SanitizeFileName(std::string file_name) {
   for (char& c : file_name) {
     if (c == '/' || c == '\\' || c == '[' || c == ']' || c == ' ') {
@@ -465,6 +516,54 @@ std::string SanitizeFileName(std::string file_name) {
 bool DistinctNumbersAreConsecutiveIfSorted(absl::Span<const int64_t> seq) {
   return *absl::c_max_element(seq) - *absl::c_min_element(seq) ==
          seq.size() - 1;
+}
+
+std::string PrintAllFields(const tsl::protobuf::Message& message) {
+  tsl::protobuf::TextFormat::Printer tsl_printer;
+  const tsl::protobuf::Reflection* reflection = message.GetReflection();
+  std::stringstream result;
+  std::string buffer;
+  const tsl::protobuf::Descriptor* descriptor = message.GetDescriptor();
+  for (int i = 0; i < descriptor->field_count(); ++i) {
+    const tsl::protobuf::FieldDescriptor* field = descriptor->field(i);
+    if (field->is_repeated()) {
+      result << field->name() << ": [";
+      for (int j = 0; j < reflection->FieldSize(message, field); ++j) {
+        if (j > 0) {
+          result << ", ";
+        }
+        tsl_printer.PrintFieldValueToString(message, field, j, &buffer);
+        result << buffer;
+      }
+      result << "]\n";
+    } else {
+      result << field->name() << ": ";
+      tsl_printer.PrintFieldValueToString(message, field, -1, &buffer);
+      result << buffer << "\n";
+    }
+  }
+  return result.str();
+}
+
+std::unique_ptr<void, FreeDeleter> AlignedAlloc(std::size_t alignment,
+                                                std::size_t size) {
+  CHECK_GT(alignment, 0) << "alignment must be positive";
+  CHECK(IsPowerOf2(alignment))
+      << "alignment must be a power of 2, but got " << alignment;
+  CHECK_GT(size, 0) << "size must be positive";
+#ifdef _WIN32
+  void* raw_ptr = _aligned_malloc(size, alignment);  // Note argument order
+#elif defined(__ANDROID__) && __ANDROID_API__ < 28
+  // Use posix_memalign as a fallback for older Android APIs
+  void* raw_ptr;
+  int result = posix_memalign(&raw_ptr, alignment, size);
+  CHECK_EQ(result, 0) << "posix_memalign failed with error code: " << result;
+#else
+  void* raw_ptr = std::aligned_alloc(alignment, size);
+#endif
+  CHECK_NE(raw_ptr, nullptr) << "aligned_alloc failed";
+  // Return unique_ptr managing the memory.
+  return std::unique_ptr<void, FreeDeleter>(raw_ptr, FreeDeleter());
 }
 
 }  // namespace xla

@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "xla/tools/run_hlo_module.h"
 
+#include <chrono>
+#include <cstddef>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -32,6 +34,7 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
@@ -168,6 +171,12 @@ absl::StatusOr<Literal> ExecuteWithRunner(
   return std::move(result_status).value();
 }
 
+void UseCpuThunkRuntime(HloModule& module) {
+  auto debug_options = module.config().debug_options();
+  debug_options.set_xla_cpu_use_thunk_runtime(true);
+  module.mutable_config().set_debug_options(debug_options);
+}
+
 absl::Status RunAndCompareInternal(
     std::unique_ptr<HloModule> test_module,
     const BufferAssignmentProto* buffer_assignment_proto,
@@ -220,9 +229,12 @@ absl::Status RunAndCompareInternal(
           "number of expected arguments.");
     } else {
       for (int i = 0; i < args.size(); ++i) {
-        if (!literal_comparison::EqualShapes(
-                 xla::Shape(args[i].shape()),
-                 xla::Shape(iteration_literals_proto->arguments(i).shape()))
+        TF_ASSIGN_OR_RETURN(
+            auto expected_shape,
+            xla::Shape::FromProto(
+                iteration_literals_proto->arguments(i).shape()));
+        if (!literal_comparison::EqualShapes(xla::Shape(args[i].shape()),
+                                             expected_shape)
                  .ok()) {
           if (test_run_result != nullptr) {
             *test_run_result = ModuleResult::kOtherError;
@@ -255,15 +267,25 @@ absl::Status RunAndCompareInternal(
 
   std::unique_ptr<HloModule> reference_module;
   if (reference_runner != nullptr) {
+    // If reference platform is the same as test platform, we shouldn't
+    // deoptimize the reference module.
+    bool skip_deoptimization = options.reference_platform == options.platform;
+
     // PrepareReferenceModule needs to know the *test* runner, in order to
     // properly match the test runner's numerics.
     TF_ASSIGN_OR_RETURN(
         reference_module,
         copy_result_on_failure(
-            PrepareReferenceModule(*test_module, test_runner,
-                                   config_modifier_hook,
-                                   reference_module_modifier_hook),
+            PrepareReferenceModule(
+                *test_module, test_runner, config_modifier_hook,
+                reference_module_modifier_hook, skip_deoptimization),
             ModuleResult::kCompilationError, reference_run_result));
+  }
+
+  // Now when reference_module is ready, we can modify test_module without
+  // impacting the reference run.
+  if (options.force_use_cpu_thunk_runtime_for_test) {
+    UseCpuThunkRuntime(*test_module);
   }
 
   TF_ASSIGN_OR_RETURN(

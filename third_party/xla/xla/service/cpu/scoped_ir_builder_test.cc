@@ -20,18 +20,20 @@ limitations under the License.
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "xla/hlo/analysis/hlo_ordering.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/service/buffer_assignment.h"
+#include "xla/service/buffer_value.h"
+#include "xla/service/cpu/cpu_executable.h"
 #include "xla/service/cpu/ir_emitter.h"
-#include "xla/service/cpu/target_machine_features_fake.h"
-#include "xla/service/hlo_ordering.h"
+#include "xla/service/cpu/target_machine_features_stub.h"
 #include "xla/service/logical_buffer.h"
-#include "xla/tests/hlo_test_base.h"
 #include "tsl/platform/test.h"
 
 namespace xla::cpu {
 namespace {
 
-class IRBuilderGuardTest : public HloTestBase {
+class IRBuilderGuardTest : public HloHardwareIndependentTestBase {
  public:
   IrEmitter MakeIrEmitter(llvm::LLVMContext& context) {
     auto module = std::make_unique<llvm::Module>("test", context);
@@ -46,12 +48,13 @@ class IRBuilderGuardTest : public HloTestBase {
     std::unique_ptr<BufferAssignment> buffer_assignment =
         BufferAssigner::Run(
             hlo.get(), std::make_unique<DependencyHloOrdering>(hlo.get()),
-            backend().compiler()->BufferSizeBytesFunction(),
+            [](const BufferValue& buffer) {
+              return CpuExecutable::ShapeSizeBytes(buffer.shape());
+            },
             [](LogicalBuffer::Color) { return /*alignment=*/1; })
             .value();
 
-    TargetMachineFeaturesWithFakeAlignmentLogic target_machine(
-        [](int64_t size) { return 1; });
+    TargetMachineFeaturesStub target_machine([](int64_t size) { return 1; });
     return IrEmitter(/*mlir_context=*/nullptr, /*hlo_module=*/*hlo,
                      /*assignment=*/*buffer_assignment,
                      /*llvm_module=*/module.get(),

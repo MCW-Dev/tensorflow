@@ -15,11 +15,12 @@ limitations under the License.
 
 #include "xla/service/gpu/reduction_utils.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/strings/str_cat.h"
 #include "xla/hlo/ir/hlo_instruction.h"
-#include "xla/service/hlo_parser.h"
-#include "xla/tests/hlo_test_base.h"
+#include "xla/hlo/parser/hlo_parser.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 
 namespace xla {
 namespace gpu {
@@ -27,7 +28,7 @@ namespace {
 
 using ::testing::ElementsAre;
 
-using ReductionUtilsTest = HloTestBase;
+using ReductionUtilsTest = HloHardwareIndependentTestBase;
 
 const char kModulePrefix[] = R"(
     HloModule test_module

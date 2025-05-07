@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "xla/service/spmd/spmd_prepare.h"
 
+#include <cstdint>
 #include <memory>
 #include <utility>
 
@@ -24,12 +25,12 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
+#include "xla/hlo/pass/hlo_pass_pipeline.h"
+#include "xla/hlo/testlib/hlo_hardware_independent_test_base.h"
 #include "xla/hlo/utils/hlo_matchers.h"
-#include "xla/service/hlo_pass_pipeline.h"
-#include "xla/tests/hlo_test_base.h"
+#include "xla/tsl/platform/errors.h"
+#include "xla/tsl/platform/statusor.h"
 #include "xla/util.h"
-#include "tsl/platform/errors.h"
-#include "tsl/platform/statusor.h"
 
 namespace xla {
 namespace spmd {
@@ -37,7 +38,7 @@ namespace {
 
 namespace op = xla::testing::opcode_matchers;
 
-class SpmdPrepareTest : public HloTestBase {
+class SpmdPrepareTest : public HloHardwareIndependentTestBase {
  public:
   absl::StatusOr<std::unique_ptr<HloModule>> RunPass(
       absl::string_view hlo_module, int64_t distance_threshold = 100) {

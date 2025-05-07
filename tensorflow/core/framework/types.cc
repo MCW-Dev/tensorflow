@@ -132,10 +132,20 @@ string DataTypeStringInternal(DataType dtype) {
       return "float8_e5m2";
     case DT_FLOAT8_E4M3FN:
       return "float8_e4m3fn";
+    case DT_FLOAT8_E4M3FNUZ:
+      return "float8_e4m3fnuz";
+    case DT_FLOAT8_E4M3B11FNUZ:
+      return "float8_e4m3b11fnuz";
+    case DT_FLOAT8_E5M2FNUZ:
+      return "float8_e5m2fnuz";
     case DT_INT4:
       return "int4";
     case DT_UINT4:
       return "uint4";
+    case DT_INT2:
+      return "int2";
+    case DT_UINT2:
+      return "uint2";
     case DT_RESOURCE:
       return "resource";
     case DT_VARIANT:
@@ -155,8 +165,8 @@ string DataTypeString(DataType dtype) {
   return DataTypeStringInternal(dtype);
 }
 
-bool DataTypeFromString(StringPiece sp, DataType* dt) {
-  if (str_util::EndsWith(sp, "_ref")) {
+bool DataTypeFromString(absl::string_view sp, DataType* dt) {
+  if (absl::EndsWith(sp, "_ref")) {
     sp.remove_suffix(4);
     DataType non_ref;
     if (DataTypeFromString(sp, &non_ref) && !IsRefType(non_ref)) {
@@ -236,11 +246,26 @@ bool DataTypeFromString(StringPiece sp, DataType* dt) {
   } else if (sp == "float8_e4m3fn") {
     *dt = DT_FLOAT8_E4M3FN;
     return true;
+  } else if (sp == "float8_e4m3fnuz") {
+    *dt = DT_FLOAT8_E4M3FNUZ;
+    return true;
+  } else if (sp == "float8_e4m3b11fnuz") {
+    *dt = DT_FLOAT8_E4M3B11FNUZ;
+    return true;
+  } else if (sp == "float8_e5m2fnuz") {
+    *dt = DT_FLOAT8_E5M2FNUZ;
+    return true;
   } else if (sp == "int4") {
     *dt = DT_INT4;
     return true;
   } else if (sp == "uint4") {
     *dt = DT_UINT4;
+    return true;
+  } else if (sp == "int2") {
+    *dt = DT_INT2;
+    return true;
+  } else if (sp == "uint2") {
+    *dt = DT_UINT2;
     return true;
   } else if (sp == "resource") {
     *dt = DT_RESOURCE;
@@ -291,8 +316,13 @@ int DataTypeSize(DataType dt) {
     TF_CALL_quint16(CASE);
     TF_CALL_float8_e5m2(CASE);
     TF_CALL_float8_e4m3fn(CASE);
+    TF_CALL_float8_e4m3fnuz(CASE);
+    TF_CALL_float8_e4m3b11fnuz(CASE);
+    TF_CALL_float8_e5m2fnuz(CASE);
     TF_CALL_int4(CASE);
     TF_CALL_uint4(CASE);
+    TF_CALL_int2(CASE);
+    TF_CALL_uint2(CASE);
 
     default:
       return 0;
@@ -327,8 +357,13 @@ DEFINE_DATATYPETOENUM_VALUE(bfloat16);
 DEFINE_DATATYPETOENUM_VALUE(Eigen::half);
 DEFINE_DATATYPETOENUM_VALUE(float8_e5m2);
 DEFINE_DATATYPETOENUM_VALUE(float8_e4m3fn);
+DEFINE_DATATYPETOENUM_VALUE(float8_e4m3fnuz);
+DEFINE_DATATYPETOENUM_VALUE(float8_e4m3b11fnuz);
+DEFINE_DATATYPETOENUM_VALUE(float8_e5m2fnuz);
 DEFINE_DATATYPETOENUM_VALUE(int4);
 DEFINE_DATATYPETOENUM_VALUE(uint4);
+DEFINE_DATATYPETOENUM_VALUE(int2);
+DEFINE_DATATYPETOENUM_VALUE(uint2);
 DEFINE_DATATYPETOENUM_VALUE(ResourceHandle);
 DEFINE_DATATYPETOENUM_VALUE(Variant);
 #undef DEFINE_DATATYPETOENUM_VALUE

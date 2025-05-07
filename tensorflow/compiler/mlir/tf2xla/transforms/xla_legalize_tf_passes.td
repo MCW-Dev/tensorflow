@@ -50,7 +50,7 @@ def LegalizeTF : Pass<"xla-legalize-tf", "ModuleOp"> {
     "chlo::ChloDialect",
     "func::FuncDialect",
     "mhlo::MhloDialect",
-    "quant::QuantizationDialect",
+    "quant::QuantDialect",
     "shape::ShapeDialect",
     "sparse_tensor::SparseTensorDialect",
     "stablehlo::StablehloDialect"
@@ -77,7 +77,7 @@ def VerifyTFXLALegalization : Pass<"tfxla-verify-legalization", "mlir::func::Fun
         "Legalizes intermediate chlo ops to hlo">
     ];
 
-  let constructor = "mlir::mhlo::CreateVerifyTFXLALegalizationPass()";
+  let constructor = "mlir::hlo::CreateVerifyTFXLALegalizationPass()";
 }
 
 def TFXLADeviceSpecificTransforms : Pass<"tfxla-device-specific-transforms",

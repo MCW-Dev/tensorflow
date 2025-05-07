@@ -16,16 +16,19 @@ limitations under the License.
 #ifndef XLA_PYTHON_PJRT_IFRT_XLA_SHARDING_H_
 #define XLA_PYTHON_PJRT_IFRT_XLA_SHARDING_H_
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/hash/hash.h"
 #include "absl/status/statusor.h"
 #include "llvm/Support/ExtensibleRTTI.h"
 #include "xla/hlo/ir/hlo_sharding.h"
-#include "xla/python/ifrt/device.h"
+#include "xla/python/ifrt/device_list.h"
 #include "xla/python/ifrt/index_domain.h"
 #include "xla/python/ifrt/memory.h"
 #include "xla/python/ifrt/shape.h"
@@ -52,7 +55,7 @@ class HloSharding final
   // devices to optimize the common path of passing it to the user or to a
   // lower-level runtime. It is instead validated when the information in the
   // sharding is used within IFRT, e.g., in `Disassemble()`.
-  static std::unique_ptr<HloSharding> Create(DeviceList devices,
+  static std::unique_ptr<HloSharding> Create(DeviceListRef devices,
                                              MemoryKind memory_kind,
                                              xla::HloSharding xla_hlo_sharding);
 
@@ -68,33 +71,50 @@ class HloSharding final
   bool HasSamePartitioning(const Sharding& other) const override;
 
   absl::StatusOr<std::unique_ptr<Sharding>> WithDeviceAssignment(
-      std::optional<DeviceList> devices,
+      std::optional<DeviceListRef> devices,
       std::optional<MemoryKind> memory_kind) const override;
 
-  absl::StatusOr<std::vector<std::pair<Shape, std::shared_ptr<const Sharding>>>>
-  Disassemble(const Shape& shape) const override;
-  absl::StatusOr<
-      std::vector<std::pair<DynamicShape, std::shared_ptr<const Sharding>>>>
-  Disassemble(const DynamicShape& dynamic_shape) const override;
+  absl::StatusOr<std::vector<std::pair<Shape, ShardingRef>>> Disassemble(
+      const Shape& shape) const override;
+  absl::StatusOr<std::vector<std::pair<Shape, ShardingRef>>> Disassemble(
+      const Shape& shape,
+      SingleDeviceShardSemantics single_device_shard_semantics) const override;
+
+  absl::StatusOr<std::vector<std::pair<DynamicShape, ShardingRef>>> Disassemble(
+      const DynamicShape& dynamic_shape) const override;
+  absl::StatusOr<std::vector<std::pair<DynamicShape, ShardingRef>>> Disassemble(
+      const DynamicShape& dynamic_shape,
+      SingleDeviceShardSemantics single_device_shard_semantics) const override;
 
   absl::StatusOr<std::vector<IndexDomain>> IndexDomains(
       const Shape& shape) const override;
+  absl::StatusOr<std::vector<IndexDomain>> IndexDomains(
+      const Shape& shape,
+      SingleDeviceShardSemantics single_device_shard_semantics) const override;
 
   std::string DebugString() const override;
 
   static char ID;  // NOLINT
 
  private:
-  HloSharding(DeviceList devices, MemoryKind memory_kind,
+  HloSharding(DeviceListRef devices, MemoryKind memory_kind,
               xla::HloSharding xla_hlo_sharding);
 
+  void Hash(absl::HashState state) const override;
+
   xla::HloSharding xla_hlo_sharding_;
+
+  // Cached hash. 0 indicates the hash needs to be computed and cached.
+  // May be written multiple times with the same non-zero value.
+  static constexpr uint64_t kUnsetHash = 0;
+  mutable std::atomic<uint64_t> hash_ = kUnsetHash;
 };
 
 // Test only: returns `HloSharding::IndexDomains()`, using `xla::HloSharding`
 // APIs internally.
 std::vector<IndexDomain> TEST_HloShardingIndexDomainsSlowPath(
-    const HloSharding& sharding, const Shape& shape);
+    const HloSharding& sharding, const Shape& shape,
+    SingleDeviceShardSemantics single_device_shard_semantics);
 
 }  // namespace ifrt
 }  // namespace xla

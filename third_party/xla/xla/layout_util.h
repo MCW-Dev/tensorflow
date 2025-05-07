@@ -28,8 +28,8 @@ limitations under the License.
 #include "xla/layout.h"
 #include "xla/printer.h"
 #include "xla/shape.h"
+#include "xla/tsl/platform/logging.h"  // IWYU pragma: keep
 #include "xla/xla_data.pb.h"
-#include "tsl/platform/logging.h"  // IWYU pragma: keep
 
 namespace xla {
 
@@ -61,17 +61,23 @@ class LayoutUtil {
 
   // Returns a layout with descending ((i.e. {n-1, n-2, ... 0}) minor-to-major
   // dimensions.
-  static Layout MakeDescendingLayout(int64_t rank);
+  static Layout MakeDescendingLayout(int64_t num_dims);
+
+  // Returns true if the layout is descending.
+  static bool HasDescendingLayout(const Layout& layout);
 
   // Returns a layout with ascending ((i.e. {0, 1, ... n-1}) minor-to-major
   // dimensions.
-  static Layout MakeAscendingLayout(int64_t rank);
+  static Layout MakeAscendingLayout(int64_t num_dims);
+
+  // Returns true if the layout is ascending.
+  static bool HasAscendingLayout(const Layout& layout);
 
   // Returns default layout for the given shape.
   static Layout GetDefaultLayoutForShape(const Shape& shape);
 
   // Helper functions that create default layouts for various ranks.
-  static Layout GetDefaultLayoutForRank(int64_t rank);
+  static Layout GetDefaultLayoutForRank(int64_t num_dims);
   static Layout GetDefaultLayoutForR2();
   static Layout GetDefaultLayoutForR3();
   static Layout GetDefaultLayoutForR4();
@@ -228,8 +234,8 @@ class LayoutUtil {
   //
   // In the returned vector, the first element represents the most major logical
   // dimension. The element whose contents are 0 represents the most major
-  // physical dimension, and the element with contents (rank - 1) represents
-  // the most minor physical dimension.
+  // physical dimension, and the element with contents (number of dimensions -
+  // 1) represents the most minor physical dimension.
   static std::vector<int64_t> MakeLogicalToPhysical(const Layout& layout);
 
   // Prints a human-readable string that represents the given layout.
@@ -241,7 +247,8 @@ class LayoutUtil {
   // Copies the layout from 'src' to 'dst'. Recursively copies layouts of
   // tuples.  'src' and 'dst' need not be compatible but the two shapes must
   // have the same tuple structure (if any) and arrays must have the same
-  // rank. within the shapes must have the same number of dimensions.
+  // number of dimensions. within the shapes must have the same number of
+  // dimensions.
   static absl::Status CopyLayoutBetweenShapes(const Shape& src, Shape* dst);
 
   // Returns true if the layouts of lhs and rhs are equal, false
@@ -249,8 +256,10 @@ class LayoutUtil {
   //
   // lhs and rhs need not be compatible to have the same layout but the two
   // shapes must have the same tuple structure (if any) and arrays must have the
-  // same rank. Element type is ignored.
-  static bool LayoutsInShapesEqual(const Shape& lhs, const Shape& rhs);
+  // same number of dimensions. Element type is ignored.
+  static bool LayoutsInShapesEqual(
+      const Shape& lhs, const Shape& rhs,
+      std::optional<Layout::Equal> equal = std::nullopt);
 
   // Returns whether the given dimensions are consecutive in the given layout,
   // not necessarily in the order given.
@@ -302,10 +311,8 @@ class LayoutUtil {
   // memory to allocate in each of the memories.
   static int64_t MaxElementsInPerSplit(const Shape& shape);
 
-  // Returns the physical shape with the descending layout based on a logical
-  // shape and its layout, e.g., (8,128){0,1} -> (128,8){1,0}.
-  // It only supports the leaf shape but not the tuple shape.
-  static Shape GetPhysicalShapeFromLogicalShape(const Shape& logical_shape);
+  // Returns a shape's split config if present.
+  static std::optional<SplitConfig> GetSplitConfig(const Shape& shape);
 };
 
 }  // namespace xla

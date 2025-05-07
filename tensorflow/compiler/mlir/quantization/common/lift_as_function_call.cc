@@ -115,6 +115,7 @@ ValueRange CreateTFPartitionedCallOp(OpBuilder& builder,
                                      const ValueRange args) {
   TF::PartitionedCallOp call_op = builder.create<TF::PartitionedCallOp>(
       location, output_types, args,
+      /*args_attrs=*/nullptr, /*res_attrs=*/nullptr,
       FlatSymbolRefAttr::get(builder.getStringAttr(func_name)),
       /*config=*/"", /*config_proto=*/"", /*executor_type=*/"");
 
@@ -160,6 +161,15 @@ ValueRange CreateTFXlaCallModuleOp(OpBuilder& builder, const Location location,
   // function name can be changed by those passes.
   call_op->setAttr(TF::kStablehloEntryFunctionAttrName,
                    FlatSymbolRefAttr::get(builder.getStringAttr(func_name)));
+
+  // Set target version to WEEK_4 since this is an offline quantizer.
+  std::string target_version =
+      mlir::vhlo::Version::fromCompatibilityRequirement(
+          vhlo::Version::CompatibilityRequirement::WEEK_4)
+          .toString();
+  call_op->setAttr(TF::kStablehloVersionAttrName,
+                   builder.getStringAttr(target_version));
+
   // Store the custom attribute to restore the function name when loading it
   // back in the post calibration stage. As mentioned above, the above entry
   // function attribute is not reliable.
@@ -481,7 +491,7 @@ bool IsEinsumSupportedByXlaDotV2(StringAttr equation_attr) {
          rhs_out_idx_start >= batch_dim_size;
 }
 
-absl::StatusOr<Method> GetQuantizationMethod(absl::Nonnull<Operation*> op) {
+absl::StatusOr<Method> GetQuantizationMethod(Operation* absl_nonnull op) {
   const auto quantization_method_attr =
       op->getAttrOfType<StringAttr>(kQuantizationMethodAttr);
   if (!quantization_method_attr) {
@@ -499,7 +509,7 @@ absl::StatusOr<Method> GetQuantizationMethod(absl::Nonnull<Operation*> op) {
   return quantization_method;
 }
 
-Method GetQuantizationMethodOrDefault(absl::Nonnull<Operation*> op) {
+Method GetQuantizationMethodOrDefault(Operation* absl_nonnull op) {
   absl::StatusOr<Method> method = GetQuantizationMethod(op);
   if (method.status().code() == absl::StatusCode::kInternal) {
     // This indicates that the `Method` protobuf string is corrupt, but this

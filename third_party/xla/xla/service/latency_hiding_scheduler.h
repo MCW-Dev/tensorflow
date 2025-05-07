@@ -16,13 +16,14 @@ limitations under the License.
 #ifndef XLA_SERVICE_LATENCY_HIDING_SCHEDULER_H_
 #define XLA_SERVICE_LATENCY_HIDING_SCHEDULER_H_
 
-#include <cstddef>
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -31,24 +32,30 @@ limitations under the License.
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/hlo/analysis/hlo_alias_analysis.h"
+#include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/hlo/ir/hlo_schedule.h"
+#include "xla/hlo/pass/hlo_pass_interface.h"
 #include "xla/map_util.h"
-#include "xla/service/hlo_alias_analysis.h"
 #include "xla/service/hlo_buffer.h"
 #include "xla/service/hlo_cost_analysis.h"
-#include "xla/service/hlo_pass_interface.h"
 #include "xla/service/hlo_value.h"
 #include "xla/shape_util.h"
+#include "xla/side_effect_util.h"
+#include "xla/status_macros.h"
 #include "xla/xla.pb.h"
 
 namespace xla {
+
+inline constexpr int64_t kInvalidAnnotation = -1;
 
 struct CanonicalAsyncOp {
   HloOpcode outer;  // kAsyncStart or kAsyncDone
@@ -66,18 +73,19 @@ class ModulePressureState;
 
 enum class ResourceType {
   kNoResource = 0,
-  kAllToAll = 1,
-  kAllGather = 2,
-  kAllReduce = 3,
-  kCollectivePermute = 4,
-  kCopy = 5,
-  kReduceScatter = 6,
-  kSendRecv = 7,
-  kSendHost = 8,
-  kRecvHost = 9,
-  kCollectiveBroadcast = 10,
-  kNumResources = 11,
-  kTargetDefinedResourcesBound = 10000,
+  kAllToAll,
+  kAllGather,
+  kAllReduce,
+  kCollectivePermute,
+  kCopy,
+  kReduceScatter,
+  kSendRecv,
+  kSendHost,
+  kRecvHost,
+  kCollectiveBroadcast,
+  kNumResources,
+  kRaggedAllToAll,
+  kTargetDefinedResourceTypeBegin,
 };
 
 enum class ResourceUsageType {
@@ -94,10 +102,14 @@ enum class ResourceHazardType {
   // past. This hazard type is useful to prevent increasing such ops' overlaps
   // more than necessary.
   kNonextendable = 2,
-  kUnshareable = 3,
+  // Ops holding this resource can only have their latency/cost covered by
+  // ops that are valuable for selective overlap.
+  kSelective = 3,
+  kUnshareable = 4,
 };
 
-constexpr int64_t ResourceTypeToIndex(ResourceType resource_type) {
+template <typename T, typename = typename std::enable_if_t<std::is_enum_v<T>>>
+constexpr int64_t ResourceTypeToIndex(T resource_type) {
   return static_cast<int64_t>(resource_type);
 }
 
@@ -116,6 +128,7 @@ struct SchedulerConfig {
   int64_t collective_broadcast_overlap_limit = 1;
   int64_t collective_permute_overlap_limit = 1;
   int64_t all_to_all_overlap_limit = 1;
+  int64_t ragged_all_to_all_overlap_limit = 1;
   int64_t all_gather_overlap_limit = 1;
   int64_t all_reduce_overlap_limit = 1;
   int64_t reduce_scatter_overlap_limit = 1;
@@ -129,11 +142,15 @@ struct SchedulerConfig {
   bool force_send_recv_to_use_same_resource = false;
   bool use_real_cost_model = false;
   bool aggressive_scheduling_policies = false;
+  bool prioritize_async_depth_over_stall = false;
   bool enable_release_start_policy = false;
   bool resource_sharing = false;
   bool resource_serializing = false;
   bool depth_based_memory_pressure_reduction = false;
+  bool enable_selective_resources = false;
+  int64_t max_hops_to_closest_selective_overlap = 0;
   int64_t rerun = 0;
+  int64_t parallel_collective_overlap_limit = 1;
 };
 
 // Class used estimate latency between instructions and cost of HLOs.
@@ -210,7 +227,7 @@ class AsyncTracker {
       const HloInstruction& hlo) const;
 
   // Returns resources used (i.e., occupied or released) by this instruction
-  virtual ResourcesVector GetResourcesFromInstruction(
+  absl::Span<const ResourcePair> GetResourcesFromInstruction(
       const HloInstruction& hlo) const;
 
   // Modifies the schedule graph passed as input to add dependencies that are
@@ -226,6 +243,11 @@ class AsyncTracker {
   virtual int64_t GetNumResourcesPerInstruction(
       int64_t resource_type, const HloInstruction& instr) const;
 
+  // Returns a map of number of resources used per resource type by this
+  // instruction.
+  virtual absl::flat_hash_map<int64_t, int64_t> GetNumResourcesPerInstruction(
+      const HloInstruction& instr) const;
+
   // Sets the maximum allowed number of instances for each resource
   virtual void SetConcurrentResourceLimits(
       absl::flat_hash_map<int64_t, int64_t>& max_concurrent_resource) const;
@@ -239,8 +261,8 @@ class AsyncTracker {
       ResourceUsageType resource_usage_type) const;
 
   // Returns the first target defined resource's id, regardless of if it exits
-  static int64_t GetFirstTargetDefinedResource() {
-    return static_cast<int64_t>(ResourceType::kTargetDefinedResourcesBound) + 1;
+  static int64_t GetTargetDefinedResourceTypeBegin() {
+    return ResourceTypeToIndex(ResourceType::kTargetDefinedResourceTypeBegin);
   }
 
   // Returns the number of target defined resources
@@ -277,6 +299,12 @@ class AsyncTracker {
   GetReleasedNonextendableResourcesFromVector(
       const ResourcesVector& resources) const;
 
+  // Returns whether the provided node releases a selective resource.
+  bool ReleasesSelectiveResource(const HloGraphNode* node) const;
+
+  // Returns whether the provided node occupies a selective resource.
+  bool OccupiesSelectiveResource(const HloGraphNode* node) const;
+
   inline CanonicalAsyncOp GetCanonicalAsyncOp(const HloInstruction& hlo) const {
     return get_canonical_async_op_(hlo);
   }
@@ -284,16 +312,20 @@ class AsyncTracker {
   explicit AsyncTracker(
       const SchedulerConfig& config,
       GetCanonicalAsyncOpFunc func = DefaultGetCanonicalAsyncOp)
-      : config_(config), get_canonical_async_op_(func) {}
+      : get_canonical_async_op_(std::move(func)), config_(config) {}
 
  private:
-  const SchedulerConfig config_;
-  mutable absl::flat_hash_map<const HloComputation*,
-                              absl::flat_hash_map<int64_t, int64_t>>
+  const absl::flat_hash_map<int64_t, int64_t>& RecursivelyComputeResourceMap(
+      const HloComputation* computation) const;
+
+  mutable absl::flat_hash_map<
+      const HloComputation*,
+      std::unique_ptr<absl::flat_hash_map<int64_t, int64_t>>>
       async_in_computation_cache_;
   GetCanonicalAsyncOpFunc get_canonical_async_op_;
 
  protected:
+  const SchedulerConfig config_;
   mutable absl::flat_hash_map<const HloInstruction*, ResourcesVector>
       resources_cache_;
 };
@@ -302,13 +334,85 @@ class AsyncTracker {
 class SchedulerCore {
  public:
   virtual absl::Status InitializeScheduler(const HloModule* module) = 0;
+
+  virtual absl::Status CaptureScheduleProto() = 0;
+
+  virtual absl::StatusOr<ScheduleProto> GetCapturedScheduleProto() = 0;
+
   virtual absl::StatusOr<std::vector<HloInstruction*>> ScheduleComputation(
       const HloComputation* computation) = 0;
+
   virtual ~SchedulerCore() = default;
   virtual int64_t GetMemoryPeak() = 0;
   virtual void SetMemoryLimit(uint64_t new_limit) = 0;
   virtual uint64_t GetMemoryLimit() = 0;
   virtual int64_t GetRerunTimes() = 0;
+};
+
+// Tracks user annotations for scheduling.
+class AnnotationTracker {
+ public:
+  explicit AnnotationTracker(const HloModule* module) : module_(module) {
+    for (const HloComputation* comp : module_->MakeNonfusionComputations()) {
+      absl::flat_hash_set<int64_t> annotations;
+      for (const HloInstruction* instr : comp->instructions()) {
+        if (auto annotation = GetAnnotation(instr)) {
+          if (annotations.insert(annotation.value()).second) {
+            comp_annotation_map_[comp].push_back(annotation.value());
+          }
+          annotations_[annotation.value()][comp].push_back(instr);
+        }
+      }
+    }
+  }
+  bool HasAnnotations(const HloComputation* comp) const {
+    return ContainsKey(comp_annotation_map_, comp);
+  }
+  std::vector<int64_t> GetAnnotations(const HloComputation* comp) const {
+    return comp_annotation_map_.at(comp);
+  }
+  std::optional<int64_t> GetAnnotation(const HloInstruction* instr) const {
+    const auto& attrs = instr->frontend_attributes().map();
+    if (attrs.contains(kXlaSchedulingGroupIdAttr)) {
+      return std::stoi(attrs.at(kXlaSchedulingGroupIdAttr));
+    }
+    return std::nullopt;
+  }
+  std::vector<const HloInstruction*> GetInstructions(
+      const HloComputation* comp, const int64_t annotation) const {
+    if (annotation == kInvalidAnnotation) {
+      return {};
+    }
+    return annotations_.at(annotation).at(comp);
+  }
+  int64_t GetNumInstructions(const HloComputation* comp,
+                             const int64_t annotation) {
+    return annotations_[annotation][comp].size();
+  }
+  void PrintAnnotationSets(int64_t level) const {
+    for (const auto& [annotation, comp_instr_vector] : annotations_) {
+      for (const auto& [comp, instrs] : comp_instr_vector) {
+        VLOG(level) << "Annotation " << annotation << " has " << instrs.size()
+                    << " instructions in computation " << comp->name();
+        for (const HloInstruction* instr : instrs) {
+          VLOG(level) << "  " << instr->name();
+        }
+      }
+    }
+  }
+
+ private:
+  const HloModule* module_;
+  absl::flat_hash_map<const HloComputation*, std::vector<int64_t>>
+      comp_annotation_map_;
+  absl::flat_hash_map<int64_t,
+                      absl::flat_hash_map<const HloComputation*,
+                                          std::vector<const HloInstruction*>>>
+      annotations_;
+  absl::flat_hash_map<int64_t,
+                      absl::flat_hash_map<const HloComputation*,
+                                          std::vector<const HloInstruction*>>>
+      annotation_successors_;
 };
 
 // Represents an edge between two nodes in the schedule graph.
@@ -327,6 +431,7 @@ class HloEdge {
   }
   const HloGraphNode& Target() const { return *target_; }
   HloGraphNode& Target() { return *target_; }
+  HloGraphNode* TargetPtr() { return target_; }
   std::string ToString() const;
 
  private:
@@ -349,6 +454,49 @@ class HloGraphNode {
   // Nullptr is not a valid value for 'i'.
   explicit HloGraphNode(const HloInstruction* i, int64_t original_position)
       : instr_(i), original_position_(original_position) {}
+
+  static void UpdateOrAddDependency(HloGraphNode* from, HloGraphNode* to,
+                                    LatencyEstimator::TimeCost latency) {
+    auto update_latency_if_edge_exists =
+        [&](absl::Span<HloEdge> edges, HloGraphNode* to,
+            LatencyEstimator::TimeCost latency) {
+          auto it = absl::c_find_if(
+              edges, [&](HloEdge edge) { return &edge.Target() == to; });
+          if (it != edges.end()) {
+            it->SetLatency(latency);
+            return true;
+          }
+          return false;
+        };
+    if (!update_latency_if_edge_exists(from->GetSuccessors(), to, latency)) {
+      from->successors_.push_back(HloEdge(latency, to));
+      from->outdegree_++;
+    }
+    if (!update_latency_if_edge_exists(to->GetPredecessors(), from, latency)) {
+      to->predecessors_.push_back(HloEdge(latency, from));
+      to->indegree_++;
+    }
+  }
+
+  static void UpdateOrAddDependency(HloGraphNode* from, HloGraphNode* to,
+                                    const LatencyEstimator* latency_estimator) {
+    UpdateOrAddDependency(from, to,
+                          latency_estimator->GetLatencyBetween(*from, *to));
+  }
+
+  static void AddDependency(HloGraphNode* from, HloGraphNode* to,
+                            LatencyEstimator::TimeCost latency) {
+    to->predecessors_.push_back(HloEdge(latency, from));
+    to->indegree_++;
+    from->successors_.push_back(HloEdge(latency, to));
+    from->outdegree_++;
+  }
+
+  static void AddDependency(HloGraphNode* from, HloGraphNode* to,
+                            const LatencyEstimator* latency_estimator) {
+    AddDependency(from, to, latency_estimator->GetLatencyBetween(*from, *to));
+  }
+
   const HloInstruction& GetInstr() const { return *instr_; }
   bool IsScheduled() const { return scheduled_; }
   int32_t GetIndegree() const { return indegree_; }
@@ -370,6 +518,32 @@ class HloGraphNode {
   void SetForceDelay(bool force_delay) { force_delay_ = force_delay; }
   bool GetForceEarly() const { return force_early_; }
   void SetForceEarly(bool force_early) { force_early_ = force_early; }
+  bool GetValuableForSelectiveOverlap() const {
+    return valuable_for_selective_overlap_;
+  }
+  void SetValuableForSelectiveOverlap(bool valuable_for_selective_overlap) {
+    valuable_for_selective_overlap_ = valuable_for_selective_overlap;
+  }
+  bool ReleasesSelectiveResource() const {
+    return releases_selective_resource_;
+  }
+  bool OccupiesSelectiveResource() const {
+    return occupies_selective_resource_;
+  }
+  void SetReleasesSelectiveResource(bool releases_selective_resource) {
+    releases_selective_resource_ = releases_selective_resource;
+  }
+  void SetOccupiesSelectiveResource(bool occupies_selective_resource) {
+    occupies_selective_resource_ = occupies_selective_resource;
+  }
+  int64_t GetNumHopsToClosestSelectiveResourceOccupier() const {
+    return num_hops_to_closest_selective_resource_occupier_;
+  }
+  void SetNumHopsToClosestSelectiveResourceOccupier(
+      int64_t num_hops_to_closest_selective_resource_occupier) {
+    num_hops_to_closest_selective_resource_occupier_ =
+        num_hops_to_closest_selective_resource_occupier;
+  }
   ResourcesVector GetResources() const { return resources_; }
   bool DoesOccupyAnyResource() const {
     return absl::c_any_of(resources_, [](const ResourcePair& resource) {
@@ -384,11 +558,43 @@ class HloGraphNode {
   bool DoesOccupyShareableResource(int64_t resource) const {
     return absl::c_linear_search(occupied_shareable_resources_, resource);
   }
-  bool DoesReleaseResource(ResourceType res) const {
+  bool DoesReleaseResource(int64_t res) const {
     return absl::c_any_of(resources_, [res](const ResourcePair& resource) {
       return resource.second == ResourceUsageType::kResourceRelease &&
-             resource.first == ResourceTypeToIndex(res);
+             resource.first == res;
     });
+  }
+  bool DoesReleaseResource(ResourceType res) const {
+    return DoesReleaseResource(ResourceTypeToIndex(res));
+  }
+  bool DoesOccupyResource(int64_t res) const {
+    return absl::c_any_of(resources_, [res](const ResourcePair& resource) {
+      return resource.second == ResourceUsageType::kResourceOccupy &&
+             resource.first == res;
+    });
+  }
+  bool DoesOccupyResource(ResourceType res) const {
+    return DoesOccupyResource(ResourceTypeToIndex(res));
+  }
+  // Returns the net resources used by the node. For a while loop, it computes
+  // the net resources used by the instructions in the while body. Otherwise, it
+  // returns the readily-available resources vector.
+  ResourcesVector GetNetResources() const {
+    if (GetInstr().opcode() != HloOpcode::kWhile) {
+      return resources_;
+    }
+    ResourcesVector result;
+    for (const auto& [resource, usage] : resources_) {
+      if (usage == ResourceUsageType::kResourceOccupy &&
+          !DoesReleaseResource(resource)) {
+        result.push_back(std::make_pair(resource, usage));
+      }
+      if (usage == ResourceUsageType::kResourceRelease &&
+          !DoesOccupyResource(resource)) {
+        result.push_back(std::make_pair(resource, usage));
+      }
+    }
+    return result;
   }
   std::optional<ResourceUsageType> UsesResourceType(ResourceType res) const {
     int64_t res_type = ResourceTypeToIndex(res);
@@ -408,11 +614,12 @@ class HloGraphNode {
     return std::nullopt;
   }
   std::vector<int64_t> GetShareableResourcesOnEdge(const HloEdge& edge) const {
-    HloGraphNode node = edge.Target();
+    HloGraphNode to = edge.Target();
     std::vector<int64_t> resources;
     absl::c_for_each(released_shareable_resources_,
-                     [&node, &resources](const int64_t resource) {
-                       if (node.DoesOccupyShareableResource(resource)) {
+                     [this, &to, &resources](const int64_t resource) {
+                       if (to.DoesOccupyShareableResource(resource) &&
+                           this->DoesReleaseResource(resource)) {
                          resources.push_back(resource);
                        }
                      });
@@ -431,6 +638,14 @@ class HloGraphNode {
   }
   void AddSuccessor(const HloEdge& e) { successors_.push_back(e); }
   int64_t GetOriginalPosition() const { return original_position_; }
+  int64_t GetAnnotation() const { return annotation_; }
+  absl::Status SetAnnotation(int64_t annotation) {
+    TF_RET_CHECK(annotation_ == kInvalidAnnotation)
+        << "Instruction " << instr_->name()
+        << " has an existing annotation: " << annotation_;
+    annotation_ = annotation;
+    return absl::OkStatus();
+  }
   std::string ToString(const AsyncTracker* async_tracker = nullptr) const {
     std::string result;
     absl::StrAppend(&result, "Instr: ", instr_->ToShortString(), "\n");
@@ -470,7 +685,7 @@ class HloGraphNode {
   std::vector<HloEdge> successors_;
   // Instruction this Graph node represents
   const HloInstruction* instr_;
-  // The prosition of this node in the original order.
+  // The position of this node in the original order.
   int64_t original_position_;
   // Estimated time at which this node is gonna be ready to be scheduled.
   // The node should be added to the ready to be scheduled set when ready_time_
@@ -503,6 +718,17 @@ class HloGraphNode {
   absl::InlinedVector<int64_t, 1> released_shareable_resources_;
   // Shareable resources occupied by this node.
   absl::InlinedVector<int64_t, 1> occupied_shareable_resources_;
+  // Whether this node can be overlapped with (can cover the latency/cost of)
+  // edges occupying selective resources.
+  bool valuable_for_selective_overlap_ = true;
+  // Whether this node releases a selective resource.
+  bool releases_selective_resource_ = false;
+  // Whether this node occupies a selective resource.
+  bool occupies_selective_resource_ = false;
+  // Nums hops to closest selective resource occupier.
+  int64_t num_hops_to_closest_selective_resource_occupier_ =
+      std::numeric_limits<int64_t>::max();
+  int64_t annotation_ = kInvalidAnnotation;
 };
 
 // Schedule graph that can be used to drive scheduling
@@ -528,7 +754,9 @@ class HloScheduleGraph {
 
   void InitializeGraphAnalysis(const AsyncTracker* async_tracker);
 
-  // l of instructions in the original scheduled order. (Before scheduling).
+  void AnnotateGraph(const AnnotationTracker* annotation_tracker);
+
+  // List of instructions in the original scheduled order. (Before scheduling).
   absl::Span<const HloInstruction* const> GetOriginalInstrList() const {
     return absl::MakeConstSpan(original_order_);
   }
@@ -563,6 +791,14 @@ class BufferInfoTracker {
     const HloBuffer* value = nullptr;
     const HloInstruction* first_definition = nullptr;
     int64_t buffer_size = 0;
+
+    // Precomputed value of
+    //     value->values()[0]->shape().has_layout() &&
+    //     (value->values()[0]->shape().layout().memory_space() !=
+    //      kDefaultMemorySpace)
+    // This expression is invoked repeatedly and is responsible for many cache
+    // misses.
+    bool non_default_memory_space_layout = false;
   };
   BufferInfoTracker(const HloModule* module,
                     const HloAliasAnalysis* alias_analysis,
@@ -570,9 +806,16 @@ class BufferInfoTracker {
   static ValueInfo CreateBufferInfo(
       const HloBuffer* value, const HloInstruction* first_definition,
       const HloCostAnalysis::ShapeSizeFunction& shape_size_bytes) {
+    const auto& shape = value->values()[0]->shape();
+    const bool non_default_memory_space_layout =
+        (shape.has_layout() &&
+         (shape.layout().memory_space() != Layout::kDefaultMemorySpace));
     return ValueInfo{
-        /*value=*/value, /*first_definition=*/first_definition,
-        /*buffer_size=*/shape_size_bytes(value->values()[0]->shape())};
+        /*value=*/value,
+        /*first_definition=*/first_definition,
+        /*buffer_size=*/shape_size_bytes(shape),
+        /*non_default_memory_space_layout=*/non_default_memory_space_layout,
+    };
   }
   const ValueInfo& GetBufferInfo(HloBuffer::Id id) const {
     return buffer_infos_[id];
@@ -636,7 +879,34 @@ class MemoryPressureTracker {
   // Returns pressure state object for this MemoryPressureTracker object.
   const MemoryPressureState& pressure_state() const { return pressure_state_; }
 
+  absl::Span<const HloBuffer::Id> allocated_buffer_ids(
+      const HloInstruction* i) const {
+    auto it = instruction_ids_.find(i);
+    CHECK(it != instruction_ids_.end());
+    NodeAllocReleaseSpan s = alloc_release_spans_[it->second];
+    return absl::MakeSpan(alloc_release_ids_).subspan(s.start, s.num_alloc);
+  }
+
+  absl::Span<const HloBuffer::Id> released_buffer_ids(
+      const HloInstruction* i) const {
+    auto it = instruction_ids_.find(i);
+    CHECK(it != instruction_ids_.end());
+    NodeAllocReleaseSpan s = alloc_release_spans_[it->second];
+    return absl::MakeSpan(alloc_release_ids_)
+        .subspan(s.start + s.num_alloc, s.num_release);
+  }
+
  private:
+  // Append to *dst the list of buffer ids allocated by instruction whose
+  // memory usage should be tracked. Returns number of ids added.
+  int32_t ComputeBufferAllocations(const HloInstruction* instruction,
+                                   std::vector<HloBuffer::Id>* dst);
+
+  // Append to *dst the list of buffer ids released by instruction whose
+  // memory usage should be tracked. Returns number of ids added.
+  int32_t ComputeBufferReleases(const HloInstruction* instruction,
+                                std::vector<HloBuffer::Id>* dst);
+
   static bool ShouldSkipBufferAllocations(
       const HloInstruction* instruction, const ShapeIndex& idx,
       const HloInstruction* first_definition) {
@@ -663,6 +933,28 @@ class MemoryPressureTracker {
     return false;
   }
   const HloAliasAnalysis* hlo_alias_analysis_;
+
+  // Mapping from instruction to dense id.
+  absl::flat_hash_map<const HloInstruction*, int32_t> instruction_ids_;
+
+  // Combined vector of buffers allocated/released by each node.
+  // See allocated_buffer_ids() and released_buffer_ids().
+  std::vector<HloBuffer::Id> alloc_release_ids_;
+
+  // Information kept per node that identifies allocated/released buffers.
+  struct NodeAllocReleaseSpan {
+    // Allocated buffers in alloc_release_ids_[start,start+num_alloc).
+    // Released buffers in
+    // alloc_release_ids_[start+num_alloc,start+num_alloc+num_release)
+    uint32_t start;
+    uint32_t num_alloc;
+    uint32_t num_release;
+  };
+
+  // Mapping from dense instruction id to span information within
+  // alloc_release_ids_.
+  std::vector<NodeAllocReleaseSpan> alloc_release_spans_;
+
   // Live buffer presence set. This is used to determine if a buffer is live or
   // not in a fast way. Because this is checked very often in the evaluation
   // function of the scheduler quering the live_buffer_set_ object is too slow.
@@ -808,10 +1100,16 @@ class DefaultSchedulerCore : public SchedulerCore {
     // order (because we schedule bottom up). This will be required to be
     // reversed before assigning to the HloSchedule.
     std::vector<HloInstruction*> new_sequence_reversed;
+
+    // Memory pressure during and after an instruction in a schedule.
+    // (memory_after, memory_peak)
+    absl::flat_hash_map<const HloInstruction*, std::pair<int64_t, int64_t>>
+        memory_trace;
     // Units of time passed in the schedule. To keep track of latency hiding.
     HloGraphNode::TimeCost current_time = 0;
-    // Number of resources in flight.
-    ResourceMap resources_in_flight;
+    // Resources and corresponding occupiers in flight.
+    absl::flat_hash_map<int64_t, absl::flat_hash_set<const HloInstruction*>>
+        resource_occupiers_in_flight;
     // Number of instructions using the key resource type in the set waiting to
     // be scheduled.
     ResourceMap resource_users_in_queue;
@@ -833,6 +1131,24 @@ class DefaultSchedulerCore : public SchedulerCore {
     absl::flat_hash_map<
         int64_t, std::vector<std::pair<HloEdge*, HloGraphNode::TimeCost>>>
         shareable_resource_occupiers;
+    // List of the graph nodes that release selective resources.
+    std::vector<HloGraphNode*> selective_resource_releasers;
+    // Similar to ready set, but only contains the no-op instructions.
+    ReadyQueueSet nop_set;
+    // Number of {scheduled, all} nodes that are a successor for the given
+    // annotation.
+    struct NumSuccessorsForAnnotation {
+      int64_t scheduled = 0;
+      int64_t all = 0;
+    };
+    absl::flat_hash_map<int64_t, NumSuccessorsForAnnotation>
+        num_successors_for_annotation;
+    // List of annotations that are ready to be scheduled.
+    absl::InlinedVector<int64_t, 2> ready_annotations;
+    // List of annotated nodes that are ready to be scheduled.
+    ReadyQueueSet annotation_ready;
+    // Annotation that is currently being scheduled.
+    int64_t ongoing_annotation = kInvalidAnnotation;
     // Reference to this scheduler run configuration.
     const SchedulerConfig& config;
     SchedulingState(const HloInstructionSequence* instr_sequence,
@@ -849,6 +1165,8 @@ class DefaultSchedulerCore : public SchedulerCore {
           config(config) {}
   };
 
+  using OverlapLimitRule =
+      std::function<bool(const SchedulingState&, const HloGraphNode*)>;
   using PostProcessingFn = std::function<void(SchedulingState&)>;
 
   DefaultSchedulerCore(
@@ -857,15 +1175,34 @@ class DefaultSchedulerCore : public SchedulerCore {
       const LatencyEstimator* latency_estimator, const SchedulerConfig& config,
       TargetSchedulingRule target_scheduling_rule = nullptr,
       TargetSchedulingRule early_target_scheduling_rule = nullptr,
-      PostProcessingFn post_processing_fn = nullptr)
+      PostProcessingFn post_processing_fn = nullptr,
+      OverlapLimitRule scheduling_instruction_crosses_overlap_limit = nullptr)
       : shape_size_bytes_(shape_size_bytes),
         async_tracker_(async_tracker),
         latency_estimator_(latency_estimator),
         config_(config),
         target_scheduling_rule_(target_scheduling_rule),
         early_target_scheduling_rule_(early_target_scheduling_rule),
-        post_processing_fn_(post_processing_fn) {}
+        post_processing_fn_(post_processing_fn),
+        scheduling_instruction_crosses_overlap_limit_(
+            scheduling_instruction_crosses_overlap_limit) {}
+
   absl::Status InitializeScheduler(const HloModule* module) override;
+
+  absl::Status CaptureScheduleProto() override {
+    schedule_proto_ = ScheduleProto();
+    *schedule_proto_->mutable_hlo_module() = module_->ToProto();
+
+    return absl::OkStatus();
+  }
+
+  absl::StatusOr<ScheduleProto> GetCapturedScheduleProto() override {
+    if (!schedule_proto_.has_value()) {
+      return absl::FailedPreconditionError("Schedule proto not captured.");
+    }
+    return schedule_proto_.value();
+  }
+
   absl::StatusOr<std::vector<HloInstruction*>> ScheduleComputation(
       const HloComputation* computation) override;
   static bool AddOccupierToResource(
@@ -882,9 +1219,28 @@ class DefaultSchedulerCore : public SchedulerCore {
     this->config_.memory_limit = new_limit;
   }
   int64_t GetRerunTimes() override { return config_.rerun; }
+  bool SchedulingAnnotationCrossesOverlapLimit(
+      const SchedulingState& sched_state, int64_t annotation);
+  absl::flat_hash_map<int64_t, int64_t> GetNumResourcesNeededForAnnotation(
+      const SchedulingState& sched_state, int64_t annotation);
+  int64_t GetNumSuccessorsForAnnotation(const SchedulingState& sched_state,
+                                        int64_t annotation) const;
+
+  ScheduleProto::ComputationScheduleProto ComputationScheduleToProto(
+      const HloComputation* computation, const SchedulingState& sched_state,
+      const LatencyEstimator& estimator,
+      const std::vector<HloInstruction*>& instructions);
 
  protected:
   virtual void LogInstruction(const HloInstruction* instr) const;
+  // Schedules the given annotated node.
+  absl::Status AnnotatedSchedulingStep(
+      HloGraphNode* node,
+      DefaultSchedulerCore::SchedulingState* sched_state) const;
+  // Schedules all of the nodes with the given annotation in computation.
+  absl::Status ScheduleAnnotation(
+      const HloComputation* computation, int64_t annotation,
+      DefaultSchedulerCore::SchedulingState* sched_state) const;
   // Update node that has been scheduled.
   virtual absl::StatusOr<HloGraphNode::TimeCost> ScheduleNode(
       HloGraphNode* n, SchedulingState* sched_state) const;
@@ -895,10 +1251,6 @@ class DefaultSchedulerCore : public SchedulerCore {
   virtual absl::StatusOr<HloGraphNode*> FindAndExtractBestNodeAvailable(
       SchedulingState& sched_state,
       DefaultSchedulerCore::ShouldSkipNodeFunction should_skip_node);
-  void DumpLatencyHidingSchedule(
-      const HloComputation* computation, const HloScheduleGraph& schedule_graph,
-      const std::vector<HloInstruction*>& instructions,
-      int cycles_per_microsecond, const DebugOptions& debug_options);
 
   HloCostAnalysis::ShapeSizeFunction shape_size_bytes_;
   std::unique_ptr<ModulePressureState> module_pressure_state_;
@@ -909,6 +1261,10 @@ class DefaultSchedulerCore : public SchedulerCore {
   TargetSchedulingRule target_scheduling_rule_ = nullptr;
   TargetSchedulingRule early_target_scheduling_rule_ = nullptr;
   PostProcessingFn post_processing_fn_ = nullptr;
+  OverlapLimitRule scheduling_instruction_crosses_overlap_limit_ = nullptr;
+  std::unique_ptr<AnnotationTracker> annotation_tracker_;
+  std::optional<ScheduleProto> schedule_proto_;
+  const HloModule* module_ = nullptr;
 };
 
 // A scheduler oriented to hiding latencies of operations that can run in
@@ -922,23 +1278,36 @@ class LatencyHidingScheduler : public HloModulePass {
     double collective_broadcast_wasted_cycles = 0;
     double collective_permute_wasted_cycles = 0;
     double all_to_all_wasted_cycles = 0;
+    double ragged_all_to_all_wasted_cycles = 0;
     double reduce_scatter_wasted_cycles = 0;
     double send_wasted_cycles = 0;
     double recv_wasted_cycles = 0;
     double total_cycles = 0;
     int64_t memory_pressure_peak = 0;
+
+    double GetTotalWastedCycles() const {
+      return all_gather_wasted_cycles + all_reduce_wasted_cycles +
+             collective_broadcast_wasted_cycles +
+             collective_permute_wasted_cycles + all_to_all_wasted_cycles +
+             ragged_all_to_all_wasted_cycles + reduce_scatter_wasted_cycles +
+             send_wasted_cycles + recv_wasted_cycles;
+    }
+
+    ScheduleProto::SchedulerStatisticsProto ToProto() const;
+    std::string ToString() const;
   };
 
   LatencyHidingScheduler(
-      std::unique_ptr<LatencyEstimator> latency_estimator,
-      std::unique_ptr<AsyncTracker> async_tracker,
+      std::shared_ptr<LatencyEstimator> latency_estimator,
+      std::shared_ptr<AsyncTracker> async_tracker,
       std::unique_ptr<SchedulerCore> scheduler_core,
       const HloCostAnalysis::ShapeSizeFunction& shape_size_bytes)
       : latency_estimator_(std::move(latency_estimator)),
         async_tracker_(std::move(async_tracker)),
         scheduler_core_(std::move(scheduler_core)),
         shape_size_bytes_(shape_size_bytes) {}
-  absl::string_view name() const override { return "latency-hiding-scheduler"; }
+  constexpr static absl::string_view kName = "latency-hiding-scheduler";
+  absl::string_view name() const override { return kName; }
 
   // Returns some printable statistics about the latency hiding for
   // operations that can run in parallel to help evaluating the performance of
@@ -948,9 +1317,7 @@ class LatencyHidingScheduler : public HloModulePass {
       const LatencyEstimator* latency_estimator,
       const AsyncTracker* async_tracker,
       const HloCostAnalysis::ShapeSizeFunction& shape_size_bytes);
-  // Returns a string representation of the scheduler statistics object.
-  static std::string SchedulerStatisticsString(
-      const SchedulerStatistics& sched_stats);
+
   using HloPassInterface::Run;
   absl::StatusOr<bool> Run(
       HloModule* module,
@@ -959,8 +1326,8 @@ class LatencyHidingScheduler : public HloModulePass {
   virtual void LogScheduleStatistics(const HloComputation* computation);
 
  private:
-  std::unique_ptr<LatencyEstimator> latency_estimator_;
-  std::unique_ptr<AsyncTracker> async_tracker_;
+  std::shared_ptr<LatencyEstimator> latency_estimator_;
+  std::shared_ptr<AsyncTracker> async_tracker_;
   std::unique_ptr<SchedulerCore> scheduler_core_;
   const HloCostAnalysis::ShapeSizeFunction shape_size_bytes_;
   absl::flat_hash_set<HloComputation*> computations_to_schedule_;

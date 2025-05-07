@@ -44,6 +44,7 @@
 #include "xla/tsl/concurrency/ref_count.h"
 #include "tsl/platform/status_to_from_proto.h"
 #include "tsl/platform/statusor.h"
+#include "tsl/profiler/lib/traceme.h"
 
 namespace xla {
 namespace ifrt {
@@ -53,11 +54,20 @@ Compiler::Compiler(xla::ifrt::Client* client,
                    std::shared_ptr<RpcHelper> rpc_helper)
     : client_(client), rpc_helper_(std::move(rpc_helper)) {}
 
-absl::StatusOr<std::unique_ptr<xla::ifrt::LoadedExecutable>> Compiler::Compile(
+absl::StatusOr<xla::ifrt::LoadedExecutableRef> Compiler::Compile(
     std::unique_ptr<Program> program,
     std::unique_ptr<xla::ifrt::CompileOptions> options) {
   auto request = std::make_unique<CompileRequest>();
-  TF_ASSIGN_OR_RETURN(*request->mutable_program(), Serialize(*program));
+  {
+    tsl::profiler::TraceMe traceme("IfrtProxyProgramSerialize");
+    TF_ASSIGN_OR_RETURN(*request->mutable_program(),
+                        Serialize(*program, /*options=*/nullptr));
+  }
+  tsl::profiler::TraceMe traceme_ifrt_entrypoint(
+      [prog_size = request->program().data().size()]() {
+        return tsl::profiler::TraceMeEncode(
+            "IfrtProxyEntrypointCompilerCompile", {{"prog_size", prog_size}});
+      });
 
   // Extract host callbacks from the XLA compile options. `XlaCompileOptions`'s
   // SerDes fails when it contains host callbacks, so the following
@@ -91,7 +101,8 @@ absl::StatusOr<std::unique_ptr<xla::ifrt::LoadedExecutable>> Compiler::Compile(
     loaded_host_callbacks.swap(xla_options->loaded_host_callbacks);
   }
 
-  TF_ASSIGN_OR_RETURN(*request->mutable_compile_options(), Serialize(*options));
+  TF_ASSIGN_OR_RETURN(*request->mutable_compile_options(),
+                      Serialize(*options, /*options=*/nullptr));
 
   // TODO(b/266635130): Avoid blocking the caller.
   TF_ASSIGN_OR_RETURN(std::shared_ptr<CompileResponse> response,
@@ -133,14 +144,14 @@ absl::StatusOr<std::unique_ptr<xla::ifrt::LoadedExecutable>> Compiler::Compile(
       std::move(loaded_host_callback_handles));
 }
 
-absl::StatusOr<std::unique_ptr<Executable>> Compiler::Compile(
+absl::StatusOr<xla::ifrt::ExecutableRef> Compiler::Compile(
     std::unique_ptr<Program> program, const Topology& topology,
     std::unique_ptr<CompileOptions> options) {
   return absl::UnimplementedError(
       "IFRT service compiler does not support `Compile` with a topology");
 }
 
-absl::StatusOr<std::unique_ptr<xla::ifrt::LoadedExecutable>>
+absl::StatusOr<xla::ifrt::LoadedExecutableRef>
 Compiler::DeserializeLoadedExecutable(
     absl::string_view serialized,
     std::unique_ptr<xla::ifrt::DeserializeExecutableOptions> options) {

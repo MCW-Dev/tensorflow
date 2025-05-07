@@ -15,7 +15,11 @@ limitations under the License.
 
 #include "xla/backends/profiler/gpu/cupti_buffer_events.h"
 
+#include <cstdint>
+
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
+#include "third_party/gpus/cuda/extras/CUPTI/include/cupti_activity.h"
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "xla/backends/profiler/gpu/cupti_interface.h"
 #include "tsl/platform/errors.h"
@@ -97,6 +101,14 @@ using CuptiActivityMemsetTy = CUpti_ActivityMemset;
 using CuptiActivityGraphTraceTy = CUpti_ActivityGraphTrace;
 #endif  // CUDA_VERSION >= 11070
 
+#if CUDA_VERSION >= 8000
+using CuptiActivityMarkerTy = CUpti_ActivityMarker2;
+constexpr int kCuptiActivityMarkerVersion = 2;
+#else
+using CuptiActivityMarkerTy = CUpti_ActivityMarker;
+constexpr int kCuptiActivityMarkerVersion = 1;
+#endif  // CUDA_VERSION >= 11070
+
 // Maps an OverheadKind enum to a const string.
 const char *getActivityOverheadKindString(CUpti_ActivityOverheadKind kind) {
   switch (kind) {
@@ -164,6 +176,7 @@ void AddKernelActivityEvent(CuptiEventCollectorDelegate &collector,
       collector.annotation_map.LookUp(event.device_id, event.correlation_id);
   event.annotation = info.annotation;
   event.nvtx_range = info.nvtx_range;
+  event.scope_range_id = info.scope_range_id;
   SetEventGraphId(event, kernel);
   event.kernel_info.registers_per_thread = kernel->registersPerThread;
   event.kernel_info.static_shared_memory_usage = kernel->staticSharedMemory;
@@ -186,19 +199,72 @@ void AddGraphTraceActivityEvent(CuptiEventCollectorDelegate &collector,
   AnnotationMap::AnnotationInfo info = collector.annotation_map.LookUp(
       graph_trace->deviceId, graph_trace->correlationId);
   collector.receive(CuptiTracerEvent{
-      .type = CuptiTracerEventType::CudaGraph,
-      .source = CuptiTracerEventSource::Activity,
-      .name = absl::StrCat("CudaGraphExec:", graph_trace->graphId),
-      .annotation = info.annotation,
-      .nvtx_range = info.nvtx_range,
-      .start_time_ns = graph_trace->start,
-      .end_time_ns = graph_trace->end,
-      .device_id = graph_trace->deviceId,
-      .correlation_id = graph_trace->correlationId,
-      .context_id = graph_trace->contextId,
-      .stream_id = graph_trace->streamId,
-      .graph_id = graph_trace->graphId,
+      /* .type = */ CuptiTracerEventType::CudaGraph,
+      /* .source = */ CuptiTracerEventSource::Activity,
+      /* .name = */ absl::StrCat("CudaGraphExec:", graph_trace->graphId),
+      /* .annotation = */ info.annotation,
+      /* .nvtx_range = */ info.nvtx_range,
+      /* .start_time_ns = */ graph_trace->start,
+      /* .end_time_ns = */ graph_trace->end,
+      /* .device_id = */ graph_trace->deviceId,
+      /* .correlation_id = */ graph_trace->correlationId,
+      // This is device event where thread_id is meaningless, using its default
+      // value kInvalidThreadId here.
+      /* .thread_id = */ CuptiTracerEvent::kInvalidThreadId,
+      /* .context_id = */ graph_trace->contextId,
+      /* .stream_id = */ graph_trace->streamId,
+      /* .graph_id = */ graph_trace->graphId,
+      /* .scope_range_id = */ info.scope_range_id,
   });
+}
+
+template <int CuptiActivityMarkerVersion>
+const char *GetActivityMarkerDomain(const CuptiActivityMarkerTy *marker_trace) {
+  if constexpr (CuptiActivityMarkerVersion == 1) {
+    return "";
+  } else {
+    return marker_trace->domain;
+  }
+}
+
+void AddMarkerActivityEvent(CuptiEventCollectorDelegate &collector,
+                            CuptiActivityMarkerTy *marker_trace) {
+  // Currently only support thread marker (i.e., nvtx range push/pop)
+  if (marker_trace->objectKind != CUPTI_ACTIVITY_OBJECT_THREAD) return;
+  if (marker_trace->flags == CUPTI_ACTIVITY_FLAG_MARKER_START) {
+    collector.receive(CuptiTracerEvent{
+        /* .type = */ CuptiTracerEventType::ThreadMarkerStart,
+        /* .source = */ CuptiTracerEventSource::Activity,
+        /* .name = */ marker_trace->name,
+        /* .annotation = */ "",
+        /* .nvtx_range = */
+        GetActivityMarkerDomain<kCuptiActivityMarkerVersion>(marker_trace),
+        /* .start_time_ns = */ marker_trace->timestamp,
+        /* .end_time_ns = */ marker_trace->timestamp,
+        /* .device_id = */ 0,
+        /* .correlation_id = */ 0,
+        /* .thread_id = */ marker_trace->objectId.pt.threadId,
+        /* .context_id = */ 0,
+        /* .stream_id = */ 0,
+        /* .graph_id = */ marker_trace->id,
+    });
+  } else if (marker_trace->flags == CUPTI_ACTIVITY_FLAG_MARKER_END) {
+    collector.receive(CuptiTracerEvent{
+        /* .type = */ CuptiTracerEventType::ThreadMarkerEnd,
+        /* .source = */ CuptiTracerEventSource::Activity,
+        /* .name = */ "",
+        /* .annotation = */ "",
+        /* .nvtx_range = */ "",
+        /* .start_time_ns = */ marker_trace->timestamp,
+        /* .end_time_ns = */ marker_trace->timestamp,
+        /* .device_id = */ 0,
+        /* .correlation_id = */ 0,
+        /* .thread_id = */ marker_trace->objectId.pt.threadId,
+        /* .context_id = */ 0,
+        /* .stream_id = */ 0,
+        /* .graph_id = */ marker_trace->id,
+    });
+  }
 }
 
 void AddMemcpyActivityEvent(CuptiEventCollectorDelegate &collector,
@@ -237,6 +303,8 @@ void AddMemcpyActivityEvent(CuptiEventCollectorDelegate &collector,
   AnnotationMap::AnnotationInfo info =
       collector.annotation_map.LookUp(event.device_id, event.correlation_id);
   event.annotation = info.annotation;
+  event.nvtx_range = info.nvtx_range;
+  event.scope_range_id = info.scope_range_id;
   SetEventGraphId(event, memcpy);
   event.memcpy_info.copy_kind = memcpy->copyKind;
   event.memcpy_info.num_bytes = memcpy->bytes;
@@ -267,6 +335,8 @@ void AddMemcpyP2PActivityEvent(CuptiEventCollectorDelegate &collector,
   AnnotationMap::AnnotationInfo info =
       collector.annotation_map.LookUp(event.device_id, event.correlation_id);
   event.annotation = info.annotation;
+  event.nvtx_range = info.nvtx_range;
+  event.scope_range_id = info.scope_range_id;
   SetEventGraphId(event, memcpy);
   event.memcpy_info.copy_kind = CUPTI_ACTIVITY_MEMCPY_KIND_PTOP;
   event.memcpy_info.num_bytes = memcpy->bytes;
@@ -501,6 +571,10 @@ static absl::Status ConvertActivityBuffer(
               collector, reinterpret_cast<CuptiActivityGraphTraceTy *>(record));
           break;
 #endif
+        case CUPTI_ACTIVITY_KIND_MARKER:
+          AddMarkerActivityEvent(
+              collector, reinterpret_cast<CuptiActivityMarkerTy *>(record));
+          break;
         default:
           VLOG(3) << "Activity type " << record->kind << " is not supported.";
           break;
@@ -524,6 +598,53 @@ static absl::Status ConvertActivityBuffer(
 
 }  // namespace
 
+const char *GetTraceEventTypeName(const CuptiTracerEventType &type) {
+  // Do not use a default so that this gives a build error when
+  // CuptiTracerEventType is extended but this is not.
+  switch (type) {
+    case CuptiTracerEventType::MemcpyH2D:
+      return "MemcpyH2D";
+    case CuptiTracerEventType::MemcpyD2H:
+      return "MemcpyD2H";
+    case CuptiTracerEventType::MemcpyD2D:
+      return "MemcpyD2D";
+    case CuptiTracerEventType::MemcpyP2P:
+      return "MemcpyP2P";
+    case CuptiTracerEventType::MemcpyOther:
+      return "MemcpyOther";
+    case CuptiTracerEventType::Kernel:
+      return "Compute";
+    case CuptiTracerEventType::MemoryAlloc:
+      return "MemoryAlloc";
+    case CuptiTracerEventType::MemoryFree:
+      return "MemoryFree";
+    case CuptiTracerEventType::Memset:
+      return "Memset";
+    case CuptiTracerEventType::Overhead:
+      return "Overhead";
+    case CuptiTracerEventType::UnifiedMemory:
+      return "UnifiedMemory";
+    case CuptiTracerEventType::Generic:
+      return "Generic";
+    case CuptiTracerEventType::MemoryResidency:
+      return "MemoryResidency";
+    case CuptiTracerEventType::HostRegister:
+      return "HostRegister";
+    case CuptiTracerEventType::HostUnregister:
+      return "HostUnregister";
+    case CuptiTracerEventType::CudaGraph:
+      return "CudaGraph";
+    case CuptiTracerEventType::ThreadMarkerRange:
+      return "ThreadMarkerRange";
+    case CuptiTracerEventType::ThreadMarkerStart:
+      return "ThreadMarkerStart";
+    case CuptiTracerEventType::ThreadMarkerEnd:
+      return "ThreadMarkerEnd";
+    case CuptiTracerEventType::Unsupported:
+      return "";
+  }
+}
+
 absl::string_view StringDeduper::Dedup(absl::string_view str,
                                        size_t max_unique_count) {
   if (str.empty()) return absl::string_view();
@@ -536,7 +657,8 @@ absl::string_view StringDeduper::Dedup(absl::string_view str,
 
 void AnnotationMap::Add(uint32_t device_id, uint32_t correlation_id,
                         const absl::string_view annotation,
-                        const absl::string_view nvtx_range) {
+                        const absl::string_view nvtx_range,
+                        int64_t scope_range_id) {
   if (annotation.empty() && nvtx_range.empty()) return;
   VLOG(3) << "Add annotation: device_id: " << device_id
           << " correlation_id: " << correlation_id
@@ -547,6 +669,7 @@ void AnnotationMap::Add(uint32_t device_id, uint32_t correlation_id,
     AnnotationInfo info;
     info.annotation = per_device_map.annotation_deduper.Dedup(annotation);
     info.nvtx_range = per_device_map.nvtx_range_deduper.Dedup(nvtx_range);
+    info.scope_range_id = scope_range_id;
     per_device_map.correlation_map.emplace(correlation_id, info);
   }
 }
@@ -597,6 +720,7 @@ CallbackAnnotationsAndEvents &CallbackAnnotationsAndEvents::operator=(
   nvtx_ranges_ = std::move(another.nvtx_ranges_);
   num_dropped_events_ = another.num_dropped_events_;
   event_queue_ = std::move(another.event_queue_);
+  scope_range_id_tree_ = std::move(another.scope_range_id_tree_);
   another.Clear();
   return *this;
 }
@@ -606,6 +730,7 @@ void CallbackAnnotationsAndEvents::Clear() {
   nvtx_ranges_.Clear();
   num_dropped_events_ = 0;
   event_queue_.Clear();
+  scope_range_id_tree_.clear();
 }
 
 }  // namespace profiler

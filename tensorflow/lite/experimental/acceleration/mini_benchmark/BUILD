@@ -70,8 +70,6 @@ cc_test(
 py_strict_binary(
     name = "copy_associated_files",
     srcs = ["copy_associated_files.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
 )
 
 cc_library(
@@ -296,8 +294,8 @@ cc_library(
     hdrs = ["decode_jpeg_register.h"],
     copts = tflite_copts(),
     deps = [
+        ":decode_jpeg_status",
         ":libjpeg_decoder",
-        "//tensorflow/lite:string",
         "//tensorflow/lite:string_util",
         "//tensorflow/lite/core/c:c_api_types",
         "//tensorflow/lite/core/c:common",
@@ -697,6 +695,7 @@ cc_library(
     visibility = ["@org_tensorflow_lite_support//tensorflow_lite_support/cc:__subpackages__"] + minibenchmark_visibility_allowlist(),
     deps = [
         "//tensorflow/lite/acceleration/configuration:configuration_fbs",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
         "@flatbuffers",
@@ -1118,6 +1117,7 @@ cc_test(
     deps = [
         ":embedded_mobilenet_validation_model",
         ":embedded_nnapi_sl_fake_impl",
+        ":embedded_validator_runner_entrypoint",
         ":mini_benchmark_test_helper",
         ":nnapi_sl_fake_impl_client",
         ":status_codes",

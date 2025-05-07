@@ -31,11 +31,13 @@ gpu_device_info {
   cuda_compute_capability {
     major: 8
   }
+  registers_per_core_limit: 65536
+  registers_per_block_limit: 65536
 }
 platform_name: "CUDA"
 dnn_version_info {
   major: 8
-  minor: 3
-  patch: 2
+  minor: 9
+  patch: 4
 }
 device_description_str: "A100 80GB"

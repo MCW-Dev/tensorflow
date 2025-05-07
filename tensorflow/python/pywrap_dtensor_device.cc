@@ -13,16 +13,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <Python.h>
+
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
 #include "pybind11/pybind11.h"  // from @pybind11
 #include "pybind11/stl.h"  // from @pybind11
 #include "pybind11_abseil/absl_casters.h"  // from @pybind11_abseil
 #include "pybind11_protobuf/native_proto_caster.h"  // from @pybind11_protobuf
 #include "tensorflow/c/eager/c_api.h"
+#include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/dtensor/cc/dtensor_device.h"
 #include "tensorflow/dtensor/cc/tensor_layout.h"
+#include "tensorflow/dtensor/proto/layout.pb.h"
 #include "tensorflow/python/eager/pywrap_tensor.h"
 #include "tensorflow/python/eager/pywrap_tfe.h"
 #include "tensorflow/python/lib/core/pybind11_lib.h"
@@ -414,7 +422,7 @@ PYBIND11_MODULE(_pywrap_dtensor_device, m) {
              return *mesh;
            }),
            py::arg("mesh_proto"), "Returns a Mesh from a MeshProto.")
-      .def(py::init([](std::string_view mesh_str) {
+      .def(py::init([](absl::string_view mesh_str) {
              auto mesh = Mesh::FromString(mesh_str);
              if (!mesh.ok()) {
                throw py::value_error(std::string(mesh.status().message()));
@@ -436,7 +444,7 @@ PYBIND11_MODULE(_pywrap_dtensor_device, m) {
            "Returns True if a Mesh contains the given dimension name.")
       .def(
           "dim_size",
-          [](const Mesh& mesh, std::string_view name) {
+          [](const Mesh& mesh, absl::string_view name) {
             auto dim_size = mesh.dim_size(name);
             if (!dim_size.ok()) {
               throw py::value_error(std::string(dim_size.status().message()));
@@ -512,7 +520,7 @@ PYBIND11_MODULE(_pywrap_dtensor_device, m) {
              return *layout;
            }),
            py::arg("layout_proto"), "Returns a Layout from a LayoutProto.")
-      .def(py::init([](std::string_view layout_str) {
+      .def(py::init([](absl::string_view layout_str) {
              auto layout = Layout::FromString(layout_str);
              if (!layout.ok()) {
                throw py::value_error(std::string(layout.status().message()));

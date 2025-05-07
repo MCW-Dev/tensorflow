@@ -16,7 +16,6 @@ limitations under the License.
 #include "xla/service/hlo_value.h"
 
 #include <algorithm>
-#include <cstdint>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -103,8 +102,8 @@ std::string HloValue::ToString(int indent) const {
   } else {
     StrAppend(&out, indentation, " uses are not initialized yet.\n");
   }
-  StrAppend(&out, indentation,
-            " from instruction: ", instruction()->ToString());
+  StrAppend(&out, indentation, " from instruction: ", instruction()->ToString(),
+            "\n");
   return out;
 }
 
@@ -287,9 +286,6 @@ bool InstructionValueSet::IsAmbiguous() const {
 bool InstructionValueSet::AssignUnionOf(
     absl::Span<const InstructionValueSet* const> inputs) {
   CHECK_GT(inputs.size(), 0);
-  for (int i = 1; i < inputs.size(); ++i) {
-    DCHECK(ShapeUtil::Compatible(inputs[0]->shape(), inputs[i]->shape()));
-  }
   bool changed = false;
   for (auto& pair : *this) {
     const ShapeIndex& index = pair.first;

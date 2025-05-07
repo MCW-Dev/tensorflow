@@ -17,6 +17,7 @@ limitations under the License.
 #define XLA_SERVICE_DUMP_H_
 
 #include <string>
+#include <vector>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/status/status.h"
@@ -25,6 +26,7 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/service/hlo_graph_dumper.h"
+#include "xla/tsl/platform/env.h"
 #include "xla/xla.pb.h"
 
 // Consolidated utilities for logging information during compilation, usually
@@ -39,9 +41,14 @@ namespace xla {
 // performed on an HloModule.
 constexpr char kBeforeOptimizationsDumpName[] = "before_optimizations";
 constexpr char kAfterOptimizationsDumpName[] = "after_optimizations";
+constexpr char kNonDefaultDebugOptionsDumpSuffix[] = "debug_options";
 
 class BufferAssignment;
 class HloSnapshot;
+
+// Creates dir if doesn't exist (analogue of `mkdir -p`), tries to get around
+// race conditions by trying again on collision.
+absl::Status CreateDirIfNeeded(const std::string& dir, tsl::Env* env);
 
 // Get a timestamp which we can use as a filename prefix specific to this
 // module.
@@ -122,6 +129,9 @@ std::vector<std::string> DumpHloModuleIfEnabled(
     const HloModule& module, const BufferAssignment& buffer_assn,
     absl::string_view name);
 
+std::vector<std::string> DumpHloModuleProtoIfEnabled(
+    const HloModuleProto& module_proto, absl::string_view name);
+
 // Dumps the given HLO module after running one HLO pass and before running
 // another, if that's enabled. Returns the full file paths of all dumps of the
 // module, or an empty vector if nothing was dumped.
@@ -148,6 +158,11 @@ void DumpHloSnapshotIfEnabled(const HloModule& module,
 void DumpHloSnapshotIfEnabled(const HloSnapshot& snapshot,
                               const DebugOptions& opts);
 
+// Dumps the given HloUnoptimisedSnapshot to the module's xla_dump_dir, if this
+// is enabled.
+void DumpHloUnoptimizedSnapshotIfEnabled(
+    const HloUnoptimizedSnapshot& hlo_snapshot, const DebugOptions& opts);
+
 void DumpHloModuleMetadataIfEnabled(const std::vector<HloModule*>& modules);
 
 // Returns true if we should dump data for an HloModule.  This is useful if you
@@ -172,6 +187,29 @@ inline bool DumpingEnabledForHloModule(const HloModule& module) {
 // For example, maybe you have (almost-)duplicate data that you wouldn't mind
 // writing to two files, but you don't want to print twice.
 bool DumpingToStdout(const DebugOptions& opts);
+
+// Writes the given message in binary proto to the path formed by joining
+// 'directory/file_name.pb'. The 'directory' is recursively created if it
+// doesn't already exist, and the 'file_name' is sanitized by replacing
+// illegal characters with underscore '_'.
+//
+// If 'full_name' is not null then it is set to the name of the file the
+// protobuf was written to.
+absl::Status DumpProtoToDirectory(const tsl::protobuf::Message& message,
+                                  const std::string& directory,
+                                  const std::string& file_name,
+                                  std::string* full_path = nullptr);
+
+void DumpHloConfigIfEnabled(const HloModule& module);
+
+// Dumps the non-default debug options to a file in the xla_dump_to directory
+// specified by the module's DebugOptions.
+void DumpNonDefaultDebugOptions(const HloModule& module,
+                                absl::string_view suffix);
+
+// Returns the non-default debug options as a string. The default debug options
+// are received from DefaultDebugOptionsIgnoringFlags().
+std::string GetNonDefaultDebugOptions(const DebugOptions& debug_options);
 
 }  // namespace xla
 

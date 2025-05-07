@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "tensorflow/compiler/mlir/tf2xla/mlir_bridge_rollout_policy.h"
+#include "absl/status/status.h"
 #include "llvm/ADT/StringRef.h"
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "tensorflow/compiler/jit/flags.h"
@@ -46,9 +47,10 @@ class MlirBridgePass : public MlirOptimizationPass {
 
   // This should be used as a thin mapper around mlir::ModulePass::runOnModule
   // API integrated with the Tensorflow runtime.
-  Status Run(const std::string& function_name, const ConfigProto& config_proto,
-             mlir::ModuleOp module, const Graph& graph,
-             const FunctionLibraryDefinition& function_library) override;
+  absl::Status Run(const std::string& function_name,
+                   const ConfigProto& config_proto, mlir::ModuleOp module,
+                   const Graph& graph,
+                   const FunctionLibraryDefinition& function_library) override;
 };
 
 // This pass uses MLIR to implement all the conversion steps to target XLA from
@@ -65,8 +67,8 @@ class MlirBridgeV1CompatPass : public MlirV1CompatOptimizationPass {
 
   // This should be used as a thin mapper around mlir::ModulePass::runOnModule
   // API integrated with the Tensorflow runtime.
-  Status Run(const GraphOptimizationPassOptions& options,
-             mlir::ModuleOp module) override;
+  absl::Status Run(const GraphOptimizationPassOptions& options,
+                   mlir::ModuleOp module) override;
 };
 
 }  // namespace tensorflow
