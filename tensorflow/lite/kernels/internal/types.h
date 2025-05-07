@@ -29,6 +29,10 @@ limitations under the License.
 #include "Eigen/Core"
 #endif
 
+#ifndef EIGEN_TFLITE
+#include "Eigen/Core"
+#endif
+
 #include "tensorflow/lite/kernels/internal/compatibility.h"
 #include "tensorflow/lite/kernels/internal/runtime_shape.h"
 
@@ -683,14 +687,6 @@ struct ArithmeticParams {
   // int8_t activation params.
   int8_t int8_activation_min;
   int8_t int8_activation_max;
-#ifndef EIGEN_TFLITE
-  // float16 activation params.
-  Eigen::half Eigen_half_activation_min;
-  Eigen::half Eigen_half_activation_max;
-  // bfloat16 activation params.
-  Eigen::bfloat16 bf16_activation_min;
-  Eigen::bfloat16 bf16_activation_max;
-#endif
 
   // Processed output dimensions.
   // Let input "a" be the one that broadcasts in the faster-changing dimension.
